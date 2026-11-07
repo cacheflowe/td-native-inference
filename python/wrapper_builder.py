@@ -28,31 +28,34 @@ KINDS = ('landmarks', 'boxes', 'image')
 ALWAYS_EXPOSED = ('Active',)
 ALWAYS_PULSES = ('Reload',)
 
+# Columns 200 apart, in data-flow order. Bands, top to bottom: the input-image lane
+# (null_passthrough -> passthrough, nothing else at that height), the inference/visualizer band,
+# the DAT outputs (Select DATs right beside their Out DATs), the CHOP outputs, then code/support
+# nodes under the input. Wires only run between adjacent columns or along an empty lane, and the
+# sources of every multi-input node sit in the same top-to-bottom order as its inputs.
+COLUMN = 200
 LAYOUT = {
-	'input': (0, 200), 'inference': (240, 200), 'null_passthrough': (480, 200),
-	'detections': (480, -120), 'tracker': (720, -120),
-	'tracks': (960, -120), 'joints': (960, -360), 'bones': (960, -600),
-	'debug_boxes': (1200, 0), 'debug_keypoints': (1200, -360),
-	'overlay': (1440, 0), 'transparent': (1440, 200), 'preview': (1680, 0),
-	'debug': (1920, 0), 'passthrough': (1920, 200),
-	'out_tracks': (1920, -240), 'out_joints': (1920, -480), 'out_bones': (1920, -720),
-	'inference_stats': (720, -960), 'channels': (1440, -960), 'out_channels': (1920, -960),
-	'channels_callbacks': (1440, -1200), 'component': (0, -1200), 'local': (240, -1200),
-	'model_pulses': (480, -1200),
-	'tracker/in_info': (0, 0),
-	'tracker/script_tracks': (240, 0), 'tracker/out_tracks': (720, 0),
-	'tracker/script_tracks_callbacks': (240, -160),
-	'tracker/script_joints': (480, -400), 'tracker/out_joints': (720, -400),
-	'tracker/script_joints_callbacks': (480, -560),
-	'tracker/script_bones': (480, -800), 'tracker/out_bones': (720, -800),
-	'tracker/script_bones_callbacks': (480, -960),
+	'null_passthrough': (2, 420), 'passthrough': (7, 420),
+	'input': (0, 180), 'inference': (1, 180), 'detections': (2, 180), 'tracker': (3, 160),
+	'debug_boxes': (4, 250), 'debug_keypoints': (4, 60),
+	'transparent': (5, 350), 'overlay': (5, 160), 'preview': (6, 230), 'debug': (7, 230),
+	'tracks': (6, -100), 'out_tracks': (7, -100),
+	'joints': (6, -240), 'out_joints': (7, -240),
+	'bones': (6, -380), 'out_bones': (7, -380),
+	'inference_stats': (5, -540), 'channels': (6, -540), 'out_channels': (7, -540),
+	'component': (0, -100), 'model_pulses': (1, -100), 'local': (0, -260),
+	'tracker/in_info': (0, 0), 'tracker/script_tracks': (1, 0), 'tracker/out_tracks': (3, 0),
+	'tracker/script_joints': (2, -150), 'tracker/out_joints': (3, -150),
+	'tracker/script_bones': (2, -300), 'tracker/out_bones': (3, -300),
 	'local/modules': (0, 0),
-	'local/modules/object_tracker': (0, 0), 'local/modules/mediapipe_skeletons': (0, -240),
-	'local/modules/box_tracker_pipeline': (280, 0),
-	'local/modules/face_tracker_pipeline': (280, -240),
-	'local/modules/pose_tracker_pipeline': (280, -480),
-	'local/modules/onnxtop_tables': (560, -240),
+	'local/modules/object_tracker': (0, 0), 'local/modules/mediapipe_skeletons': (0, -150),
+	'local/modules/box_tracker_pipeline': (1, 0), 'local/modules/face_tracker_pipeline': (1, -150),
+	'local/modules/pose_tracker_pipeline': (1, -300), 'local/modules/onnxtop_tables': (2, -150),
 }
+# Image models have no tracker or visualizers: the resized result sits right after inference.
+LAYOUT_IMAGE = {'overlay': (2, 320), 'detections': (2, 120)}
+DOCKED = ('channels_callbacks', 'tracker/script_tracks_callbacks',
+	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
 
 
 def root():
@@ -164,8 +167,8 @@ def _load_shared(comp, name, relative):
 
 
 def _build_visuals(comp, kind):
-	"""Wire the overlay (or image result) into `preview`, a Switch whose input 0 is transparent."""
-	source = comp.op('input')
+	"""Build `overlay` (the visualizers, or the resized image result) and `preview`, a two-input
+	Switch: transparent when Debug Overlay is off, so the visualizers don't cook then."""
 	transparent = comp.create('constantTOP', 'transparent')
 	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
 		transparent.par[channel] = 0
@@ -173,6 +176,7 @@ def _build_visuals(comp, kind):
 	transparent.par.resolutionw.expr = "op('input').width"
 	transparent.par.resolutionh.expr = "op('input').height"
 	preview = comp.create('switchTOP', 'preview')
+	preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
 	if kind == 'image':
 		overlay = comp.create('resolutionTOP', 'overlay')
 		_connect(overlay, comp.op('inference'))
@@ -180,24 +184,34 @@ def _build_visuals(comp, kind):
 		overlay.par.resolutionw.expr = "op('input').width"
 		overlay.par.resolutionh.expr = "op('input').height"
 		_connect(preview, transparent, overlay)
-		preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
 		return
+	tracker = comp.op('tracker')
+	def table(suffix):
+		# Straight from the tracker's outputs (adjacent column); the Select DATs feed the Out DATs.
+		if tracker is None:
+			return comp.op(suffix).outputConnectors[0]
+		return next(c for c in tracker.outputConnectors if c.outOP == tracker.op('out_' + suffix))
 	boxes = _load_shared(comp, 'debug_boxes', DEBUG_BB)
 	boxes.par.Inputaspectratio.expr = 'parent().par.Inputaspectratio'
-	_connect(boxes, source, comp.op('tracks'))
+	# DebugBB only reads its image input's resolution.
+	boxes.inputConnectors[0].connect(comp.op('null_passthrough'))
+	boxes.inputConnectors[1].connect(table('tracks'))
 	if kind == 'boxes':
 		overlay = comp.create('nullTOP', 'overlay')
 		_connect(overlay, boxes)
 		_connect(preview, transparent, overlay)
-		preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
 		return
 	keypoints = _load_shared(comp, 'debug_keypoints', DEBUG_KEYPOINTS)
-	_connect(keypoints, comp.op('joints'), comp.op('bones'))
+	keypoints.inputConnectors[0].connect(table('joints'))
+	keypoints.inputConnectors[1].connect(table('bones'))
 	overlay = comp.create('compositeTOP', 'overlay')
 	overlay.par.operand = 'over'
-	_connect(overlay, keypoints, boxes)
-	_connect(preview, transparent, overlay, boxes, keypoints)
-	preview.par.index.expr = '0 if not parent().par.Debugoverlay else parent().par.Debuglayers.menuIndex + 1'
+	overlay.par.swaporder = True	# boxes wired first (it sits above), keypoints drawn over it
+	_connect(overlay, boxes, keypoints)
+	# Overlay Layers: Both composites; Bounding Boxes / Joints pass one input through.
+	overlay.par.selectinput.expr = "parent().par.Debuglayers.eval() != 'both'"
+	overlay.par.inputindex.expr = "0 if parent().par.Debuglayers.eval() == 'boxes' else 1"
+	_connect(preview, transparent, overlay)
 
 
 def _build_pages(comp, spec, plugin, tracker):
@@ -236,6 +250,20 @@ def _build_pages(comp, spec, plugin, tracker):
 		forward.par.valuechange = False
 		forward.par.onpulse = True
 		forward.text = "def onPulse(par):\n\tparent().op('inference').par[par.name].pulse()\n"
+
+
+def _layout(comp, kind):
+	positions = dict(LAYOUT, **(LAYOUT_IMAGE if kind == 'image' else {}))
+	for path, (column, y) in positions.items():
+		node = comp.op(path)
+		if node is not None:
+			node.nodeX, node.nodeY = column * COLUMN, y
+	for path in DOCKED:
+		callbacks = comp.op(path)
+		host = comp.op(path.removesuffix('_callbacks'))
+		if callbacks is not None and host is not None:
+			callbacks.nodeX, callbacks.nodeY = host.nodeX, host.nodeY - 110
+			callbacks.dock = host
 
 
 def build(spec, parent_comp):
@@ -286,10 +314,7 @@ def build(spec, parent_comp):
 	_connect(comp.create('outCHOP', 'out_channels'), channels)
 	for node in comp.findChildren():
 		node.viewer = False
-	for path, (x, y) in LAYOUT.items():
-		node = comp.op(path)
-		if node is not None:
-			node.nodeX, node.nodeY = x, y
+	_layout(comp, spec['kind'])
 	comp.par.opviewer = 'debug'
 	for index, source in enumerate(inputs):
 		if source is not None:
