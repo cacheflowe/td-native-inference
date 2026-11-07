@@ -169,7 +169,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	MpTaskConfig cfg;
 	cfg.kind = kind;
 	const char* model = inputs->getParFilePath(kModelPars[task]);
-	cfg.modelPath = model ? model : "";
+	cfg.modelPath = mpapi::resolveModelPath(model, inputs->getParString(kModelPars[task]));
 	cfg.maxInstances = std::clamp(inputs->getParInt("Maxinstances"), 1, kMaxInstances);
 	cfg.minDetection = (float)inputs->getParDouble("Mindetection");
 	cfg.minPresence = (float)inputs->getParDouble("Minpresence");

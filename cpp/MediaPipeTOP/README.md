@@ -38,7 +38,7 @@ matching tag: the struct layouts must agree.
 | Parameter | Notes |
 |---|---|
 | Task | face / hands / gesture / pose / holistic / facedetector / segment (saved by name) |
-| Face / Hand / Gesture / Pose / Holistic / Face Detector / Segmenter Model | Model file for each task (`.task`, or `.tflite` for the face detector and segmenters). Defaults point at `models/mediapipe/` (paths resolve relative to the project folder). Only the current task's parameter is enabled. |
+| Face / Hand / Gesture / Pose / Holistic / Face Detector / Segmenter Model | Model file for each task (`.task`, or `.tflite` for the face detector and segmenters). Defaults point at `models/mediapipe/`. A relative path is looked up under the project folder, then under the folder holding `MediaPipeTOP.dll` (an installed `Plugins/<folder>/models/...`). Only the current task's parameter is enabled. |
 | Active | Off: stops sending frames and clears the results. |
 | Reload Model | Recreates the task. |
 | Max Faces / Hands / Poses | Set this to what you really expect. While fewer are tracked, MediaPipe runs its detector every frame looking for the rest: 2 hands with 1 visible costs about 3×. |

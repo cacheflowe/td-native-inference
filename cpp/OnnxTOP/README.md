@@ -64,7 +64,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 
 | Page | Parameter | Notes |
 |---|---|---|
-| ONNX | Model | `.onnx` with one image input `[1, 3, H, W]` or `[1, H, W, 3]`, float32 / float16 / int32 / uint8 (H, W fixed, or dynamic + Dynamic Size) |
+| ONNX | Model | `.onnx` with one image input `[1, 3, H, W]` or `[1, H, W, 3]`, float32 / float16 / int32 / uint8 (H, W fixed, or dynamic + Dynamic Size). A relative path is looked up under the project folder, then under the folder holding `OnnxTOP.dll` (an installed `Plugins/<folder>/models/...`) |
 | ONNX | Execution Provider | **Auto** (default): CUDA now, TensorRT once its engine is built. **TensorRT**: wait for the build. **CUDA**: never build. TensorRT falls back to CUDA if session creation fails. Saved nodes keep their value |
 | ONNX | TensorRT FP16 | Part of the engine cache key |
 | ONNX | Reload Model | Retries after a failure, or reloads in place |

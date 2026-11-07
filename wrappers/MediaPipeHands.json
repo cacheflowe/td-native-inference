@@ -1,0 +1,29 @@
+{
+	"name": "MediaPipeHands",
+	"label": "MediaPipe Hands",
+	"plugin": "MediapipeTOP",
+	"kind": "landmarks",
+	"tracker": "mp_hands",
+	"preset": {
+		"Task": "gesture",
+		"Maxinstances": 2
+	},
+	"model": [
+		"Task",
+		"Maxinstances",
+		"Mindetection",
+		"Minpresence",
+		"Mintracking"
+	],
+	"menus": {
+		"Task": {"hands": "Hands", "gesture": "Gesture (hands + gestures)"}
+	},
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Coastwhilelost",
+		"Outputsmoothing",
+		"Gestureholdframes",
+		"Gestureminscore"
+	]
+}

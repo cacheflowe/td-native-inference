@@ -211,6 +211,22 @@ namespace
 		return fs::path(buf).parent_path();
 	}
 
+	// TD resolves a relative file parameter against the project folder. When that file doesn't
+	// exist, fall back to the same relative path under the plugin's folder, so a tox can preset
+	// "models/..." and work from an installed Plugins/<package>/models/ folder.
+	std::string resolveModelPath(const char* resolved, const char* raw)
+	{
+		std::string path = resolved ? resolved : "";
+		std::error_code ec;
+		if (path.empty() || fs::exists(path, ec) || !raw || !*raw)
+			return path;
+		fs::path rel(raw);
+		if (rel.is_absolute())
+			return path;
+		fs::path candidate = pluginDir() / rel;
+		return fs::exists(candidate, ec) ? candidate.lexically_normal().generic_string() : path;
+	}
+
 	constexpr float kLetterboxPad = 114.f / 255.f;	// Ultralytics letterbox gray
 	constexpr int kMaxDetsCap = YoloDecoder::kMaxDets;
 }
@@ -581,7 +597,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
 
 	EngineConfig desired;
-	desired.modelPath = modelPath ? modelPath : "";
+	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"));
 	desired.provider = provider;
 	desired.fp16 = fp16;
 	desired.cacheDir = cacheDir ? cacheDir : "";

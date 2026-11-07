@@ -38,6 +38,19 @@ namespace
 
 namespace mpapi
 {
+	std::string resolveModelPath(const char* resolved, const char* raw)
+	{
+		std::string path = resolved ? resolved : "";
+		std::error_code ec;
+		if (path.empty() || fs::exists(path, ec) || !raw || !*raw)
+			return path;
+		fs::path rel(raw);
+		if (rel.is_absolute())
+			return path;
+		fs::path candidate = pluginDir() / rel;
+		return fs::exists(candidate, ec) ? candidate.lexically_normal().generic_string() : path;
+	}
+
 	bool load(std::string& err)
 	{
 		std::lock_guard<std::mutex> lock(gMutex);
