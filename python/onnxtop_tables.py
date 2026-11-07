@@ -92,7 +92,8 @@ def pose_defaults(mode):
 	if mode == 'movenet':
 		return pose_tracker_pipeline.MOVENET_DEFAULTS
 	if mode in MP_SKELETONS:
-		d = dict(MEDIAPIPE_DEFAULTS, Maxmatchdist=MP_SKELETONS[mode].max_match_dist)
+		d = dict(MEDIAPIPE_DEFAULTS, Maxmatchdist=MP_SKELETONS[mode].max_match_dist,
+			Relmatchdist=MP_SKELETONS[mode].rel_match_dist)
 		if mode == 'mp_hands':
 			d.update(MEDIAPIPE_HANDS_DEFAULTS)
 		return d
@@ -313,6 +314,7 @@ def write_tracks(out, comp, info_dat):
 			conf_threshold=p['Confthreshold'],
 			smoothing=p['Outputsmoothing'],
 			max_match_dist=p['Maxmatchdist'],
+			relative_match_dist=p['Relmatchdist'] if p['Scalematch'] else None,
 			track_buffer=p['Tracklossframes'],
 			min_hits=p['Trackconfirmframes'],
 			**persist,

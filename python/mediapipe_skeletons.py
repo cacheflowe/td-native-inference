@@ -19,6 +19,9 @@ class Skeleton:
 	distance_indices: list	# stable keypoints KeypointTracker matches on (skip fast extremities)
 	max_match_dist: float	# default Maxmatchdist: summed distance over distance_indices
 	hide_missing: bool = False	# conf 0 = keypoint absent (holistic's unseen hands/face): skip in joints/bones
+	# default Relmatchdist: mean distance over distance_indices in skeleton sizes (box diagonal).
+	# Each matches max_match_dist at a typical on-screen size (body ~0.5 of the frame, hand ~0.15).
+	rel_match_dist: float = 0.15
 
 	@property
 	def count(self):
@@ -110,13 +113,14 @@ COCO_17 = Skeleton('coco17', COCO_17_NAMES, COCO_17_EDGES, _stable(COCO_17_NAMES
 # Pose: face + shoulders + hips (15 points vs COCO's 9, so the threshold scales up to match).
 MP_POSE = Skeleton('mp_pose', POSE_NAMES, POSE_EDGES, _stable(POSE_NAMES), 0.5 * 15 / 9)
 # Hands: wrist + the five finger bases (the palm), which move together.
-MP_HANDS = Skeleton('mp_hands', HAND_NAMES, HAND_EDGES, [0, 1, 5, 9, 13, 17], 0.3)
+MP_HANDS = Skeleton('mp_hands', HAND_NAMES, HAND_EDGES, [0, 1, 5, 9, 13, 17], 0.3, rel_match_dist=0.35)
 # Face: nose tip, eye corners, mouth corners, chin.
-MP_FACE = Skeleton('mp_face', FACE_NAMES, FACE_EDGES, [1, 33, 263, 61, 291, 152], 0.3)
+MP_FACE = Skeleton('mp_face', FACE_NAMES, FACE_EDGES, [1, 33, 263, 61, 291, 152], 0.3, rel_match_dist=0.2)
 
 # Face Detector (BlazeFace): 6 keypoints in MediaPipe's order.
 FACE_DET_NAMES = ['right_eye', 'left_eye', 'nose_tip', 'mouth_center', 'right_ear_tragion', 'left_ear_tragion']
-MP_FACE_DET = Skeleton('mp_facedet', FACE_DET_NAMES, [(0, 1), (0, 2), (1, 2), (2, 3), (0, 4), (1, 5)], [0, 1, 2, 3], 0.3)
+MP_FACE_DET = Skeleton('mp_facedet', FACE_DET_NAMES, [(0, 1), (0, 2), (1, 2), (2, 3), (0, 4), (1, 5)], [0, 1, 2, 3], 0.3,
+	rel_match_dist=0.3)
 
 
 def _offset(edges, at):

@@ -16,11 +16,15 @@
 		"Mintracking"
 	],
 	"menus": {
-		"Task": {"hands": "Hands", "gesture": "Gesture (hands + gestures)"}
+		"Task": {
+			"hands": "Hands",
+			"gesture": "Gesture (hands + gestures)"
+		}
 	},
 	"tracking": [
 		"Confthreshold",
 		"Tracklossframes",
+		"Relmatchdist",
 		"Coastwhilelost",
 		"Outputsmoothing",
 		"Gestureholdframes",

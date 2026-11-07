@@ -15,6 +15,7 @@
 	"tracking": [
 		"Confthreshold",
 		"Tracklossframes",
+		"Relmatchdist",
 		"Outputsmoothing"
 	]
 }

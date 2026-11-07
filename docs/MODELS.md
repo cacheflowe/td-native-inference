@@ -31,6 +31,34 @@ person or object while it's visible and through short dropouts.
   Joints) on landmark models.
 - **About** page: the package version.
 
+## Tracking
+
+The plugins report raw detections each frame; Python inside each tox (`python/object_tracker.py`
+and the `*_tracker_pipeline.py` modules) turns them into tracks with stable ids. It's
+ByteTrack-style, with changes that have worked well for live installations:
+
+- **Boxes** (YOLO Detection/Segmentation, YuNet): ByteTrack. A Kalman filter predicts each
+  track's box, and detections are matched by box overlap in two passes: confident detections
+  first, then weaker ones that can only extend existing tracks. Segmentation adds a presence
+  ramp; YuNet adds a head-pose estimate.
+- **Skeletons** (every pose, hand and face-landmark model): matched by how far the stable
+  keypoints (torso, wrist and palm, eyes and nose; not fast-moving extremities) moved, not by box
+  overlap, because limbs make boxes jump. By default the distance is measured relative to the
+  skeleton's size, so small distant and large close-up people use the same setting. Other
+  additions: duplicate suppression, **Coast While Lost** (a lost track keeps drifting along its last
+  motion, so a fast hand that MediaPipe drops for a frame keeps its id), presence fade in/out,
+  and debounced gestures with a one-frame onset.
+
+Tuning, if ids swap or tracks break:
+- **Relative Match Distance** (default 0.15 for bodies, 0.35 for hands): how far the stable
+  keypoints may move between frames, as a fraction of the skeleton's size. Lower it if
+  neighbours swap ids; raise it if fast movement keeps creating new ids. Turning **Scale Match
+  To Skeleton** off (inside the tox's `tracker`) restores the original absolute **Max Match
+  Distance**.
+- **Track Loss Frames**: longer bridges occlusions but keeps a departed person's ghost longer.
+  After switching the video source, old tracks linger for this many frames.
+- **Output Smoothing**: steadier keypoints at the cost of lag.
+
 ## Hardware
 
 Both plugins need Windows and an NVIDIA GPU. **ONNX** models run on the GPU through

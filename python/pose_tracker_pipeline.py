@@ -67,6 +67,12 @@ TRACKER_MIN_HITS = 3
 # over from onnx_movenet.py's own tuning; re-tune live against this scene.
 MAX_MATCH_DIST = 0.5
 
+# Scale-relative matching (the default): mean stable-keypoint distance in units of the skeleton's
+# box diagonal, so one value works for small distant and large close people. 0.15 matches
+# MAX_MATCH_DIST for a person about half the frame tall. Off = MAX_MATCH_DIST as before.
+SCALE_MATCH = True
+REL_MATCH_DIST = 0.15
+
 # Fraction of MAX_MATCH_DIST used as the duplicate-detection suppression threshold --
 # see KeypointTracker.update()'s docstring for why this needs to be tighter than the
 # match threshold itself.
@@ -104,8 +110,17 @@ PARAMETERS = [
 		object_tracker.par_help('Outputsmoothing', what='keypoint position')),
 	('Tracklossframes', 'Track Loss Frames', TRACKER_MAX_AGE, 0.0, 90.0, False,
 		object_tracker.par_help('Tracklossframes')),
+	('Scalematch', 'Scale Match To Skeleton', SCALE_MATCH, 0.0, 1.0, True,
+		"Match tracks by how far keypoints moved relative to the skeleton's size (Relative Match "
+		"Distance), so small distant and large close-up skeletons need no re-tuning. Off = the "
+		"absolute Max Match Distance."),
+	('Relmatchdist', 'Relative Match Distance', REL_MATCH_DIST, 0.0, 1.0, False,
+		"With Scale Match To Skeleton on: how far, on average, the stable keypoints may move between "
+		"frames and still be the same track, as a fraction of the skeleton's size (its box diagonal). "
+		"Too low breaks tracks on fast movement; too high lets neighbours swap ids."),
 	('Maxmatchdist', 'Max Match Distance', MAX_MATCH_DIST, 0.0, 2.0, False,
-		object_tracker.par_help('Maxmatchdist', subject='person')),
+		object_tracker.par_help('Maxmatchdist', subject='person') +
+		' Used only with Scale Match To Skeleton off.'),
 	('Trackconfirmframes', 'Track Confirm Frames', TRACKER_MIN_HITS, 1.0, 30.0, False,
 		object_tracker.par_help('Trackconfirmframes', subject='person')),
 	('Minboxwidth', 'Min Box Width', MIN_BOX_WIDTH, 0.0, 0.2, False,
@@ -163,6 +178,12 @@ def append_parameters(page, owner, defaults=None, extra=()):
 	defaults = defaults or {}
 	for name, label, default, vmin, vmax, clamp_max, help_text in [*PARAMETERS, *extra]:
 		default = defaults.get(name, default)
+		if isinstance(default, bool):
+			p = page.appendToggle(name, label=label)
+			p[0].default = default
+			p[0].help = help_text
+			setattr(owner.par, name, default)
+			continue
 		p = page.appendFloat(name, label=label, size=1)
 		p[0].default = default
 		p[0].min = vmin
@@ -208,6 +229,7 @@ class PoseTrackerPipeline:
 		self.skeleton = skeleton or mediapipe_skeletons.COCO_17
 		self.tracker = object_tracker.KeypointTracker(
 			max_match_dist=self.skeleton.max_match_dist, distance_keypoint_indices=self.skeleton.distance_indices,
+			relative_match_dist=self.skeleton.rel_match_dist if SCALE_MATCH else None,
 			dup_dist_factor=DUP_DIST_FACTOR, track_buffer=TRACKER_MAX_AGE,
 			min_hits=TRACKER_MIN_HITS,
 		)
@@ -222,7 +244,7 @@ class PoseTrackerPipeline:
 
 	def update(self, detections, conf_threshold=CONF_THRESHOLD, smoothing=OUTPUT_SMOOTHING,
 			max_match_dist=MAX_MATCH_DIST, track_buffer=TRACKER_MAX_AGE, min_hits=TRACKER_MIN_HITS,
-			coast=0.0, presence=None, label_hold=None, label_min_score=0.0):
+			coast=0.0, relative_match_dist=None, presence=None, label_hold=None, label_min_score=0.0):
 		"""Advance the tracker one frame. `detections` must already be admission-filtered
 		(see filter_detections()). Returns (and stores) the displayable tracked objects.
 
@@ -237,6 +259,7 @@ class PoseTrackerPipeline:
 		self._presence_on = presence is not None
 		self._labels_on = label_hold is not None
 		self.tracker.max_match_dist = max_match_dist
+		self.tracker.relative_match_dist = relative_match_dist
 		self.tracker.track_buffer = track_buffer
 		self.tracker.min_hits = int(min_hits)
 		self.tracker.coast = coast

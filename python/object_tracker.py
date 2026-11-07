@@ -589,8 +589,14 @@ class KeypointTracker:
 	currently active KeypointTrack objects (order not significant)."""
 
 	def __init__(self, max_match_dist, distance_keypoint_indices=None, dup_dist_factor=0.5,
-			track_buffer=15, min_hits=1, score_decay=0.9, max_tracks=50):
+			track_buffer=15, min_hits=1, score_decay=0.9, max_tracks=50, relative_match_dist=None):
 		self.max_match_dist = max_match_dist
+		# Scale-relative matching (None/0 = absolute max_match_dist): the MEAN stable-keypoint
+		# distance divided by the skeleton's size (the larger box diagonal of the pair), so the
+		# threshold reads "fraction of a body/hand/face". An absolute threshold tuned for a
+		# mid-size person is too loose for small distant people (neighbours swap ids) and too
+		# tight for large close ones (fast motion breaks tracks).
+		self.relative_match_dist = relative_match_dist
 		# None = use every keypoint; a real caller should almost always pass a stable
 		# subset (see section docstring) -- left optional rather than required so a
 		# quick prototype against a new model can start simple.
@@ -626,6 +632,18 @@ class KeypointTracker:
 			indices = range(min(len(kpts_a), len(kpts_b)))
 		return keypoint_distance(kpts_a, kpts_b, indices)
 
+	def _match(self, kpts_a, box_a, kpts_b, box_b):
+		"""(distance, threshold) in whichever space matching uses: absolute summed distance,
+		or mean distance in units of skeleton size (see relative_match_dist)."""
+		distance = self._distance(kpts_a, kpts_b)
+		if not self.relative_match_dist:
+			return distance, self.max_match_dist
+		count = len(self.distance_keypoint_indices) if self.distance_keypoint_indices is not None \
+			else min(len(kpts_a), len(kpts_b))
+		size = max(math.hypot(box_a[2] - box_a[0], box_a[3] - box_a[1]),
+			math.hypot(box_b[2] - box_b[0], box_b[3] - box_b[1]), 1e-6)
+		return distance / max(count, 1) / size, self.relative_match_dist
+
 	def update(self, detections):
 		"""Greedy best-first matching: build every (track, detection) pair within
 		max_match_dist, sort by distance ascending, assign greedily -- same algorithm as
@@ -641,8 +659,8 @@ class KeypointTracker:
 				dx, dy = self.predicted_offset(track)
 				track_kpts = [[kp[0] + dx, kp[1] + dy, *kp[2:]] for kp in track_kpts]
 			for di, det in enumerate(detections):
-				dist = self._distance(track_kpts, det['keypoints'])
-				if dist < self.max_match_dist:
+				dist, threshold = self._match(track_kpts, track.box, det['keypoints'], det['box'])
+				if dist < threshold:
 					pairs.append((dist, ti, di))
 		pairs.sort(key=lambda p: p[0])
 
@@ -676,14 +694,14 @@ class KeypointTracker:
 		# Uses a TIGHTER threshold than max_match_dist itself (true duplicates are
 		# nearly overlapping; two distinct people standing close together should still
 		# both spawn/track independently).
-		dup_threshold = self.max_match_dist * self.dup_dist_factor
+		def is_duplicate_of(track, det):
+			dist, threshold = self._match(track.payload['keypoints'], track.box, det['keypoints'], det['box'])
+			return dist < threshold * self.dup_dist_factor
+
 		for di, det in enumerate(detections):
 			if di in matched_det_idx:
 				continue
-			is_duplicate = any(
-				self._distance(mt.payload['keypoints'], det['keypoints']) < dup_threshold
-				for mt in matched_track_objs
-			)
+			is_duplicate = any(is_duplicate_of(mt, det) for mt in matched_track_objs)
 			if is_duplicate:
 				continue
 			if len(self.tracks) >= self.max_tracks:

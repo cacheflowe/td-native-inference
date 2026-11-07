@@ -18,7 +18,7 @@
 	"tracking": [
 		"Confthreshold",
 		"Tracklossframes",
-		"Maxmatchdist",
+		"Relmatchdist",
 		"Outputsmoothing"
 	]
 }
