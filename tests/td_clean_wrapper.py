@@ -1,11 +1,12 @@
-"""Clean-process wrapper test: loads an exported wrapper tox into a fresh TD process.
+"""Clean-process wrapper test: loads exported wrapper toxes into a fresh TD process.
 
 Build the driver tox from the dev project (POST this file to the bridge's /run), then launch
-TouchDesigner.exe on build/clean-wrapper/RunCleanWrapper.tox with:
-	TDNI_WRAPPER_TOX  exported wrapper to load
-	TDNI_IMAGE        test image fed to its input
-	TDNI_RESULT       JSON report path (TD quits after writing it)
-The report records the inner node type, errors/warnings, tracks, joints and overlay pixels.
+TouchDesigner.exe on build/clean-wrapper/RunCleanWrapper.tox (tests/run_clean_wrapper.ps1 does
+this) with:
+	TDNI_CASES   JSON list of {"tox": path, "image": path}, tested one after another
+	TDNI_RESULT  JSON report path (TD quits after writing it)
+Each case reports the inner node type, errors/warnings, tracks, joints and overlay pixels. A case
+passes when it has a real track (or, for image models, a non-empty result image).
 """
 
 import json
@@ -21,51 +22,84 @@ def _issues(nodes, method):
 
 def start():
 	container = me.parent()
-	wrapper = container.loadTox(os.environ['TDNI_WRAPPER_TOX'])
+	container.store('cases', json.loads(os.environ['TDNI_CASES']))
+	container.store('report', {})
+	_next()
+
+
+def _next():
+	container = me.parent()
+	cases = container.fetch('cases')
+	if not cases:
+		Path(os.environ['TDNI_RESULT']).write_text(json.dumps(container.fetch('report'), indent=1, default=str), encoding='utf-8')
+		project.quit(force=True)
+		return
+	case = cases[0]
+	for child in list(container.children):
+		if child.family in ('COMP', 'TOP') and child.name not in ('test_driver', 'startup'):
+			child.destroy()
+	wrapper = container.loadTox(case['tox'])
 	source = container.create('moviefileinTOP', 'source')
-	source.par.file = os.environ['TDNI_IMAGE']
+	source.par.file = case['image']
 	wrapper.inputConnectors[0].connect(source)
 	container.store('frames', 0)
-	run('args[0]()', poll, delayFrames=1)
+	run('args[0]()', _poll, delayFrames=1)
 
 
-def poll():
+def _wrapper():
 	container = me.parent()
-	wrapper = next(child for child in container.children if child.family == 'COMP' and child.name != container.name
-		and child.op('inference') is not None)
+	return next(child for child in container.children if child.family == 'COMP' and child.op('inference') is not None)
+
+
+def _detected(wrapper):
+	tracks = wrapper.op('tracks')
+	header = [cell.val for cell in tracks.row(0)] if tracks is not None and tracks.numRows else []
+	if 'track_id' in header and tracks.numRows > 1:
+		return True
+	spec = wrapper.fetch('wrapper_spec', {})
+	stats = wrapper.op('inference_stats')
+	loaded = stats is not None and stats['loaded'] is not None and stats['loaded'][0] >= 1
+	return bool(spec.get('kind') == 'image' and loaded and wrapper.op('debug').numpyArray()[..., :3].max() > 0)
+
+
+def _poll():
+	container = me.parent()
+	wrapper = _wrapper()
 	frames = container.fetch('frames') + 1
 	container.store('frames', frames)
 	for name in ('debug', 'out_channels'):
 		node = wrapper.op(name)
 		if node is not None:
 			node.cook(force=True)
-	tracks = wrapper.op('tracks')
-	if frames < MAX_FRAMES and (tracks is None or tracks.numRows < 2):
-		run('args[0]()', poll, delayFrames=1)
+	if frames < MAX_FRAMES and not _detected(wrapper):
+		run('args[0]()', _poll, delayFrames=1)
 		return
-	finish(wrapper, frames)
+	_record(wrapper, frames)
+	cases = container.fetch('cases')
+	cases.pop(0)
+	container.store('cases', cases)
+	run('args[0]()', _next, delayFrames=1)
 
 
-def finish(wrapper, frames):
-	import numpy as np
+def _record(wrapper, frames):
 	nodes = [wrapper, *wrapper.findChildren()]
 	inference = wrapper.op('inference')
 	tracks = wrapper.op('tracks')
 	header = [cell.val for cell in tracks.row(0)] if tracks is not None and tracks.numRows else []
-	rows = [[cell.val for cell in row] for row in tracks.rows()[1:]] if tracks is not None else []
-	debug = wrapper.op('debug')
-	report = {
-		'wrapper': wrapper.path, 'frames': frames, 'project_folder': project.folder,
-		'inference_type': inference.OPType if inference is not None else None,
+	rows = [[cell.val for cell in row] for row in tracks.rows()[1:]] if 'track_id' in header else []
+	label = next((column for column in ('emotion_label', 'gesture', 'class_name') if column in header), None)
+	debug = wrapper.op('debug').numpyArray()
+	report = me.parent().fetch('report')
+	report[wrapper.name] = {
+		'passed': _detected(wrapper), 'frames': frames, 'project_folder': project.folder,
+		'inference_type': inference.OPType,
 		'errors': _issues(nodes, 'errors'), 'warnings': _issues(nodes, 'warnings'),
-		'tracks': len(rows),
-		'gestures': [row[header.index('gesture')] for row in rows] if 'gesture' in header else [],
+		'tracks': len(rows), 'labels': [row[header.index(label)] for row in rows] if label else [],
 		'joints': wrapper.op('joints').numRows - 1 if wrapper.op('joints') is not None else None,
-		'overlay_pixels': int((debug.numpyArray()[..., 3] > 0).sum()) if debug is not None else None,
+		'overlay_pixels': int((debug[..., 3] > 0).sum()),
 		'pages': {page.name: [par.name for par in page.pars] for page in wrapper.customPages},
 	}
-	Path(os.environ['TDNI_RESULT']).write_text(json.dumps(report, indent=1, default=str), encoding='utf-8')
-	project.quit(force=True)
+	me.parent().store('report', report)
 
 
 def build_driver():

@@ -2,17 +2,18 @@
 #
 # Installs the plugin folder temporarily where users install it,
 # Documents\Derivative\Plugins\td-native-inference\, launches a fresh TouchDesigner on the driver
-# tox in -CaseDir (no plugins or models anywhere near it), loads the wrapper tox, feeds it -Image
-# and prints the JSON report. Afterwards the temporary install is removed and Plugins.json
-# restored. TD asks once to allow each plugin DLL in the new location.
+# tox in -CaseDir (no plugins or models anywhere near it), loads each -Wrapper tox in turn, feeds
+# it the matching -Image (one image = used for all) and prints the JSON report. Afterwards the
+# temporary install is removed and Plugins.json restored. TD asks once to allow each plugin DLL
+# in the new location.
 #
 #   -Package <extracted release folder>  test the release: its td-native-inference\ and tox\
 #   (default)                            test this checkout: plugins\ + the models in -Models
 #   -NoInstall                           don't install plugins (tests the missing-plugin case)
 param(
 	[Parameter(Mandatory)] [string] $CaseDir,
-	[string] $Wrapper = 'MediaPipeHands',
-	[string] $Image = 'build/thumbs_up.jpg',
+	[string[]] $Wrapper = @('MediaPipeHands'),
+	[string[]] $Image = @('build/thumbs_up.jpg'),
 	[string] $Package,
 	[string[]] $Models = @('models/mediapipe/gesture_recognizer.task'),
 	[switch] $NoInstall,
@@ -29,7 +30,11 @@ $toxDir = if ($Package) { Join-Path $Package 'tox' } else { Join-Path $repo 'tox
 if (Test-Path $CaseDir) { Remove-Item -Recurse -Force $CaseDir }
 New-Item -ItemType Directory -Force "$CaseDir\package" | Out-Null
 Copy-Item "$repo\build\clean-wrapper\RunCleanWrapper.tox" $CaseDir
-Copy-Item (Join-Path $toxDir "$Wrapper.tox") "$CaseDir\package\"
+$cases = @()
+for ($i = 0; $i -lt $Wrapper.Count; $i++) {
+	Copy-Item (Join-Path $toxDir "$($Wrapper[$i]).tox") "$CaseDir\package\"
+	$cases += @{ tox = "$CaseDir\package\$($Wrapper[$i]).tox"; image = (Join-Path $repo $Image[[Math]::Min($i, $Image.Count - 1)]) }
+}
 
 $installed = $false
 $savedAllowList = if (Test-Path $allowList) { Get-Content -Raw $allowList } else { $null }
@@ -52,8 +57,7 @@ try {
 		}
 	}
 	$result = "$CaseDir\result.json"
-	$env:TDNI_WRAPPER_TOX = "$CaseDir\package\$Wrapper.tox"
-	$env:TDNI_IMAGE = Join-Path $repo $Image
+	$env:TDNI_CASES = ConvertTo-Json -Compress -InputObject @($cases)
 	$env:TDNI_RESULT = $result
 	$process = Start-Process $td -ArgumentList "`"$CaseDir\RunCleanWrapper.tox`"" -WorkingDirectory $CaseDir -PassThru
 	$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
