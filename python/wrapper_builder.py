@@ -249,6 +249,9 @@ def _build_visuals(comp, spec):
 		keypoints = _load_shared(comp, 'debug_keypoints', DEBUG_KEYPOINTS)
 		keypoints.inputConnectors[0].connect(sources['joints'])
 		keypoints.inputConnectors[1].connect(sources['bones'])
+		debug_page = next(page for page in comp.customPages if page.name == 'Debug')
+		for name in ('Jointsize', 'Jointoutline'):
+			_expose(debug_page, keypoints, name)
 		overlay = comp.create('compositeTOP', 'overlay')
 		overlay.par.operand = 'over'
 		overlay.par.swaporder = True	# boxes wired first (it sits above), keypoints drawn over it

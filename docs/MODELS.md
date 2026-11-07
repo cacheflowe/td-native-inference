@@ -27,8 +27,8 @@ person or object while it's visible and through short dropouts.
   weaker detections), **Track Loss Frames** (how long a lost track is held), **Output Smoothing**
   (0 = raw), plus model-specific settings.
 - **Debug** page: **Debug Overlay** on/off (or **Show Result** on image models; off outputs
-  transparent black and skips the drawing work), and **Overlay Layers** (Both, Bounding Boxes or
-  Joints) on landmark models.
+  transparent black and skips the drawing work), and on landmark models **Overlay Layers** (Both,
+  Bounding Boxes or Joints), **Joint Size** and **Joint Outline** (a white ring around each joint).
 - **About** page: the package version.
 
 ## Tracking
