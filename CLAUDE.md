@@ -9,12 +9,12 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 
 | Path | What |
 |---|---|
-| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: generated wrappers (new). `/project1/ModelDemo`: workbench of the previous generation of wrappers. `/project1/ONNX_Native`: legacy reference chains. `/project1/startup` puts `python/` on `sys.path` |
+| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image. `/project1/ModelDemo`: the generated workbench (one toggle per model). `/project1/ONNX_Native`: legacy reference chains. `/project1/startup` puts `python/` on `sys.path` |
 | `wrappers/<Model>.json` | One spec per model tox: custom OP type, presets, output kind, tracker mode, and the curated parameters the wrapper exposes |
 | `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side |
 | `plugins/` | Build output. On Windows this *is* the project's `Plugins/` folder, so TD registers the custom OPs (`OnnxTOP`, `MediapipeTOP`) from it at startup. `onnxtop_tool.exe` must sit next to `OnnxTOP.dll`, `libmediapipe.dll` next to `MediaPipeTOP.dll`. Gitignored |
 | `models/mediapipe/`, `models/onnx/<model>/` | Model files, gitignored. Sources and licenses: `models/README.md` |
-| `python/` | `onnxtop_tables.py` (Info DAT → trackers → tables) and `object_tracker`, `pose_`/`box_`/`face_tracker_pipeline`, `mediapipe_skeletons`. numpy only; `cv2` lazily for solvePnP head pose. `wrapper_builder.py` builds/exports wrappers; `wrapper_runtime.py` is embedded in each. `mediapipe_hands_component.py` serves only the previous-generation ModelDemo wrappers |
+| `python/` | `onnxtop_tables.py` (Info DAT → trackers → tables) and `object_tracker`, `pose_`/`box_`/`face_tracker_pipeline`, `mediapipe_skeletons`. numpy only; `cv2` lazily for solvePnP head pose. `wrapper_builder.py` builds/exports wrappers; `wrapper_runtime.py` is embedded in each. `mediapipe_hands_component.py` serves only the legacy `/project1/ONNX_Native/MediaPipeHands` |
 | `tox/shared/` | `DebugBB.tox`, `DebugKeypoints.tox`. Instances in the `.toe` reference these files: edit the shared tox, never an instance |
 | `media/` | Test clips used by the `.toe`'s Movie File In TOPs. Gitignored |
 | `docs/learnings/` | Write-ups carried over from haxlib (paths in them are haxlib's) |
@@ -31,7 +31,11 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   `scripts/build_wrappers.py` to the bridge's `/run`. It rebuilds into `/project1/WrapperLab`
   (keeping position and wires) and exports a self-contained tox: Python is embedded, file syncs and
   shared-tox links are stripped from the saved copy only. Wrappers use the registered custom OPs,
-  so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`.
+  so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`. Set
+  `DEMO = True` in the script to regenerate `/project1/ModelDemo` and `tox/ModelDemo.tox`.
+- **Testing wrappers:** POST `tests/td_wrapper_lab.py` to `/run` (checks every lab wrapper on the
+  official MediaPipe images in `build/`, report in `build/wrapper-lab.json`);
+  `tests/run_clean_wrapper.ps1` tests an exported tox in a fresh TD process.
 - **Python:** the tracker COMPs `import onnxtop_tables`. After editing a module, reload it (the
   td-http-api bridge's `GET /reload` reloads every imported module under the project folder).
 - **Models:** reference them by relative path (`models/...`). Both plugins look under the project

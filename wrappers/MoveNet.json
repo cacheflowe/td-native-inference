@@ -1,0 +1,27 @@
+{
+	"name": "MoveNet",
+	"label": "MoveNet MultiPose",
+	"plugin": "OnnxTOP",
+	"kind": "landmarks",
+	"tracker": "movenet",
+	"preset": {
+		"Model": "models/onnx/movenet/movenet-multipose-lightning.onnx",
+		"Mode": "movenet",
+		"Inputnorm": "byte",
+		"Dynamicsize1": 384,
+		"Dynamicsize2": 384,
+		"Confthreshold": 0.214,
+		"Maxdetections": 40
+	},
+	"model": [
+		"Confthreshold",
+		"Maxdetections",
+		"Dynamicsize"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Maxmatchdist",
+		"Outputsmoothing"
+	]
+}

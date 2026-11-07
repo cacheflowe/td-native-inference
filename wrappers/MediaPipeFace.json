@@ -1,0 +1,25 @@
+{
+	"name": "MediaPipeFace",
+	"label": "MediaPipe Face Landmarks",
+	"plugin": "MediapipeTOP",
+	"kind": "landmarks",
+	"tracker": "mp_face",
+	"preset": {
+		"Task": "face",
+		"Maxinstances": 2
+	},
+	"model": [
+		"Maxinstances",
+		"Mindetection",
+		"Minpresence",
+		"Mintracking",
+		"Blendshapes",
+		"Matrix"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Coastwhilelost",
+		"Outputsmoothing"
+	]
+}

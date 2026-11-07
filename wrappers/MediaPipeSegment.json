@@ -1,0 +1,14 @@
+{
+	"name": "MediaPipeSegment",
+	"label": "MediaPipe Segmentation",
+	"plugin": "MediapipeTOP",
+	"kind": "image",
+	"preset": {
+		"Task": "segment"
+	},
+	"model": [
+		"Segmentmodel",
+		"Segoutput",
+		"Segclass"
+	]
+}

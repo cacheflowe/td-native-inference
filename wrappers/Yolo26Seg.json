@@ -1,0 +1,26 @@
+{
+	"name": "Yolo26Seg",
+	"label": "YOLO26 Segmentation",
+	"plugin": "OnnxTOP",
+	"kind": "boxes",
+	"tracker": "segment",
+	"result": "inference",
+	"preset": {
+		"Model": "models/onnx/yolo26/yolo26s-seg.onnx",
+		"Confthreshold": 0.214,
+		"Maxdetections": 40
+	},
+	"model": [
+		"Model",
+		"Confthreshold",
+		"Maxdetections",
+		"Maskthreshold",
+		"Matteconf"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Minmaskarea",
+		"Outputsmoothing"
+	]
+}

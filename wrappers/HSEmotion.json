@@ -1,0 +1,22 @@
+{
+	"name": "HSEmotion",
+	"label": "HSEmotion Face Emotion",
+	"plugin": "OnnxTOP",
+	"kind": "classifier",
+	"detector": "YuNet",
+	"preset": {
+		"Model": "models/onnx/hsemotion/emotion.onnx",
+		"Mode": "crops",
+		"Inputnorm": "imagenet",
+		"Classnames": "anger disgust fear happiness neutral sadness surprise",
+		"Cropdat": "crop_boxes"
+	},
+	"model": [
+		"Classifyinterval",
+		"Cropscale"
+	],
+	"classes": {
+		"prefix": "emotion",
+		"smoothing": 0.5
+	}
+}

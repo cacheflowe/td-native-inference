@@ -1,0 +1,24 @@
+{
+	"name": "Yolo26Pose",
+	"label": "YOLO26 Pose",
+	"plugin": "OnnxTOP",
+	"kind": "landmarks",
+	"tracker": "pose",
+	"preset": {
+		"Model": "models/onnx/yolo26/yolo26n-pose.onnx",
+		"Confthreshold": 0.214,
+		"Classfilter": -1,
+		"Maxdetections": 40
+	},
+	"model": [
+		"Model",
+		"Confthreshold",
+		"Maxdetections"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Maxmatchdist",
+		"Outputsmoothing"
+	]
+}

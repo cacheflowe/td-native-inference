@@ -1,0 +1,18 @@
+{
+	"name": "DepthAnything",
+	"label": "Depth Anything V2",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx",
+		"Mode": "raw",
+		"Inputnorm": "imagenet",
+		"Dynamicsize1": 256,
+		"Dynamicsize2": 256
+	},
+	"model": [
+		"Dynamicsize",
+		"Rawnormalize",
+		"Rawsmoothing"
+	]
+}

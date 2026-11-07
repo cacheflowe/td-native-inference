@@ -1,0 +1,23 @@
+{
+	"name": "MediaPipePose",
+	"label": "MediaPipe Pose",
+	"plugin": "MediapipeTOP",
+	"kind": "landmarks",
+	"tracker": "mp_pose",
+	"preset": {
+		"Task": "pose",
+		"Maxinstances": 2
+	},
+	"model": [
+		"Maxinstances",
+		"Mindetection",
+		"Minpresence",
+		"Mintracking"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Coastwhilelost",
+		"Outputsmoothing"
+	]
+}

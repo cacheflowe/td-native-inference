@@ -1,0 +1,25 @@
+{
+	"name": "Yolo26Detect",
+	"label": "YOLO26 Object Detection",
+	"plugin": "OnnxTOP",
+	"kind": "boxes",
+	"tracker": "detect",
+	"preset": {
+		"Model": "models/onnx/yolo26/yolo26s.onnx",
+		"Confthreshold": 0.214,
+		"Classfilter": -1,
+		"Maxdetections": 40
+	},
+	"model": [
+		"Model",
+		"Confthreshold",
+		"Classfilter",
+		"Maxdetections"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Trackiouthreshold",
+		"Outputsmoothing"
+	]
+}

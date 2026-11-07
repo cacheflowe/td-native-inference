@@ -1,0 +1,20 @@
+{
+	"name": "MediaPipeFaceDetector",
+	"label": "MediaPipe Face Detector",
+	"plugin": "MediapipeTOP",
+	"kind": "landmarks",
+	"tracker": "mp_facedet",
+	"preset": {
+		"Task": "facedetector",
+		"Maxinstances": 4
+	},
+	"model": [
+		"Maxinstances",
+		"Mindetection"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Outputsmoothing"
+	]
+}

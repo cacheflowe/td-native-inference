@@ -10,9 +10,14 @@ Every wrapper has the same skeleton:
 Outputs: TOP 1 debug overlay (or the image result), TOP 2 the input image, DATs tracks / joints /
 bones, CHOP per-track values plus native stats.
 
-The spec decides what differs: which custom OP and presets, the tracker mode, the output kind
-(landmarks / boxes / image) and which native and tracker parameters the user sees. Everything
-not exposed stays preset on the inner nodes.
+The spec decides what differs:
+	plugin, preset   the custom OP type and its fixed settings (member names like Dynamicsize1 ok)
+	kind             landmarks | boxes | image | classifier (second stage on a nested detector)
+	tracker          onnxtop_tables tracker mode (omit for image models)
+	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
+	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
+	detector, classes  classifier only: the nested detector spec and the score column settings
+Everything not exposed stays preset on the inner nodes.
 """
 
 import json
@@ -24,7 +29,7 @@ MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
-KINDS = ('landmarks', 'boxes', 'image')
+KINDS = ('landmarks', 'boxes', 'image', 'classifier')
 ALWAYS_EXPOSED = ('Active',)
 ALWAYS_PULSES = ('Reload',)
 
@@ -52,10 +57,17 @@ LAYOUT = {
 	'local/modules/box_tracker_pipeline': (1, 0), 'local/modules/face_tracker_pipeline': (1, -150),
 	'local/modules/pose_tracker_pipeline': (1, -300), 'local/modules/onnxtop_tables': (2, -150),
 }
-# Image models have no tracker or visualizers: the resized result sits right after inference.
-LAYOUT_IMAGE = {'overlay': (2, 320), 'detections': (2, 120)}
-DOCKED = ('channels_callbacks', 'tracker/script_tracks_callbacks',
+LAYOUT_KIND = {
+	# No tracker or visualizers: the resized result sits right after inference.
+	'image': {'overlay': (2, 320), 'detections': (2, 120)},
+	# The nested detector feeds the crops (above) and the keypoint visualizer (below).
+	'classifier': {'detector': (1, -20), 'crop_boxes': (2, 320), 'scores': (3, 160)},
+}
+LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (7, 20)}
+DOCKED = ('channels_callbacks', 'scores_callbacks', 'tracker/script_tracks_callbacks',
 	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
+
+DEMO_ROW = 180
 
 
 def root():
@@ -70,6 +82,7 @@ def load_spec(name):
 	spec = json.loads((root() / 'wrappers' / f'{name}.json').read_text(encoding='utf-8'))
 	assert spec.get('name') == name, f'[WrapperBuilder] {name}.json names itself {spec.get("name")!r}'
 	assert spec.get('kind') in KINDS, f'[WrapperBuilder] {name}: kind must be one of {KINDS}'
+	assert spec['kind'] != 'classifier' or spec.get('detector'), f'[WrapperBuilder] {name}: classifier needs a detector'
 	return spec
 
 
@@ -81,6 +94,11 @@ def version():
 def _connect(destination, *sources):
 	for index, source in enumerate(sources):
 		destination.inputConnectors[index].connect(source.outputConnectors[0])
+
+
+def _output(comp, out_name):
+	"""A COMP's output connector by its Out OP (mixed-family COMPs don't number them by family)."""
+	return next(connector for connector in comp.outputConnectors if connector.outOP == comp.op(out_name))
 
 
 def _synced_dat(parent_comp, name, relative):
@@ -100,6 +118,11 @@ def _tuplet(node, name):
 	raise KeyError(f'[WrapperBuilder] {node.path} has no parameter {name!r}. Custom parameters: {names}')
 
 
+def _set(node, name, value):
+	parameter = getattr(node.par, name, None) or _tuplet(node, name)[0]
+	parameter.val = value
+
+
 def _expose(page, node, name, exposed_name=None):
 	"""Copy a parameter onto the wrapper's page and drive the inner one from it. Returns the
 	new pars and the names of any pulses (forwarded by the model_pulses DAT)."""
@@ -111,7 +134,7 @@ def _expose(page, node, name, exposed_name=None):
 			pulses.append(target.name)
 			continue
 		target.val = source.eval()
-		target.default = source.default
+		target.default = source.eval()
 		# .eval() so menu values forward by name even when the wrapper's menu is shorter.
 		source.expr = f'parent().par.{target.name}.eval()'
 	return group, pulses
@@ -158,6 +181,22 @@ def _build_tracker(comp, mode):
 	return tracker
 
 
+def _build_classifier(comp, spec):
+	"""Second stage: a nested detector wrapper finds and tracks faces; this node classifies their
+	crops and `scores` joins the class scores onto the detector's tracks."""
+	detector = build(load_spec(spec['detector']), comp, name='detector')
+	detector.par.Active.expr = 'parent().par.Active.eval()'
+	detector.par.Debugoverlay = False	# its own overlay is unused; ours draws its tables
+	_connect(detector, comp.op('input'))
+	# script_tracks, not out_tracks: the crops must not depend on the scored table.
+	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
+	scores = comp.create('scriptDAT', 'scores')
+	comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
+		'\tonnxtop_tables.write_scores(scriptOp, parent(), scriptOp.inputs[0], scriptOp.inputs[1])\n')
+	_connect(scores, comp.op('crop_boxes'), comp.op('detections'))
+	return detector
+
+
 def _load_shared(comp, name, relative):
 	node = comp.loadTox((root() / relative).as_posix())
 	node.name = name
@@ -166,9 +205,21 @@ def _load_shared(comp, name, relative):
 	return node
 
 
-def _build_visuals(comp, kind):
+def _sources(comp, kind):
+	"""Output connectors feeding the visualizers: tracker outputs, or the classifier's tables."""
+	tracker, detector = comp.op('tracker'), comp.op('detector')
+	if kind == 'classifier':
+		return {'tracks': comp.op('scores').outputConnectors[0],
+			'joints': _output(detector, 'out_joints'), 'bones': _output(detector, 'out_bones')}
+	if tracker is not None:
+		return {suffix: _output(tracker, 'out_' + suffix) for suffix in ('tracks', 'joints', 'bones')}
+	return {'tracks': comp.op('tracks').outputConnectors[0]}
+
+
+def _build_visuals(comp, spec):
 	"""Build `overlay` (the visualizers, or the resized image result) and `preview`, a two-input
 	Switch: transparent when Debug Overlay is off, so the visualizers don't cook then."""
+	kind = spec['kind']
 	transparent = comp.create('constantTOP', 'transparent')
 	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
 		transparent.par[channel] = 0
@@ -185,33 +236,37 @@ def _build_visuals(comp, kind):
 		overlay.par.resolutionh.expr = "op('input').height"
 		_connect(preview, transparent, overlay)
 		return
-	tracker = comp.op('tracker')
-	def table(suffix):
-		# Straight from the tracker's outputs (adjacent column); the Select DATs feed the Out DATs.
-		if tracker is None:
-			return comp.op(suffix).outputConnectors[0]
-		return next(c for c in tracker.outputConnectors if c.outOP == tracker.op('out_' + suffix))
+	sources = _sources(comp, kind)
 	boxes = _load_shared(comp, 'debug_boxes', DEBUG_BB)
 	boxes.par.Inputaspectratio.expr = 'parent().par.Inputaspectratio'
 	# DebugBB only reads its image input's resolution.
 	boxes.inputConnectors[0].connect(comp.op('null_passthrough'))
-	boxes.inputConnectors[1].connect(table('tracks'))
+	boxes.inputConnectors[1].connect(sources['tracks'])
 	if kind == 'boxes':
 		overlay = comp.create('nullTOP', 'overlay')
 		_connect(overlay, boxes)
+	else:
+		keypoints = _load_shared(comp, 'debug_keypoints', DEBUG_KEYPOINTS)
+		keypoints.inputConnectors[0].connect(sources['joints'])
+		keypoints.inputConnectors[1].connect(sources['bones'])
+		overlay = comp.create('compositeTOP', 'overlay')
+		overlay.par.operand = 'over'
+		overlay.par.swaporder = True	# boxes wired first (it sits above), keypoints drawn over it
+		_connect(overlay, boxes, keypoints)
+		# Overlay Layers: Both composites; Bounding Boxes / Joints pass one input through.
+		overlay.par.selectinput.expr = "parent().par.Debuglayers.eval() != 'both'"
+		overlay.par.inputindex.expr = "0 if parent().par.Debuglayers.eval() == 'boxes' else 1"
+	if spec.get('result') == 'inference':
+		# The native image (e.g. a segmentation matte, at inference size) is the primary result;
+		# referenced, not wired, so no wire crosses the visualizers.
+		matte = comp.create('selectTOP', 'matte')
+		matte.par.top = 'inference'
+		_connect(preview, transparent, matte)
+		boxes_out = comp.create('outTOP', 'out_boxes')
+		boxes_out.par.connectorder = 3
+		_connect(boxes_out, overlay)
+	else:
 		_connect(preview, transparent, overlay)
-		return
-	keypoints = _load_shared(comp, 'debug_keypoints', DEBUG_KEYPOINTS)
-	keypoints.inputConnectors[0].connect(table('joints'))
-	keypoints.inputConnectors[1].connect(table('bones'))
-	overlay = comp.create('compositeTOP', 'overlay')
-	overlay.par.operand = 'over'
-	overlay.par.swaporder = True	# boxes wired first (it sits above), keypoints drawn over it
-	_connect(overlay, boxes, keypoints)
-	# Overlay Layers: Both composites; Bounding Boxes / Joints pass one input through.
-	overlay.par.selectinput.expr = "parent().par.Debuglayers.eval() != 'both'"
-	overlay.par.inputindex.expr = "0 if parent().par.Debuglayers.eval() == 'boxes' else 1"
-	_connect(preview, transparent, overlay)
 
 
 def _build_pages(comp, spec, plugin, tracker):
@@ -222,15 +277,25 @@ def _build_pages(comp, spec, plugin, tracker):
 		pulses += found
 	for name, choices in spec.get('menus', {}).items():
 		_restrict_menu(comp.par[name], choices)
+	if spec['kind'] == 'classifier':
+		classes = spec.get('classes', {})
+		prefix = model_page.appendStr('Classprefix', label='Class Column Prefix')[0]
+		prefix.val = prefix.default = classes.get('prefix', 'class')
+		prefix.help = 'Score columns become <prefix>_label and <prefix>_<class name>.'
+		smoothing = model_page.appendFloat('Classsmoothing', label='Class Score Smoothing')[0]
+		smoothing.val = smoothing.default = classes.get('smoothing', 0.5)
+		smoothing.normMin, smoothing.normMax = 0, 0.99
+		smoothing.help = 'Per-track smoothing of class scores (0 = raw, higher = steadier).'
 	if tracker is not None and spec.get('tracking'):
 		tracking_page = comp.appendCustomPage('Tracking')
 		for name in spec['tracking']:
 			assert _tuplet(tracker, name)[0].page.name == 'Tracking', f'[WrapperBuilder] {name} is not a tracking parameter'
 			_expose(tracking_page, tracker, name, 'Track' + name.lower())
 	debug_page = comp.appendCustomPage('Debug')
-	overlay = debug_page.appendToggle('Debugoverlay', label='Debug Overlay')[0]
+	label = 'Show Result' if spec['kind'] == 'image' or spec.get('result') == 'inference' else 'Debug Overlay'
+	overlay = debug_page.appendToggle('Debugoverlay', label=label)[0]
 	overlay.val = overlay.default = True
-	if spec['kind'] == 'landmarks':
+	if spec['kind'] in ('landmarks', 'classifier'):
 		layers = debug_page.appendMenu('Debuglayers', label='Overlay Layers')[0]
 		layers.menuNames = ['both', 'boxes', 'joints']
 		layers.menuLabels = ['Both', 'Bounding Boxes', 'Joints']
@@ -252,8 +317,10 @@ def _build_pages(comp, spec, plugin, tracker):
 		forward.text = "def onPulse(par):\n\tparent().op('inference').par[par.name].pulse()\n"
 
 
-def _layout(comp, kind):
-	positions = dict(LAYOUT, **(LAYOUT_IMAGE if kind == 'image' else {}))
+def _layout(comp, spec):
+	positions = dict(LAYOUT, **LAYOUT_KIND.get(spec['kind'], {}))
+	if spec.get('result') == 'inference':
+		positions.update(LAYOUT_RESULT_INFERENCE)
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:
@@ -266,25 +333,41 @@ def _layout(comp, kind):
 			callbacks.dock = host
 
 
-def build(spec, parent_comp):
-	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires."""
-	name = spec['name']
-	position, inputs, outputs = (parent_comp.nodeX, parent_comp.nodeY), [], []
+def _take_place(parent_comp, name):
+	"""Destroy an existing node, returning its position and wires so a rebuild can restore them."""
 	old = parent_comp.op(name)
-	if old is not None:
-		position = (old.nodeX, old.nodeY)
-		inputs = [connector.connections[0].owner if connector.connections else None for connector in old.inputConnectors]
-		outputs = [(index, connection.owner, connection.index) for index, connector in enumerate(old.outputConnectors)
-			for connection in connector.connections]
-		old.destroy()
+	if old is None:
+		return None, [], []
+	position = (old.nodeX, old.nodeY)
+	inputs = [connector.connections[0].owner if connector.connections else None for connector in old.inputConnectors]
+	outputs = [(index, connection.owner, connection.index) for index, connector in enumerate(old.outputConnectors)
+		for connection in connector.connections]
+	old.destroy()
+	return position, inputs, outputs
+
+
+def _restore_wires(comp, inputs, outputs):
+	for index, source in enumerate(inputs):
+		if source is not None and index < len(comp.inputConnectors):
+			comp.inputConnectors[index].connect(source)
+	for index, owner, input_index in outputs:
+		if index < len(comp.outputConnectors):
+			comp.outputConnectors[index].connect(owner.inputConnectors[input_index])
+
+
+def build(spec, parent_comp, name=None):
+	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires."""
+	name = name or spec['name']
+	position, inputs, outputs = _take_place(parent_comp, name)
 	comp = parent_comp.create('baseCOMP', name)
-	comp.nodeX, comp.nodeY = position
+	if position is not None:
+		comp.nodeX, comp.nodeY = position
 	comp.store('wrapper_spec', spec)
 	_add_code(comp)
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
-		_tuplet(plugin, parameter)[0].val = value
+		_set(plugin, parameter, value)
 	_connect(plugin, comp.op('input'))
 	info = comp.create('infoDAT', 'detections')
 	info.par.op = 'inference'
@@ -292,19 +375,26 @@ def build(spec, parent_comp):
 	stats.par.op = 'inference'
 	passthrough = comp.create('nullTOP', 'null_passthrough')
 	_connect(passthrough, comp.op('input'))
+	kind = spec['kind']
 	tracker = _build_tracker(comp, spec['tracker']) if spec.get('tracker') else None
+	detector = _build_classifier(comp, spec) if kind == 'classifier' else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
 		for suffix in ('tracks', 'joints', 'bones'):
 			comp.create('selectDAT', suffix).par.dat = 'tracker/out_' + suffix
+	elif detector is not None:
+		comp.create('selectDAT', 'tracks').par.dat = 'scores'
+		for suffix in ('joints', 'bones'):
+			comp.create('selectDAT', suffix).par.dat = 'detector/out_' + suffix
 	else:
 		comp.create('selectDAT', 'tracks').par.dat = 'detections'
-	_build_visuals(comp, spec['kind'])
+	_build_visuals(comp, spec)
 	for index, (suffix, source) in enumerate((('debug', 'preview'), ('passthrough', 'null_passthrough')), 1):
 		output = comp.create('outTOP', suffix)
 		output.par.connectorder = index
 		_connect(output, comp.op(source))
-	for index, suffix in enumerate(('tracks', 'joints', 'bones') if tracker is not None else ('tracks',), 1):
+	tables = ('tracks', 'joints', 'bones') if comp.op('joints') is not None else ('tracks',)
+	for index, suffix in enumerate(tables, 1):
 		output = comp.create('outDAT', 'out_' + suffix)
 		output.par.connectorder = index
 		_connect(output, comp.op(suffix))
@@ -314,14 +404,99 @@ def build(spec, parent_comp):
 	_connect(comp.create('outCHOP', 'out_channels'), channels)
 	for node in comp.findChildren():
 		node.viewer = False
-	_layout(comp, spec['kind'])
+	_layout(comp, spec)
 	comp.par.opviewer = 'debug'
-	for index, source in enumerate(inputs):
-		if source is not None:
-			comp.inputConnectors[index].connect(source)
-	for index, owner, input_index in outputs:
-		comp.outputConnectors[index].connect(owner.inputConnectors[input_index])
+	_restore_wires(comp, inputs, outputs)
 	return comp
+
+
+def build_demo(parent_comp, names, name='ModelDemo'):
+	"""(Re)build the workbench: one wrapper per spec, each enabled from the Models page. A disabled
+	wrapper doesn't cook at all (allowCooking, set from outside it: a COMP can't wake itself)."""
+	specs = [load_spec(spec_name) for spec_name in names]
+	# Over puts earlier inputs on top: box/joint overlays first, opaque image results last.
+	specs.sort(key=lambda spec: spec['kind'] == 'image' or spec.get('result') == 'inference')
+	position, inputs, outputs = _take_place(parent_comp, name)
+	demo = parent_comp.create('baseCOMP', name)
+	if position is not None:
+		demo.nodeX, demo.nodeY = position
+	models = demo.appendCustomPage('Models')
+	controls = {}
+	for spec in specs:
+		toggle = models.appendToggle(spec['name'].capitalize(), label=spec.get('label', spec['name']))[0]
+		toggle.val = toggle.default = False
+		controls[toggle.name] = spec['name']
+	about = demo.appendCustomPage('About')
+	release = about.appendStr('Version', label='Version')[0]
+	release.val = release.default = version()
+	release.readOnly = True
+	source = demo.create('inTOP', 'input')
+	frame = demo.create('nullTOP', 'input_frame')
+	_connect(frame, source)
+	transparent = demo.create('constantTOP', 'transparent')
+	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
+		transparent.par[channel] = 0
+	transparent.par.outputresolution = 'custom'
+	transparent.par.resolutionw.expr = "op('input_frame').width"
+	transparent.par.resolutionh.expr = "op('input_frame').height"
+	composite = demo.create('compositeTOP', 'debug_composite')
+	composite.par.operand = 'over'
+	for index, spec in enumerate(specs):
+		toggle = next(key for key, value in controls.items() if value == spec['name'])
+		wrapper = build(spec, demo)
+		wrapper.allowCooking = False
+		wrapper.par.Active.expr = f'parent().par.{toggle}.eval()'
+		_connect(wrapper, frame)
+		wrapper.nodeX, wrapper.nodeY = 2 * COLUMN, -index * DEMO_ROW
+		# Referenced, not wired: a disabled wrapper keeps its last frame, so pick transparent.
+		layer = demo.create('selectTOP', 'layer_' + spec['name'])
+		layer.par.top.expr = f"'{spec['name']}/debug' if parent().par.{toggle} else 'transparent'"
+		layer.nodeX, layer.nodeY = 3 * COLUMN, -index * DEMO_ROW + 20
+		layer.viewer = False
+		composite.inputConnectors[index].connect(layer)
+	output = demo.create('outTOP', 'out_debug')
+	output.par.connectorder = 1
+	_connect(output, composite)
+	passthrough = demo.create('outTOP', 'out_input')
+	passthrough.par.connectorder = 2
+	_connect(passthrough, frame)
+	gate = demo.create('parameterexecuteDAT', 'model_controls')
+	gate.par.op = '..'
+	gate.par.pars = ' '.join(controls)
+	gate.par.onpulse = False
+	gate.text = (f'NAMES = {controls!r}\n'
+		'def onValueChange(par, prev):\n\tpar.owner.op(NAMES[par.name]).allowCooking = bool(par.eval())\n'
+		'def apply():\n\tfor control, name in NAMES.items():\n'
+		'\t\tparent().op(name).allowCooking = bool(parent().par[control].eval())\n')
+	startup = demo.create('executeDAT', 'initialize')
+	startup.par.create = True
+	startup.par.start = True
+	startup.text = ("def onCreate():\n\trun(\"args[0].module.apply()\", parent().op('model_controls'), delayFrames=1)\n"
+		"def onStart():\n\tonCreate()\n")
+	middle = -(len(specs) - 1) * DEMO_ROW // 2
+	for node, (column, y) in {source: (0, 200), frame: (1, 200), passthrough: (5, 200), transparent: (3, 200),
+		composite: (4, middle), output: (5, middle), gate: (0, -200), startup: (0, -350)}.items():
+		node.nodeX, node.nodeY = column * COLUMN, y
+	for node in (source, frame, transparent, composite, gate, startup):
+		node.viewer = False
+	demo.par.opviewer = 'out_debug'
+	_restore_wires(demo, inputs, outputs)
+	return demo
+
+
+def export_demo(demo, destination):
+	"""Export with every model off (and not cooking), then restore the live selection."""
+	toggles = [demo.par[name] for name in demo.op('model_controls').module.NAMES]
+	states = [(toggle, toggle.val) for toggle in toggles]
+	try:
+		for toggle in toggles:
+			toggle.val = False
+		demo.op('model_controls').module.apply()
+		return export(demo, destination)
+	finally:
+		for toggle, value in states:
+			toggle.val = value
+		demo.op('model_controls').module.apply()
 
 
 def export(comp, destination):
@@ -356,6 +531,7 @@ def check_export(path):
 	probe = td.op('/project1').create('baseCOMP', '_wrapper_export_check')
 	try:
 		subject = probe.loadTox(str(path))
+		subject.allowCooking = False
 		problems = []
 		folder = td.project.folder.lower()
 		for node in [subject, *subject.findChildren()]:

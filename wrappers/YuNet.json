@@ -1,0 +1,30 @@
+{
+	"name": "YuNet",
+	"label": "YuNet Face Detection",
+	"plugin": "OnnxTOP",
+	"kind": "landmarks",
+	"tracker": "face",
+	"preset": {
+		"Model": "models/onnx/yunet/face_detection_yunet_2023mar.onnx",
+		"Mode": "yunet",
+		"Inputnorm": "byte",
+		"Channelorder": "bgr",
+		"Dynamicsize1": 384,
+		"Dynamicsize2": 384,
+		"Confthreshold": 0.214,
+		"Maxdetections": 40
+	},
+	"model": [
+		"Confthreshold",
+		"Nmsthreshold",
+		"Maxdetections",
+		"Dynamicsize"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Outputsmoothing",
+		"Posemethod",
+		"Posesmoothing"
+	]
+}

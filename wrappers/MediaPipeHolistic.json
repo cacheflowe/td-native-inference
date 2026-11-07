@@ -1,0 +1,20 @@
+{
+	"name": "MediaPipeHolistic",
+	"label": "MediaPipe Holistic",
+	"plugin": "MediapipeTOP",
+	"kind": "landmarks",
+	"tracker": "mp_holistic",
+	"preset": {
+		"Task": "holistic"
+	},
+	"model": [
+		"Mindetection",
+		"Minpresence",
+		"Blendshapes"
+	],
+	"tracking": [
+		"Confthreshold",
+		"Tracklossframes",
+		"Outputsmoothing"
+	]
+}
