@@ -28,13 +28,20 @@ per slot when the first non-video model lands, not before:
 | `kind` (outputs + visualizer) | landmarks, boxes, image, classifier | `scores` (class table + CHOP, bar visualizer), `embedding` (vector CHOP), `transcript` (text DAT, subtitle visualizer) |
 | post-processing | tracker (ids, smoothing, gesture onset) | score smoothing and onset events for sound classes |
 
-- [ ] **MediaPipe audio** (first): `libmediapipe.dll` already exports `MpAudioClassifier*`
-      (YAMNet, ~520 sound classes) and `MpAudioEmbedder*`. Needs the matching audio C headers
-      from MediaPipe 1.2.2 and a Custom CHOP (audio CHOP in, class scores out) sharing
-      MediaPipeTOP's DLL loader and worker thread (move them to `cpp/common/`).
+- [x] **MediaPipe audio classifier**: `cpp/MediaPipeCHOP` (Custom CHOP `MediapipeaudioCHOP`):
+      audio CHOP in (any rate, mixed to mono), YAMNet's 521 class scores out as named channels,
+      top results in the Info DAT. Worker thread, rolling Window/Hop. `build/audio_test.exe`
+      checks it offline (440 Hz sine -> Sine wave 0.996, silence -> Silence 0.80).
+- [ ] Live-test MediapipeaudioCHOP in TD (restart to register it), then a `MediaPipeAudio`
+      wrapper: an `audio` input slot and a `scores` kind (score smoothing, onset events, a
+      top-results debug TOP). Add yamnet.tflite (Apache-2.0) and the DLL to the release.
+- [ ] Audio embedder (`MpAudioEmbedder*`): same plugin, second task. Merge MpAudio's loader with
+      MediaPipeTOP's MpApi into `cpp/common/`.
 - [ ] **Whisper** speech to text: autoregressive, so not an OnnxTOP mode. Likely a whisper.cpp
       (MIT, CUDA) Custom DAT/CHOP: audio CHOP in, transcript DAT out, with VAD for streaming.
-      `MpAudioTranscriberCreate` is also exported; check whether it's usable first.
+      MediaPipe 1.2.2 also has `audio_transcriber.h` (streaming, generative ASR: an `OMNI`
+      architecture with an optional prompt, interim results, timestamps). Check which models it
+      loads and whether the Windows DLL runs it before writing a whisper.cpp plugin.
 - [ ] Also exported and cheap to add: MediaPipe text classifier/embedder, language detector,
       object detector, image classifier/embedder, interactive segmenter.
 - [ ] Other ONNX candidates: RF-DETR (Apache-2.0), RVM (GPL-3.0: fetch only).
