@@ -342,14 +342,15 @@ namespace mpaudio
 	{
 		std::lock_guard<std::mutex> lock(myMutex);
 		bool changed = false;
+		const int64_t offsetMs = mySampleRate > 0 ? (int64_t)(myOffsetSamples * 1000 / (uint64_t)mySampleRate) : 0;
 		for (uint32_t i = 0; i < result.segments_count; i++)
 		{
 			const MpTranscriptionSegment& s = result.segments[i];
 			Segment segment;
 			segment.text = s.transcript ? s.transcript : "";
 			segment.final = s.is_final;
-			segment.fromMs = s.from_timestamp_ms;
-			segment.toMs = s.to_timestamp_ms;
+			segment.fromMs = s.from_timestamp_ms + offsetMs;
+			segment.toMs = s.to_timestamp_ms + offsetMs;
 			if (segment.final)
 			{
 				myTranscript.finals.push_back(std::move(segment));
@@ -413,6 +414,10 @@ namespace mpaudio
 			MpStatus status = kMpOk;
 			if (!chunk.empty())
 			{
+				{
+					std::lock_guard<std::mutex> lock(myMutex);
+					myStreamSamples += chunk.size();
+				}
 				status = gApi.asrTranscribe(transcriber, chunk.data(), chunk.size(), false, &result, &msg);
 				if (status == kMpOk)
 					collect(result);
@@ -425,6 +430,9 @@ namespace mpaudio
 				if (status == kMpOk)
 					collect(result);
 				gApi.asrCloseResult(&result);
+				std::lock_guard<std::mutex> lock(myMutex);
+				myOffsetSamples += myStreamSamples;	// the next stream's timestamps start here
+				myStreamSamples = 0;
 			}
 			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 			std::lock_guard<std::mutex> lock(myMutex);

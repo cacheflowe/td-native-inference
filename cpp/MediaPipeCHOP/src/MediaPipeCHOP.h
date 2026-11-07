@@ -62,6 +62,7 @@ private:
 	std::vector<float>			myWindow;		// rolling mono buffer of the newest samples
 	size_t						mySinceSubmit = 0;
 	int							myTopCount = 5;
+	std::vector<int>			myTopOrder;		// class indices of the top results, best first
 
 	// Transcribe Speech
 	std::unique_ptr<mpaudio::Transcriber>	myTranscriber;

@@ -111,16 +111,14 @@ std::vector<float> MediaPipeCHOP::takeNewSamples(const OP_CHOPInput* input)
 		mySampleRate = rate;
 	}
 	// Timesliced audio advances startIndex every cook: only the samples past last cook's end are
-	// new. A jump (seek, restart) takes the whole input; the same non-timesliced input again
-	// gives nothing new.
+	// new (the same non-timesliced input again gives nothing new). Any jump, forward or back (a
+	// looping or seeking Audio File In restarts its index), takes the whole input.
 	const double start = input->startIndex;
 	const double end = start + input->numSamples;
 	int32_t first = 0;
 	if (myLastEnd >= start && myLastEnd <= end)
 		first = (int32_t)std::llround(myLastEnd - start);
-	else if (myLastEnd > end)
-		first = input->numSamples;
-	myLastEnd = std::max(myLastEnd, end);
+	myLastEnd = end;
 	const float scale = 1.0f / (float)std::max(1, input->numChannels);
 	fresh.reserve((size_t)std::max(0, input->numSamples - first));
 	for (int32_t s = first; s < input->numSamples; s++)
@@ -308,6 +306,15 @@ void MediaPipeCHOP::execute(CHOP_Output* output, const OP_Inputs* inputs, void*)
 		return;
 	}
 	updateChannelNames();
+	// The Info DAT's top results, sorted once per cook (ties ordered by class index, so rows
+	// asked for one at a time can't repeat or skip a class).
+	myTopOrder.resize(myResult.scores.size());
+	std::iota(myTopOrder.begin(), myTopOrder.end(), 0);
+	const size_t top = std::min(myTopOrder.size(), (size_t)myTopCount);
+	std::partial_sort(myTopOrder.begin(), myTopOrder.begin() + top, myTopOrder.end(), [this](int a, int b) {
+		return myResult.scores[a] != myResult.scores[b] ? myResult.scores[a] > myResult.scores[b] : a < b;
+	});
+	myTopOrder.resize(top);
 	for (int32_t c = 0; c < output->numChannels; c++)
 		output->channels[c][0] = c < (int32_t)myResult.scores.size() ? myResult.scores[c] : 0.0f;
 }
@@ -389,18 +396,14 @@ void MediaPipeCHOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDA
 			set(col, header[col]);
 		return;
 	}
-	std::vector<int> order(myResult.scores.size());
-	std::iota(order.begin(), order.end(), 0);
 	const int rank = index - 1;
-	if (rank >= (int)order.size())
+	if (rank >= (int)myTopOrder.size())
 	{
 		for (int col = 0; col < nEntries; col++)
 			set(col, "");
 		return;
 	}
-	std::partial_sort(order.begin(), order.begin() + rank + 1, order.end(),
-		[this](int a, int b) { return myResult.scores[a] > myResult.scores[b]; });
-	const int cls = order[rank];
+	const int cls = myTopOrder[rank];
 	set(0, number(rank + 1));
 	set(1, number(cls));
 	set(2, myResult.names[cls]);

@@ -128,6 +128,10 @@ namespace mpaudio
 		bool						myFinish = false;
 		std::string					myError;
 		std::vector<float>			myQueue;
+		// Each flush starts a new stream whose timestamps restart at 0: segments are offset by the
+		// audio of earlier streams so times count from when this transcriber started.
+		uint64_t					myStreamSamples = 0;
+		uint64_t					myOffsetSamples = 0;
 		Transcript					myTranscript;
 		std::thread					myThread;
 	};
