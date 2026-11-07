@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.1.0 (2026-11-07)
+
 First release.
 
 - **13 drop-in model toxes**: MediaPipe Hands/Gesture, Pose, Face Landmarks, Face Detector,
