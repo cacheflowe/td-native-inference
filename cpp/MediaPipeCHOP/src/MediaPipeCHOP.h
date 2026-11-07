@@ -1,8 +1,13 @@
-// MediaPipeCHOP -- Google's MediaPipe audio classifier (YAMNet: 521 sound classes) as a Custom CHOP.
+// MediaPipeCHOP -- Google's MediaPipe audio tasks as a Custom CHOP. Input: any audio CHOP
+// (timesliced, any sample rate; channels are mixed to mono). Task:
 //
-// Input: any audio CHOP (timesliced, any sample rate; channels are mixed to mono). Every Hop seconds
-// the latest Window seconds go to a worker thread; the newest scores come out as one channel per
-// class, named after the class ("Speech", "Music", "Dog", ...). The Info DAT lists the top results.
+//   Classify Sounds    YAMNet (521 sound classes). Every Hop seconds the latest Window seconds are
+//                      classified on a worker thread; one output channel per class ("Speech",
+//                      "Music", "Dog", ...). The Info DAT lists the top results.
+//   Transcribe Speech  streaming speech to text (Whisper, Moonshine, Parakeet, ... .litertlm). All
+//                      audio goes to the transcriber in order; after speech and a pause (or Max
+//                      Segment seconds) the stream is flushed so the sentence is finalized. The Info
+//                      DAT holds the transcript; channels report speaking / new segments / backlog.
 #pragma once
 
 #include "CHOP_CPlusPlusBase.h"
@@ -34,23 +39,45 @@ public:
 	void		getInfoPopupString(OP_String* info, void*) override;
 	void		setupParameters(OP_ParameterManager* manager, void*) override;
 	void		pulsePressed(const char* name, void*) override;
+	void		setParameterEnableStates(const OP_Inputs* inputs, OP_ParEnableState* state, void*) override;
 
 private:
-	void		appendInput(const OP_CHOPInput* input);
+	enum class Task { Classify = 0, Transcribe = 1 };
+
+	std::vector<float>	takeNewSamples(const OP_CHOPInput* input);	// new samples since last cook, mono
+	void		classify(const OP_Inputs* inputs, const std::vector<float>& fresh, const std::string& model);
+	void		transcribe(const OP_Inputs* inputs, const std::vector<float>& fresh, const std::string& model);
 	void		updateChannelNames();
+	void		resetStream();
 
-	std::unique_ptr<mpaudio::Classifier>	myClassifier;
+	Task						myTask = Task::Classify;
 	bool						myReload = false;
-	mpaudio::Result				myResult;
-	std::vector<std::string>	myChannelNames;	// sanitized, unique; fixed once the model reports its classes
+	bool						myFlush = false;
+	bool						myClear = false;
 
-	// Rolling mono buffer of the newest input samples, and where the input left off last cook.
-	std::vector<float>			myBuffer;
+	// Classify Sounds
+	std::unique_ptr<mpaudio::Classifier>	myClassifier;
+	mpaudio::Result				myResult;
+	std::vector<std::string>	myChannelNames;	// sanitized, unique
+	std::vector<float>			myWindow;		// rolling mono buffer of the newest samples
+	size_t						mySinceSubmit = 0;
+	int							myTopCount = 5;
+
+	// Transcribe Speech
+	std::unique_ptr<mpaudio::Transcriber>	myTranscriber;
+	mpaudio::Transcript			myTranscript;
+	size_t						myLastFinals = 0;
+	uint64_t					myTotalFinals = 0;	// keeps counting past Transcriber::kMaxFinals
+	bool						myNewSegment = false;
+	bool						mySpeaking = false;
+	double						mySilentFor = 0.0;	// seconds below Silence Level since speech
+	double						mySegmentFor = 0.0;	// seconds since the last flush, while speaking
+	float						myLevel = 0.0f;
+
+	// Input tracking
 	double						mySampleRate = 0.0;
 	double						myLastEnd = -1.0;
-	size_t						mySinceSubmit = 0;
 
-	int							myTopCount = 5;
 	std::string					myError;
 	std::string					myWarning;
 	std::string					myModelHint;

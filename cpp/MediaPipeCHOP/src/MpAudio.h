@@ -10,6 +10,7 @@
 #endif
 #include "mediapipe/tasks/c/components/containers/category.h"	// classification_result.h only forward-declares it
 #include "mediapipe/tasks/c/audio/audio_classifier/audio_classifier.h"
+#include "mediapipe/tasks/c/audio/audio_transcriber/audio_transcriber.h"
 #include "mediapipe/tasks/c/core/common.h"
 
 #include <condition_variable>
@@ -67,6 +68,67 @@ namespace mpaudio
 		bool						myHasPending = false;
 		uint64_t					myDropped = 0;
 		Result						myResult;
+		std::thread					myThread;
+	};
+
+	struct Segment
+	{
+		std::string	text;
+		bool		final = false;
+		int64_t		fromMs = 0;
+		int64_t		toMs = 0;
+	};
+
+	// Everything transcribed so far: final segments (oldest first, capped) plus the current interim
+	// hypothesis, if interim results are on.
+	struct Transcript
+	{
+		std::vector<Segment>	finals;
+		Segment					interim;
+		double					inferMs = 0.0;	// last Transcribe call
+		uint64_t				serial = 0;		// increments whenever the transcript changes
+	};
+
+	// Streaming speech to text (MediaPipe AudioTranscriber: Whisper, Moonshine, Parakeet, ... as
+	// .litertlm bundles). Audio must arrive in order and never be dropped, so submit() appends to
+	// a queue the worker drains; backlogSeconds() shows if it falls behind real time.
+	class Transcriber
+	{
+	public:
+		Transcriber(const std::string& modelPath, int sampleRate, bool interim, const std::string& prompt);
+		~Transcriber();
+		Transcriber(const Transcriber&) = delete;
+		Transcriber& operator=(const Transcriber&) = delete;
+
+		void		submit(const float* samples, size_t count);
+		void		finishStream();	// flush: finalizes the current utterance
+		bool		latest(Transcript& out) const;
+		bool		loaded() const;
+		std::string	error() const;
+		double		backlogSeconds() const;
+		bool		idle() const;	// loaded, nothing queued and nothing being transcribed
+		const std::string&	modelPath() const { return myModelPath; }
+		int			sampleRate() const { return mySampleRate; }
+
+		static constexpr size_t kMaxFinals = 200;
+
+	private:
+		void		run();
+		void		collect(const MpAudioTranscriberResult& result);
+
+		const std::string			myModelPath;
+		const int					mySampleRate;
+		const bool					myInterim;
+		const std::string			myPrompt;
+		mutable std::mutex			myMutex;
+		std::condition_variable		myWake;
+		bool						myStop = false;
+		bool						myLoaded = false;
+		bool						myBusy = false;
+		bool						myFinish = false;
+		std::string					myError;
+		std::vector<float>			myQueue;
+		Transcript					myTranscript;
 		std::thread					myThread;
 	};
 }

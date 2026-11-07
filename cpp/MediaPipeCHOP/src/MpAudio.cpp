@@ -17,6 +17,11 @@ namespace
 		decltype(&MpAudioClassifierClassify)	classify = nullptr;
 		decltype(&MpAudioClassifierCloseResult)	closeResult = nullptr;
 		decltype(&MpAudioClassifierClose)		close = nullptr;
+		decltype(&MpAudioTranscriberCreate)		asrCreate = nullptr;
+		decltype(&MpAudioTranscriberTranscribe)	asrTranscribe = nullptr;
+		decltype(&MpAudioTranscriberFinishStream)	asrFinish = nullptr;
+		decltype(&MpAudioTranscriberCloseResult)	asrCloseResult = nullptr;
+		decltype(&MpAudioTranscriberClose)		asrClose = nullptr;
 	};
 
 	Api			gApi;
@@ -64,6 +69,11 @@ namespace
 				bind(lib, gApi.classify, "MpAudioClassifierClassify", missing);
 				bind(lib, gApi.closeResult, "MpAudioClassifierCloseResult", missing);
 				bind(lib, gApi.close, "MpAudioClassifierClose", missing);
+				bind(lib, gApi.asrCreate, "MpAudioTranscriberCreate", missing);
+				bind(lib, gApi.asrTranscribe, "MpAudioTranscriberTranscribe", missing);
+				bind(lib, gApi.asrFinish, "MpAudioTranscriberFinishStream", missing);
+				bind(lib, gApi.asrCloseResult, "MpAudioTranscriberCloseResult", missing);
+				bind(lib, gApi.asrClose, "MpAudioTranscriberClose", missing);
 				if (!missing.empty())
 					gApiError = "libmediapipe.dll is missing " + missing + " (needs the mediapipe 1.2.2 build)";
 				else
@@ -254,6 +264,176 @@ namespace mpaudio
 			gApi.closeResult(&classified);
 		}
 		gApi.close(classifier, &msg);
+		if (msg)
+			takeError(msg);
+	}
+
+	Transcriber::Transcriber(const std::string& modelPath, int sampleRate, bool interim, const std::string& prompt)
+		: myModelPath(modelPath), mySampleRate(sampleRate), myInterim(interim), myPrompt(prompt)
+	{
+		myThread = std::thread(&Transcriber::run, this);
+	}
+
+	Transcriber::~Transcriber()
+	{
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myStop = true;
+		}
+		myWake.notify_all();
+		if (myThread.joinable())
+			myThread.join();
+	}
+
+	void Transcriber::submit(const float* samples, size_t count)
+	{
+		if (count == 0)
+			return;
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myQueue.insert(myQueue.end(), samples, samples + count);
+		}
+		myWake.notify_one();
+	}
+
+	void Transcriber::finishStream()
+	{
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myFinish = true;
+		}
+		myWake.notify_one();
+	}
+
+	bool Transcriber::latest(Transcript& out) const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		if (myTranscript.serial == out.serial)
+			return false;
+		out = myTranscript;
+		return true;
+	}
+
+	bool Transcriber::loaded() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myLoaded;
+	}
+
+	std::string Transcriber::error() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myError;
+	}
+
+	double Transcriber::backlogSeconds() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return mySampleRate > 0 ? (double)myQueue.size() / mySampleRate : 0.0;
+	}
+
+	bool Transcriber::idle() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myLoaded && !myBusy && myQueue.empty() && !myFinish;
+	}
+
+	void Transcriber::collect(const MpAudioTranscriberResult& result)
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		bool changed = false;
+		for (uint32_t i = 0; i < result.segments_count; i++)
+		{
+			const MpTranscriptionSegment& s = result.segments[i];
+			Segment segment;
+			segment.text = s.transcript ? s.transcript : "";
+			segment.final = s.is_final;
+			segment.fromMs = s.from_timestamp_ms;
+			segment.toMs = s.to_timestamp_ms;
+			if (segment.final)
+			{
+				myTranscript.finals.push_back(std::move(segment));
+				if (myTranscript.finals.size() > kMaxFinals)
+					myTranscript.finals.erase(myTranscript.finals.begin());
+				myTranscript.interim = Segment();
+			}
+			else
+				myTranscript.interim = std::move(segment);
+			changed = true;
+		}
+		if (changed)
+			myTranscript.serial++;
+	}
+
+	void Transcriber::run()
+	{
+		std::string err;
+		if (!loadApi(err))
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myError = err;
+			return;
+		}
+		MpAudioTranscriberOptions options = {};
+		options.base_options.model_asset_path = myModelPath.c_str();
+		options.base_options.delegate = MP_DELEGATE_CPU;
+		options.sample_rate_hz = mySampleRate;
+		options.enable_interim_results = myInterim;
+		options.model_architecture = MP_AUDIO_TRANSCRIBER_MODEL_ARCHITECTURE_AUTO;
+		options.prompt = myPrompt.empty() ? nullptr : myPrompt.c_str();
+		options.cache_dir = nullptr;
+		MpAudioTranscriberPtr transcriber = nullptr;
+		char* msg = nullptr;
+		if (gApi.asrCreate(&options, &transcriber, &msg) != kMpOk)
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myError = "Could not load " + myModelPath + ": " + takeError(msg);
+			return;
+		}
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myLoaded = true;
+		}
+		for (;;)
+		{
+			std::vector<float> chunk;
+			bool finish = false;
+			{
+				std::unique_lock<std::mutex> lock(myMutex);
+				myWake.wait(lock, [this] { return myStop || !myQueue.empty() || myFinish; });
+				if (myStop)
+					break;
+				chunk.swap(myQueue);	// everything queued so far, in order
+				finish = myFinish;
+				myFinish = false;
+				myBusy = true;
+			}
+			auto start = std::chrono::steady_clock::now();
+			MpAudioTranscriberResult result = {};
+			MpStatus status = kMpOk;
+			if (!chunk.empty())
+			{
+				status = gApi.asrTranscribe(transcriber, chunk.data(), chunk.size(), false, &result, &msg);
+				if (status == kMpOk)
+					collect(result);
+				gApi.asrCloseResult(&result);
+			}
+			if (status == kMpOk && finish)
+			{
+				result = {};
+				status = gApi.asrFinish(transcriber, &result, &msg);
+				if (status == kMpOk)
+					collect(result);
+				gApi.asrCloseResult(&result);
+			}
+			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+			std::lock_guard<std::mutex> lock(myMutex);
+			myBusy = false;
+			myTranscript.inferMs = ms;
+			if (status != kMpOk)
+				myError = "Transcription failed: " + takeError(msg);
+		}
+		gApi.asrClose(transcriber, &msg);
 		if (msg)
 			takeError(msg);
 	}

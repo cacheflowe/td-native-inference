@@ -37,14 +37,28 @@ per slot when the first non-video model lands, not before:
       top-results debug TOP). Add yamnet.tflite (Apache-2.0) and the DLL to the release.
 - [ ] Audio embedder (`MpAudioEmbedder*`): same plugin, second task. Merge MpAudio's loader with
       MediaPipeTOP's MpApi into `cpp/common/`.
-- [ ] **Whisper** speech to text: autoregressive, so not an OnnxTOP mode. Likely a whisper.cpp
-      (MIT, CUDA) Custom DAT/CHOP: audio CHOP in, transcript DAT out, with VAD for streaming.
-      MediaPipe 1.2.2 also has `audio_transcriber.h` (streaming, generative ASR: an `OMNI`
-      architecture with an optional prompt, interim results, timestamps). Check which models it
-      loads and whether the Windows DLL runs it before writing a whisper.cpp plugin.
+- [x] **Speech to text**: MediapipeaudioCHOP's Transcribe Speech task wraps MediaPipe 1.2.2's
+      AudioTranscriber (bundled in libmediapipe.dll; no whisper.cpp needed). Models are
+      `.litertlm` bundles from huggingface.co/litert-community: moonshine-tiny (30 MB, MIT,
+      streams interim text), whisper-tiny (42 MB, Apache-2.0, 30 s windows), parakeet-tdt-0.6b-v3
+      (615 MB, CC-BY-4.0, stateful streaming), Qwen3-ASR-0.6B (960 MB, Apache-2.0). Offline
+      (`build/asr_test.exe`, synthesized speech): whisper-tiny word-perfect at 0.06x real time,
+      moonshine-tiny one word off at 0.10x; 48 kHz input is resampled internally. Our own pause
+      detection flushes the stream so sentences finalize (whisper otherwise waits for 30 s).
+- [ ] Live-test Transcribe Speech in TD (restart for the new DLL); a `MediaPipeSpeech` wrapper
+      (`transcript` kind: text DAT, latest-sentence DAT, new-sentence pulse, subtitle debug TOP);
+      try parakeet-tdt and Qwen3-ASR; models fetch for the large ones.
+- [ ] The DLL also has text-to-speech (`text_to_speech.h`; Kokoro-82M, Qwen3-TTS .litertlm).
 - [ ] Also exported and cheap to add: MediaPipe text classifier/embedder, language detector,
       object detector, image classifier/embedder, interactive segmenter.
 - [ ] Other ONNX candidates: RF-DETR (Apache-2.0), RVM (GPL-3.0: fetch only).
+
+## Tracking (area of interest)
+
+- [ ] The Python tracker (`python/object_tracker.py`, `*_tracker_pipeline.py`) is ByteTrack-based
+      with our own changes (keypoint-distance matching, scale-relative matching, coast, presence,
+      gesture debounce). Revisit after real-world testing of the scale-relative default; open
+      questions to be collected from that testing.
 
 ## Housekeeping
 
