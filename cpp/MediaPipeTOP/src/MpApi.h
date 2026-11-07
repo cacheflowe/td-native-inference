@@ -85,8 +85,9 @@ namespace mpapi
 
 	// TD resolves a relative file parameter against the project folder. When that file doesn't
 	// exist, returns the same relative path under this plugin DLL's folder if it exists there
-	// (an installed Plugins/<package>/models/ folder); otherwise returns `resolved` unchanged.
-	std::string		resolveModelPath(const char* resolved, const char* raw);
+	// (an installed Plugins/<package>/models/ folder); otherwise returns `resolved` unchanged and
+	// describes both places looked in via `missing` (empty when the file was found).
+	std::string		resolveModelPath(const char* resolved, const char* raw, std::string& missing);
 
 	// Takes ownership of a C API error string (may be null) and returns it as std::string.
 	std::string		takeError(char* msg);

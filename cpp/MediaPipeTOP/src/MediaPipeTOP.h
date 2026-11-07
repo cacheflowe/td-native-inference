@@ -80,4 +80,5 @@ private:
 	std::string			myModelPath;
 	std::string			myError;
 	std::string			myWarning;
+	std::string			myModelHint;	// where a missing model was looked for
 };

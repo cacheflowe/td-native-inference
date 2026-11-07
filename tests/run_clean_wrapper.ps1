@@ -1,42 +1,73 @@
-# Clean-process test of an exported wrapper tox (see tests/td_clean_wrapper.py).
-#   -Install: copy the plugins + the listed models into <CaseDir>/Plugins/td-native-inference/,
-#             the layout a release user gets in Documents/Derivative/Plugins/. Without it the
-#             fresh project has no plugins at all.
-# TD asks once to allow each plugin DLL in a new location.
+# Clean-process test of an exported wrapper tox (driver: tests/td_clean_wrapper.py).
+#
+# Installs the plugin folder temporarily where users install it,
+# Documents\Derivative\Plugins\td-native-inference\, launches a fresh TouchDesigner on the driver
+# tox in -CaseDir (no plugins or models anywhere near it), loads the wrapper tox, feeds it -Image
+# and prints the JSON report. Afterwards the temporary install is removed and Plugins.json
+# restored. TD asks once to allow each plugin DLL in the new location.
+#
+#   -Package <extracted release folder>  test the release: its td-native-inference\ and tox\
+#   (default)                            test this checkout: plugins\ + the models in -Models
+#   -NoInstall                           don't install plugins (tests the missing-plugin case)
 param(
 	[Parameter(Mandatory)] [string] $CaseDir,
 	[string] $Wrapper = 'MediaPipeHands',
 	[string] $Image = 'build/thumbs_up.jpg',
+	[string] $Package,
 	[string[]] $Models = @('models/mediapipe/gesture_recognizer.task'),
-	[switch] $Install,
+	[switch] $NoInstall,
 	[int] $TimeoutSeconds = 180
 )
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $td = 'C:\Program Files\Derivative\TouchDesigner\bin\TouchDesigner.exe'
+$plugins = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Derivative\Plugins'
+$install = Join-Path $plugins 'td-native-inference'
+$allowList = Join-Path $plugins 'Plugins.json'
+$toxDir = if ($Package) { Join-Path $Package 'tox' } else { Join-Path $repo 'tox' }
 
 if (Test-Path $CaseDir) { Remove-Item -Recurse -Force $CaseDir }
 New-Item -ItemType Directory -Force "$CaseDir\package" | Out-Null
 Copy-Item "$repo\build\clean-wrapper\RunCleanWrapper.tox" $CaseDir
-Copy-Item "$repo\tox\$Wrapper.tox" "$CaseDir\package\"
-if ($Install) {
-	$pluginFolder = "$CaseDir\Plugins\td-native-inference"
-	New-Item -ItemType Directory -Force $pluginFolder | Out-Null
-	foreach ($file in 'OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'libmediapipe.dll') {
-		Copy-Item "$repo\plugins\$file" $pluginFolder
-	}
-	foreach ($model in $Models) {
-		$target = Join-Path $pluginFolder $model
-		New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
-		Copy-Item (Join-Path $repo $model) $target
-	}
-}
+Copy-Item (Join-Path $toxDir "$Wrapper.tox") "$CaseDir\package\"
 
-$result = "$CaseDir\result.json"
-$env:TDNI_WRAPPER_TOX = "$CaseDir\package\$Wrapper.tox"
-$env:TDNI_IMAGE = Join-Path $repo $Image
-$env:TDNI_RESULT = $result
-$process = Start-Process $td -ArgumentList "`"$CaseDir\RunCleanWrapper.tox`"" -WorkingDirectory $CaseDir -PassThru
-$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-while (-not (Test-Path $result) -and -not $process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-if (Test-Path $result) { Get-Content $result } else { "[CleanWrapper] no result (exited=$($process.HasExited))" }
+$installed = $false
+$savedAllowList = if (Test-Path $allowList) { Get-Content -Raw $allowList } else { $null }
+try {
+	if (-not $NoInstall) {
+		if (Test-Path $install) { throw "$install already exists; remove it first (it would mask this test)." }
+		$installed = $true
+		if ($Package) {
+			Copy-Item -Recurse (Join-Path $Package 'td-native-inference') $install
+		} else {
+			New-Item -ItemType Directory -Force $install | Out-Null
+			foreach ($file in 'OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'libmediapipe.dll') {
+				Copy-Item "$repo\plugins\$file" $install
+			}
+			foreach ($model in $Models) {
+				$target = Join-Path $install $model
+				New-Item -ItemType Directory -Force (Split-Path $target) | Out-Null
+				Copy-Item (Join-Path $repo $model) $target
+			}
+		}
+	}
+	$result = "$CaseDir\result.json"
+	$env:TDNI_WRAPPER_TOX = "$CaseDir\package\$Wrapper.tox"
+	$env:TDNI_IMAGE = Join-Path $repo $Image
+	$env:TDNI_RESULT = $result
+	$process = Start-Process $td -ArgumentList "`"$CaseDir\RunCleanWrapper.tox`"" -WorkingDirectory $CaseDir -PassThru
+	$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+	while (-not (Test-Path $result) -and -not $process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
+	if (Test-Path $result) { Get-Content $result } else { "[CleanWrapper] no result (exited=$($process.HasExited))" }
+	if (-not $process.HasExited) { $process.WaitForExit(15000) | Out-Null }
+} finally {
+	if ($installed) {
+		# A TensorRT engine build (onnxtop_tool.exe) may still be writing into the temporary install.
+		Get-Process onnxtop_tool -ErrorAction SilentlyContinue |
+			Where-Object { $_.Path -and $_.Path.StartsWith($install, [StringComparison]::OrdinalIgnoreCase) } |
+			Stop-Process -Force
+		Start-Sleep -Seconds 1
+		Remove-Item -Recurse -Force $install
+	}
+	if ($null -ne $savedAllowList) { Set-Content -NoNewline -Path $allowList -Value $savedAllowList }
+}

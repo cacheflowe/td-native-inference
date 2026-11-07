@@ -88,6 +88,33 @@ class ReleaseTests(unittest.TestCase):
 		with self.assertRaisesRegex(ValueError, 'already exists'):
 			release.package(self.root)
 
+	def test_map_places_binaries_and_models(self):
+		model = self.root / 'models/mediapipe/hand.task'
+		model.parent.mkdir(parents=True)
+		model.write_bytes(b'model')
+		(self.root / '.gitignore').write_text('build/\nplugins/\nmodels/\n', encoding='utf-8')
+		files = [name for name in self.files if name not in release.BINARY_FILES]
+		mapped = {name: 'pkg/' + name.split('/')[-1] for name in release.BINARY_FILES}
+		mapped['models/mediapipe/hand.task'] = 'pkg/models/mediapipe/hand.task'
+		(self.root / 'release-manifest.json').write_text(json.dumps({'files': files, 'map': mapped}), encoding='utf-8')
+		self.commit()
+		self.package()
+		archive, prefix = release.artifact_paths(self.root)
+		with zipfile.ZipFile(archive) as source:
+			self.assertIn(f'{prefix}/pkg/OnnxTOP.dll', source.namelist())
+			self.assertEqual(source.read(f'{prefix}/pkg/models/mediapipe/hand.task'), b'model')
+		with contextlib.redirect_stdout(io.StringIO()):
+			release.verify(self.root)
+
+	def test_rejects_agpl_models(self):
+		model = self.root / 'models/onnx/yolo26/yolo26s.onnx'
+		model.parent.mkdir(parents=True)
+		model.write_bytes(b'agpl')
+		manifest = {'files': self.files, 'map': {'models/onnx/yolo26/yolo26s.onnx': 'pkg/yolo26s.onnx'}}
+		(self.root / 'release-manifest.json').write_text(json.dumps(manifest), encoding='utf-8')
+		with self.assertRaisesRegex(ValueError, 'Excluded'):
+			release.manifest_files(self.root)
+
 	def test_archive_tampering_is_rejected(self):
 		self.package()
 		archive, _ = release.artifact_paths(self.root)

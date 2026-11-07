@@ -1,4 +1,10 @@
-"""Prepare versions, package a committed tree, verify, and publish model-free releases."""
+"""Prepare versions, package a committed tree, verify, and publish releases.
+
+release-manifest.json lists the archive's contents: "files" are copied to the same path, "map"
+copies a source path to a different archive path (the plugin folder users copy into
+Documents/Derivative/Plugins). Built binaries and redistributable model files are untracked; their
+hashes are recorded. Models must be listed one by one from models/; AGPL models never ship.
+"""
 import argparse
 import datetime
 import hashlib
@@ -16,6 +22,9 @@ BINARY_FILES = {
 	'plugins/OnnxTOP.dll', 'plugins/onnxtop_tool.exe',
 	'plugins/MediaPipeTOP.dll', 'plugins/libmediapipe.dll',
 }
+MODEL_SUFFIXES = ('.onnx', '.task', '.tflite')
+# Licenses that don't allow bundling in this Apache-2.0 package (fetch_models.ps1 gets them).
+BLOCKED_MODELS = ('yolo',)
 
 
 def fail(message):
@@ -54,43 +63,62 @@ def next_version(current, bump):
 	return bump
 
 
+def _safe_path(name):
+	if not isinstance(name, str):
+		fail('Manifest paths must be strings.')
+	path = PurePosixPath(name)
+	if (path.is_absolute() or path.as_posix() != name or '..' in path.parts
+		or '\\' in name or ':' in name or not path.parts):
+		fail(f'Unsafe manifest path: {name}')
+	return path
+
+
+def is_untracked_input(name):
+	"""Built binaries and model files: gitignored, so hashed instead of checked against HEAD."""
+	return name in BINARY_FILES or (name.startswith('models/') and name.lower().endswith(MODEL_SUFFIXES))
+
+
 def manifest_files(root):
+	"""[(source, archive path)], sorted by archive path."""
 	manifest = json.loads((root / 'release-manifest.json').read_text(encoding='utf-8'))
-	files = manifest.get('files')
-	if not isinstance(files, list) or not files:
-		fail('release-manifest.json needs a nonempty files list.')
+	files, mapped = manifest.get('files'), manifest.get('map', {})
+	if not isinstance(files, list) or not files or not isinstance(mapped, dict):
+		fail('release-manifest.json needs a nonempty files list (and map, if any, an object).')
+	entries = [(name, name) for name in files] + list(mapped.items())
 	seen = set()
-	for name in files:
-		if not isinstance(name, str):
-			fail('Manifest paths must be strings.')
-		path = PurePosixPath(name)
-		if (path.is_absolute() or path.as_posix() != name or '..' in path.parts
-			or '\\' in name or ':' in name or not path.parts):
-			fail(f'Unsafe manifest path: {name}')
-		if name.casefold() in seen:
-			fail(f'Duplicate manifest path: {name}')
-		seen.add(name.casefold())
-		if (name.startswith(('media/', 'build/', 'cache/'))
+	for source, target in entries:
+		path = _safe_path(source)
+		_safe_path(target)
+		if target.casefold() in seen:
+			fail(f'Duplicate manifest path: {target}')
+		seen.add(target.casefold())
+		suffix = path.suffix.lower()
+		model = source.startswith('models/') and suffix in MODEL_SUFFIXES
+		if (source.startswith(('media/', 'build/', 'cache/'))
 			or any(part in ('trt_cache', '__pycache__', '.git') for part in path.parts)
-			or (name.startswith('models/') and name != 'models/README.md')
-			or (path.suffix.lower() in ('.dll', '.exe') and name not in BINARY_FILES)
-			or path.suffix.lower() in ('.onnx', '.task', '.tflite', '.engine', '.toe')):
-			fail(f'Excluded release content: {name}')
-		if root.resolve() not in (root / name).resolve().parents:
-			fail(f'Manifest path escapes the repository: {name}')
-	required = BINARY_FILES | {'LICENSE', 'NOTICE', 'VERSION', 'CHANGELOG.md', 'README.md'}
-	if not required.issubset(set(files)) or not any(
-		name.startswith('tox/') and not name.startswith('tox/shared/') and name.endswith('.tox')
-		for name in files
+			or (source.startswith('models/') and source != 'models/README.md' and not model)
+			or (model and any(blocked in source.lower() for blocked in BLOCKED_MODELS))
+			or (suffix in MODEL_SUFFIXES and not model)
+			or (suffix in ('.dll', '.exe') and source not in BINARY_FILES)
+			or suffix in ('.engine', '.toe')):
+			fail(f'Excluded release content: {source}')
+		if root.resolve() not in (root / source).resolve().parents:
+			fail(f'Manifest path escapes the repository: {source}')
+	sources = {source for source, _ in entries}
+	targets = {target for _, target in entries}
+	required = {'LICENSE', 'NOTICE', 'VERSION', 'CHANGELOG.md', 'README.md'}
+	if not BINARY_FILES.issubset(sources) or not required.issubset(targets) or not any(
+		target.startswith('tox/') and not target.startswith('tox/shared/') and target.endswith('.tox')
+		for target in targets
 	):
 		fail('Manifest must include licenses, version/docs, all runtime binaries, and a model tox.')
-	missing = [name for name in files if not (root / name).is_file()]
+	missing = [source for source, _ in entries if not (root / source).is_file()]
 	if missing:
 		fail('Release prerequisites missing:\n  ' + '\n  '.join(missing))
 	for name in ('LICENSE', 'NOTICE'):
 		if not (root / name).read_text(encoding='utf-8').strip():
 			fail(f'{name} must not be empty.')
-	return sorted(files)
+	return sorted(entries, key=lambda entry: entry[1])
 
 
 def notes_section(text, heading):
@@ -126,8 +154,8 @@ def artifact_paths(root):
 
 
 def tracked_inputs(root, files):
-	for name in ['release-manifest.json', 'scripts/release.py', *files]:
-		if name in BINARY_FILES:
+	for name in ['release-manifest.json', 'scripts/release.py', *(source for source, _ in files)]:
+		if is_untracked_input(name):
 			continue
 		git(root, 'ls-files', '--error-unmatch', '--', name)
 		committed = subprocess.check_output(['git', 'show', f'HEAD:{name}'], cwd=root)
@@ -152,7 +180,7 @@ def package(root):
 	archive, prefix = artifact_paths(root)
 	if archive.exists():
 		fail(f'{archive.name} already exists; use a new version or remove the local artifact yourself.')
-	payload = {name: (root / name).read_bytes() for name in files}
+	payload = {target: (root / source).read_bytes() for source, target in files}
 	metadata = {
 		'version': version(root), 'source_commit': commit,
 		'files': {name: sha256(data) for name, data in payload.items()},
@@ -186,16 +214,16 @@ def verify(root, tested=False):
 		fail('Archive checksum mismatch.')
 	with zipfile.ZipFile(archive) as source:
 		names = source.namelist()
-		wanted = {f'{prefix}/{name}' for name in files} | {f'{prefix}/release.json'}
+		wanted = {f'{prefix}/{target}' for _, target in files} | {f'{prefix}/release.json'}
 		if len(names) != len(wanted) or set(names) != wanted:
 			fail('Archive contents do not match the manifest.')
 		metadata = json.loads(source.read(f'{prefix}/release.json'))
 		if metadata.get('version') != version(root) or metadata.get('source_commit') != commit:
 			fail('Archive does not belong to this version and HEAD. Package again from the release commit.')
-		actual = {name: sha256(source.read(f'{prefix}/{name}')) for name in files}
+		actual = {target: sha256(source.read(f'{prefix}/{target}')) for _, target in files}
 		if metadata.get('files') != actual:
 			fail('Archive file hashes do not match release.json.')
-		if actual != {name: sha256((root / name).read_bytes()) for name in files}:
+		if actual != {target: sha256((root / name).read_bytes()) for name, target in files}:
 			fail('Release inputs changed after packaging.')
 	if archive.with_suffix('.notes.md').read_text(encoding='utf-8') != release_notes(root):
 		fail('Release notes changed after packaging.')

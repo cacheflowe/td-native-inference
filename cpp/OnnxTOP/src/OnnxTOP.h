@@ -115,6 +115,7 @@ private:
 
 	std::string					myError;
 	std::string					myWarning;
+	std::string					myModelHint;	// where a missing model was looked for
 	int							myModelW = 0, myModelH = 0;
 	double						myInferMs = 0.0;
 	double						myExecuteMs = 0.0;

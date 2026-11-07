@@ -214,17 +214,23 @@ namespace
 	// TD resolves a relative file parameter against the project folder. When that file doesn't
 	// exist, fall back to the same relative path under the plugin's folder, so a tox can preset
 	// "models/..." and work from an installed Plugins/<package>/models/ folder.
-	std::string resolveModelPath(const char* resolved, const char* raw)
+	// `missing` gets both places looked in when neither has the file.
+	std::string resolveModelPath(const char* resolved, const char* raw, std::string& missing)
 	{
 		std::string path = resolved ? resolved : "";
+		missing.clear();
 		std::error_code ec;
 		if (path.empty() || fs::exists(path, ec) || !raw || !*raw)
 			return path;
 		fs::path rel(raw);
 		if (rel.is_absolute())
 			return path;
-		fs::path candidate = pluginDir() / rel;
-		return fs::exists(candidate, ec) ? candidate.lexically_normal().generic_string() : path;
+		fs::path candidate = (pluginDir() / rel).lexically_normal();
+		if (fs::exists(candidate, ec))
+			return candidate.generic_string();
+		missing = "Looked for " + rel.generic_string() + " in the project folder and in " +
+			pluginDir().generic_string() + " (run fetch_models.ps1 there for models not in the release).";
+		return path;
 	}
 
 	constexpr float kLetterboxPad = 114.f / 255.f;	// Ultralytics letterbox gray
@@ -597,7 +603,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
 
 	EngineConfig desired;
-	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"));
+	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
 	desired.provider = provider;
 	desired.fp16 = fp16;
 	desired.cacheDir = cacheDir ? cacheDir : "";
@@ -1037,7 +1043,7 @@ void OnnxTOP::getWarningString(OP_String* warning, void*)
 void OnnxTOP::getErrorString(OP_String* error, void*)
 {
 	if (!myError.empty())
-		error->setString(myError.c_str());
+		error->setString((myModelHint.empty() ? myError : myError + "\n" + myModelHint).c_str());
 }
 
 void OnnxTOP::getInfoPopupString(OP_String* info, void*)

@@ -38,17 +38,22 @@ namespace
 
 namespace mpapi
 {
-	std::string resolveModelPath(const char* resolved, const char* raw)
+	std::string resolveModelPath(const char* resolved, const char* raw, std::string& missing)
 	{
 		std::string path = resolved ? resolved : "";
+		missing.clear();
 		std::error_code ec;
 		if (path.empty() || fs::exists(path, ec) || !raw || !*raw)
 			return path;
 		fs::path rel(raw);
 		if (rel.is_absolute())
 			return path;
-		fs::path candidate = pluginDir() / rel;
-		return fs::exists(candidate, ec) ? candidate.lexically_normal().generic_string() : path;
+		fs::path candidate = (pluginDir() / rel).lexically_normal();
+		if (fs::exists(candidate, ec))
+			return candidate.generic_string();
+		missing = "Looked for " + rel.generic_string() + " in the project folder and in " +
+			pluginDir().generic_string() + ".";
+		return path;
 	}
 
 	bool load(std::string& err)
