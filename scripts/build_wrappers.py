@@ -3,8 +3,8 @@
 	curl -X POST --data-binary @scripts/build_wrappers.py http://127.0.0.1:3031/run
 
 Edit the settings below. NAMES empty = every spec. Wrappers are rebuilt in /project1/WrapperLab,
-keeping their position and wires. DEMO rebuilds /project1/ModelDemo (every spec, all models off,
-keeping its input wire) and exports tox/ModelDemo.tox. The project is not saved.
+keeping their position and wires. DEMO rebuilds /project1/VisionDemo (every spec, all models off,
+keeping its input wire) and exports tox/VisionDemo.tox. The project is not saved.
 """
 
 import importlib
@@ -54,8 +54,8 @@ if DEMO:
 	demo = wrapper_builder.build_demo(op('/project1'), wrapper_builder.spec_names())
 	entry = {'path': demo.path, 'nodes': len(demo.findChildren())}
 	if EXPORT:
-		destination = Path(project.folder) / 'tox' / 'ModelDemo.tox'
+		destination = Path(project.folder) / 'tox' / 'VisionDemo.tox'
 		wrapper_builder.export_demo(demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
-	report['ModelDemo'] = entry
+	report['VisionDemo'] = entry
 print(json.dumps(report, indent=1))

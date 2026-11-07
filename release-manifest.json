@@ -14,7 +14,7 @@
 		"tox/MediaPipeHolistic.tox",
 		"tox/MediaPipePose.tox",
 		"tox/MediaPipeSegment.tox",
-		"tox/ModelDemo.tox",
+		"tox/VisionDemo.tox",
 		"tox/MoveNet.tox",
 		"tox/Yolo26Detect.tox",
 		"tox/Yolo26Pose.tox",

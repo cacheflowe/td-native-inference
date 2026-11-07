@@ -3,7 +3,7 @@
 ## Status (Nov 7, 2026)
 
 Done: the move out of haxlib; Custom OP plugins with models resolved next to the DLL; 13 model
-toxes and ModelDemo generated from `wrappers/*.json`; clean-process tests; Apache-2.0 LICENSE and
+toxes and VisionDemo generated from `wrappers/*.json`; clean-process tests; Apache-2.0 LICENSE and
 NOTICE; release tooling that bundles the redistributable models. The previous plan (Package Root,
 CPlusPlus TOP wrappers) is in git history before commit 7ddfb48.
 
@@ -62,8 +62,9 @@ per slot when the first non-video model lands, not before:
 
 ## Housekeeping
 
-- [ ] Retire `/project1/ONNX_Native` (legacy chains) and `python/mediapipe_hands_component.py`
-      once nothing needs them; delete the stale `cache/trt/` engine folder.
+- [x] Retired `/project1/ONNX_Native` and `python/mediapipe_hands_component.py` (Nov 7).
+- [ ] Delete the stale `cache/trt/` engine folder.
+- [ ] AudioDemo COMP once MediaPipeAudio/MediaPipeSpeech toxes exist (v0.2).
 - [ ] TensorRT cache: a per-user cache (`%LOCALAPPDATA%`) keyed by model content, for read-only
       installs. Today it's `trt_cache/` next to each model, which is writable in Documents.
 - [ ] Plugin metadata version from `VERSION`; CI build (GitHub Actions, CUDA toolkit).

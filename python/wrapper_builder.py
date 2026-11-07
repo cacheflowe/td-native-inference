@@ -413,7 +413,7 @@ def build(spec, parent_comp, name=None):
 	return comp
 
 
-def build_demo(parent_comp, names, name='ModelDemo'):
+def build_demo(parent_comp, names, name='VisionDemo'):
 	"""(Re)build the workbench: one wrapper per spec, each enabled from the Models page. A disabled
 	wrapper doesn't cook at all (allowCooking, set from outside it: a COMP can't wake itself)."""
 	specs = [load_spec(spec_name) for spec_name in names]

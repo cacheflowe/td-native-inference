@@ -2,11 +2,11 @@
 frames (never blocks TD). POST to the bridge's /run; the report lands in
 build/wrapper-lab.json when done (poll for it).
 
-Each wrapper gets a suitable example image (docs/images/sources/<name>, else the official
-MediaPipe test image build/<name>) and is cooked until it reports a detection (or, for image
-models, a non-empty result), or until MAX_FRAMES, then SETTLE_FRAMES more. With THUMBNAILS on,
-docs/images/models/<Name>.jpg shows its overlay over the input (image results beside it), for the
-README. Afterwards the lab source is restored.
+Each wrapper gets a suitable example image, docs/images/sources/hand.jpg, face.jpg or body.jpg
+(replace those files to change the README thumbnails), and is cooked until it reports a detection
+(or, for image models, a non-empty result), or until MAX_FRAMES, then SETTLE_FRAMES more. With
+THUMBNAILS on, docs/images/models/<Name>.jpg shows its overlay over the input (image results beside
+it). Afterwards the lab source is restored.
 """
 
 import json
@@ -14,9 +14,10 @@ from pathlib import Path
 
 MAX_FRAMES = 1200
 SETTLE_FRAMES = 90
-IMAGES = {'MediaPipeHands': 'thumbs_up.jpg', 'MediaPipeFace': 'portrait.jpg', 'MediaPipeFaceDetector': 'portrait.jpg',
-	'YuNet': 'portrait.jpg', 'HSEmotion': 'portrait.jpg', 'MediaPipeSegment': 'portrait.jpg'}
-DEFAULT_IMAGE = 'pose.jpg'
+SOURCES = Path(project.folder) / 'docs' / 'images' / 'sources'
+IMAGES = {'MediaPipeHands': 'hand.jpg', 'MediaPipeFace': 'face.jpg', 'MediaPipeFaceDetector': 'face.jpg',
+	'YuNet': 'face.jpg', 'HSEmotion': 'face.jpg', 'MediaPipeSegment': 'face.jpg'}
+DEFAULT_IMAGE = 'body.jpg'
 LAB = '/project1/WrapperLab'
 REPORT = Path(project.folder) / 'build' / 'wrapper-lab.json'
 
@@ -45,11 +46,7 @@ def _begin_next():
 	if not state['queue']:
 		return _finish()
 	name = state['queue'][0]
-	image = IMAGES.get(name, DEFAULT_IMAGE)
-	# Images in docs/images/sources/ (publishable, for the README thumbnails) replace the
-	# MediaPipe test images in build/ of the same name.
-	override = Path(project.folder) / 'docs' / 'images' / 'sources' / image
-	op(LAB).op('source').par.file = override.as_posix() if override.exists() else 'build/' + image
+	op(LAB).op('source').par.file = (SOURCES / IMAGES.get(name, DEFAULT_IMAGE)).as_posix()
 	state['frames'] = 0
 	op(LAB).store('lab_test', state)
 	run('args[0]()', _poll, delayFrames=2)

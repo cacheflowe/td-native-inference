@@ -14,7 +14,7 @@ td-native-inference-vX.Y.Z/
     OnnxTOP.dll  onnxtop_tool.exe  MediaPipeTOP.dll  libmediapipe.dll
     fetch_models.ps1        (exports YOLO26, AGPL, which isn't bundled)
     models/mediapipe/...  models/onnx/...
-  tox/                      the 13 model toxes + ModelDemo.tox
+  tox/                      the 13 model toxes + VisionDemo.tox
   README.md  docs/MODELS.md  LICENSE  NOTICE  CHANGELOG.md  VERSION  release.json
 ```
 

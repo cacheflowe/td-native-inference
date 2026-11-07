@@ -194,7 +194,7 @@ The node itself outputs raw per-frame detections; tracking stays in Python, wher
   mode rebuilds the **Tracking** page and remembers each mode's tuned values separately. A
   Parameter Execute DAT (`parexec_mode`) calls `onnxtop_tables.setup_parameters()` on change.
 
-In td-native-inference.toe, `/project1/ONNX_Native/OnnxTopTables` contains `in_info`, then `script_tracks`
+In each generated model tox, the `tracker` COMP contains `in_info`, then `script_tracks`
 (advances the tracker), then `script_joints` / `script_bones`. Those two are wired after
 `script_tracks` so they format the same frame. The outputs are 0 tracks, 1 joints and 2 bones,
 in the same formats the Python COMPs write, so `DebugBB` and `DebugKeypoints` work unchanged

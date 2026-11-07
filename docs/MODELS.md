@@ -132,7 +132,7 @@ plus one `emotion_<name>` score for anger, disgust, fear, happiness, neutral, sa
 surprise. **Classify Interval** runs the classifier every Nth frame to save GPU time;
 **Class Score Smoothing** steadies the scores. GPU. HSEmotion enet_b2_7, Apache-2.0.
 
-## ModelDemo (`ModelDemo.tox`)
+## VisionDemo (`VisionDemo.tox`)
 
 All 13 models in one COMP for trying them side by side. Wire a video TOP in and switch models on
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
