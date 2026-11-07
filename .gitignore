@@ -1,0 +1,39 @@
+# TouchDesigner
+Backup/
+CrashAutoSave*
+*.dmp
+# TD's numbered saves (td-native-inference.12.toe); the plain .toe is tracked
+*.[0-9]*.toe
+# TD's per-machine plugin allow-list (computer name + hashes)
+Plugins.json
+# td-http-api bridge: rewritten on every project save (Save Tox With Project) and
+# embedded in the .toe anyway; its source of truth is the td-http-api repo
+src/TdHttpApi.tox
+
+# Local agent/editor settings
+.claude/settings.local.json
+
+# Build output and built plugins (rebuild with cpp/*/build.cmd)
+build/
+cpp/**/build/
+plugins/*.dll
+plugins/*.exe
+plugins/*.old-*
+
+# Models (large; see models/README.md) and TensorRT engine caches
+models/**/*.onnx
+models/**/*.task
+models/**/*.tflite
+models/**/*.engine
+models/**/*.onnx_data
+models/**/*.bin
+**/trt_cache/
+cache/
+
+# Test videos (not ours to publish)
+media/
+
+# Python
+__pycache__/
+.venv/
+tmp/

@@ -1,0 +1,31 @@
+{
+  "files": [
+    "VERSION",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "docs/RELEASING.md",
+    "plugins/OnnxTOP.dll",
+    "plugins/onnxtop_tool.exe",
+    "plugins/MediaPipeTOP.dll",
+    "plugins/libmediapipe.dll",
+    "tox/MediaPipeHands.tox",
+    "tox/MediaPipePose.tox",
+    "tox/MediaPipeFace.tox",
+    "tox/MediaPipeFaceDetector.tox",
+    "tox/MediaPipeHolistic.tox",
+    "tox/MediaPipeSegment.tox",
+    "tox/Yolo26Pose.tox",
+    "tox/Yolo26Detect.tox",
+    "tox/Yolo26Seg.tox",
+    "tox/MoveNet.tox",
+    "tox/YuNet.tox",
+    "tox/DepthAnything.tox",
+    "tox/HSEmotion.tox",
+    "tox/ModelDemo.tox",
+    "models/README.md",
+    "cpp/OnnxTOP/README.md",
+    "cpp/MediaPipeTOP/README.md"
+  ]
+}
