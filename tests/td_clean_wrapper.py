@@ -129,6 +129,8 @@ def _record(wrapper, frames):
 		table = wrapper.op(name)
 		if table is not None:
 			report[wrapper.name][name] = [[cell.val for cell in row] for row in table.rows()][:4]
+	# A partial report after each case shows how far a run got if it never finishes.
+	Path(os.environ['TDNI_RESULT'] + '.partial').write_text(json.dumps(report, indent=1, default=str), encoding='utf-8')
 	me.parent().store('report', report)
 
 

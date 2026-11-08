@@ -63,7 +63,12 @@ try {
 	$process = Start-Process $td -ArgumentList "`"$CaseDir\RunCleanWrapper.tox`"" -WorkingDirectory $CaseDir -PassThru
 	$deadline = (Get-Date).AddSeconds($TimeoutSeconds)
 	while (-not (Test-Path $result) -and -not $process.HasExited -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }
-	if (Test-Path $result) { Get-Content $result } else { "[CleanWrapper] no result (exited=$($process.HasExited))" }
+	if (Test-Path $result) { Get-Content $result }
+	else {
+		"[CleanWrapper] no result (exited=$($process.HasExited)); an unanswered Allow prompt is the usual cause"
+		if (Test-Path "$result.partial") { "[CleanWrapper] finished cases:"; Get-Content "$result.partial" }
+		else { "[CleanWrapper] no case finished (stuck before or in the first case)" }
+	}
 	if (-not $process.HasExited) { $process.WaitForExit(15000) | Out-Null }
 } finally {
 	# The test's own TD (a timeout, or stuck on a dialog) would keep the install's DLLs locked.
