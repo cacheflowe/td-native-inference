@@ -87,6 +87,7 @@ namespace mpaudio
 		Segment					interim;
 		double					inferMs = 0.0;	// last Transcribe call
 		uint64_t				serial = 0;		// increments whenever the transcript changes
+		uint64_t				totalFinals = 0;	// every final segment so far, including ones dropped from finals
 	};
 
 	// Streaming speech to text (MediaPipe AudioTranscriber: Whisper, Moonshine, Parakeet, ... as
@@ -102,6 +103,7 @@ namespace mpaudio
 
 		void		submit(const float* samples, size_t count);
 		void		finishStream();	// flush: finalizes the current utterance
+		void		skip(size_t count);	// audio left out between utterances: keeps timestamps in real time
 		bool		latest(Transcript& out) const;
 		bool		loaded() const;
 		std::string	error() const;
@@ -132,6 +134,7 @@ namespace mpaudio
 		// audio of earlier streams so times count from when this transcriber started.
 		uint64_t					myStreamSamples = 0;
 		uint64_t					myOffsetSamples = 0;
+		uint64_t					mySkipSamples = 0;	// skipped since the last stream, added before the next one
 		Transcript					myTranscript;
 		std::thread					myThread;
 	};

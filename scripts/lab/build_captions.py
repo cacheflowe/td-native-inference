@@ -7,14 +7,18 @@ lab = op('/project1/AudioLab')
 COL, ROW, BAND = 150, 100, -500
 
 CALLBACKS = '''# Closed captions from the transcript Info DAT (segment, final, start_ms, end_ms, text): the
-# newest sentences plus the interim guess, trimmed to the last Max Characters at a word boundary,
-# cleared after Hold seconds without new text. Frame (absTime.frame) makes it cook every frame.
+# newest sentences plus the interim guess, trimmed to the last Max Characters at a word boundary.
+# Text arriving after New Caption After seconds of quiet starts a fresh caption; the caption
+# clears after Hold seconds without new text. Frame (absTime.frame) makes it cook every frame.
 
 def onSetupParameters(scriptOp):
 	page = scriptOp.appendCustomPage('Captions')
 	p = page.appendInt('Maxchars', label='Max Characters')
 	p[0].default = p[0].val = 90
 	p[0].normMin, p[0].normMax = 20, 200
+	p = page.appendFloat('Newcaption', label='New Caption After (Seconds)')
+	p[0].default = p[0].val = 1.0
+	p[0].normMin, p[0].normMax = 0.0, 5.0
 	p = page.appendFloat('Hold', label='Hold (Seconds)')
 	p[0].default = p[0].val = 4.0
 	p[0].normMin, p[0].normMax = 0.5, 15.0
@@ -38,10 +42,14 @@ def onCook(scriptOp):
 	if newest < state.get('cutoff', 0):
 		state['cutoff'] = 0	# transcript cleared or restarted
 	if signature != state.get('signature'):
+		gap = scriptOp.par.Newcaption.eval()
+		if gap > 0 and now - state.get('changed', now) > gap:
+			state['cutoff'] = state.get('newest', 0)	# new speech after a quiet gap: fresh caption
 		state['signature'] = signature
 		state['changed'] = now
 	elif now - state.get('changed', now) > scriptOp.par.Hold.eval():
 		state['cutoff'] = newest	# caption timed out: only segments after this one from now on
+	state['newest'] = newest
 	cutoff = state.get('cutoff', 0)
 	visible = ' '.join(text for number, final, text in rows if not final or number > cutoff)
 	limit = max(1, scriptOp.par.Maxchars.eval())
@@ -54,8 +62,11 @@ def onCook(scriptOp):
 '''
 
 def node(op_type, name, column, row):
-	n = lab.op(name) or lab.create(op_type, name)
-	n.nodeX, n.nodeY = column * COL, BAND - row * ROW
+	# Only new nodes are placed: existing ones keep the position they've been given by hand.
+	n = lab.op(name)
+	if n is None:
+		n = lab.create(op_type, name)
+		n.nodeX, n.nodeY = column * COL, BAND - row * ROW
 	return n
 
 lines = node('scriptDAT', 'caption_lines', 2, 0)
@@ -63,8 +74,9 @@ callbacks = lab.op('caption_lines_callbacks')
 callbacks.text = CALLBACKS
 lines.inputConnectors[0].connect(lab.op('transcript'))
 lines.par.setuppars.pulse()
-callbacks.nodeX, callbacks.nodeY = lines.nodeX, lines.nodeY - ROW
-callbacks.dock = lines
+if callbacks.dock != lines:
+	callbacks.nodeX, callbacks.nodeY = lines.nodeX, lines.nodeY - ROW
+	callbacks.dock = lines
 
 text = node('textTOP', 'caption_text', 3, 0)
 text.par.outputresolution = 'custom'

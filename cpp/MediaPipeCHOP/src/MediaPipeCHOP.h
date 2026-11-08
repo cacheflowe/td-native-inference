@@ -4,10 +4,12 @@
 //   Classify Sounds    YAMNet (521 sound classes). Every Hop seconds the latest Window seconds are
 //                      classified on a worker thread; one output channel per class ("Speech",
 //                      "Music", "Dog", ...). The Info DAT lists the top results.
-//   Transcribe Speech  streaming speech to text (Whisper, Moonshine, Parakeet, ... .litertlm). All
-//                      audio goes to the transcriber in order; after speech and a pause (or Max
-//                      Segment seconds) the stream is flushed so the sentence is finalized. The Info
-//                      DAT holds the transcript; channels report speaking / new segments / backlog.
+//   Transcribe Speech  streaming speech to text (Whisper, Moonshine, Parakeet, ... .litertlm). Speech
+//                      is detected against the tracked noise floor; with Skip Silence only speech
+//                      (plus a short lead-in) reaches the transcriber, which keeps models from
+//                      inventing text from room noise. After speech and a pause (or Max Segment
+//                      seconds) the stream is flushed so the sentence is finalized. The Info DAT
+//                      holds the transcript; channels report speaking / new segments / backlog.
 #pragma once
 
 #include "CHOP_CPlusPlusBase.h"
@@ -67,13 +69,16 @@ private:
 	// Transcribe Speech
 	std::unique_ptr<mpaudio::Transcriber>	myTranscriber;
 	mpaudio::Transcript			myTranscript;
-	size_t						myLastFinals = 0;
+	uint64_t					myLastFinals = 0;	// the current transcriber's totalFinals at the last cook
 	uint64_t					myTotalFinals = 0;	// keeps counting past Transcriber::kMaxFinals
 	bool						myNewSegment = false;
 	bool						mySpeaking = false;
 	double						mySilentFor = 0.0;	// seconds below Silence Level since speech
 	double						mySegmentFor = 0.0;	// seconds since the last flush, while speaking
 	float						myLevel = 0.0f;
+	float						myNoiseFloor = -1.0f;	// tracked input RMS between words; < 0 = not measured yet
+	float						myThreshold = 0.0f;		// RMS that counts as speech this cook
+	std::vector<float>			myPreroll;		// Skip Silence: the latest unsent audio, sent when speech starts
 
 	// Input tracking
 	double						mySampleRate = 0.0;

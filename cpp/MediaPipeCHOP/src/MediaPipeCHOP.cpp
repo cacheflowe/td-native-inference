@@ -12,9 +12,11 @@ namespace
 	const char* kTaskNames[] = { "classify", "transcribe" };
 	const char* kTaskLabels[] = { "Classify Sounds", "Transcribe Speech" };
 	const char* kClassifyPars[] = { "Classifiermodel", "Window", "Hop", "Topresults" };
-	const char* kTranscribePars[] = { "Transcribermodel", "Interim", "Prompt", "Autoflush", "Pause",
-		"Maxsegment", "Silencelevel", "Flush", "Clear" };
-	const char* kTranscribeChannels[] = { "speaking", "level", "segments", "new_segment", "backlog" };
+	const char* kTranscribePars[] = { "Transcribermodel", "Interim", "Prompt", "Skipsilence", "Autoflush",
+		"Pause", "Maxsegment", "Silencelevel", "Noiseratio", "Flush", "Clear" };
+	const char* kTranscribeChannels[] = { "speaking", "level", "segments", "new_segment", "backlog",
+		"threshold" };
+	const double kPrerollSeconds = 0.3;	// Skip Silence: audio kept from before speech was detected
 
 	// "Child speech, kid speaking" -> "Child_speech_kid_speaking": letters, digits and underscores,
 	// no leading digit, as TD channel names expect.
@@ -139,6 +141,8 @@ void MediaPipeCHOP::resetStream()
 	mySpeaking = false;
 	mySilentFor = mySegmentFor = 0.0;
 	myLevel = 0.0f;
+	myNoiseFloor = -1.0f;
+	myPreroll.clear();
 }
 
 void MediaPipeCHOP::updateChannelNames()
@@ -206,16 +210,24 @@ void MediaPipeCHOP::transcribe(const OP_Inputs* inputs, const std::vector<float>
 	}
 	if (!myTranscriber)
 		return;
-	myTranscriber->submit(fresh.data(), fresh.size());
-
-	// Pause detection: after speech, Pause seconds below Silence Level (or Max Segment seconds of
-	// continuous speech) flush the stream so the sentence comes out as a final segment.
+	// Speech detection: input RMS above Noise Ratio x the noise floor (and at least Silence Level).
+	// The floor follows quiet stretches quickly and louder ones slowly, so a steady noise source
+	// (a fan, a hum) raises it over tens of seconds without speech doing the same.
 	double sum = 0.0;
 	for (float v : fresh)
 		sum += (double)v * v;
 	myLevel = fresh.empty() ? myLevel : (float)std::sqrt(sum / fresh.size());
 	const double seconds = mySampleRate > 0 ? fresh.size() / mySampleRate : 0.0;
-	const bool voiced = myLevel > (float)inputs->getParDouble("Silencelevel");
+	if (!fresh.empty())
+	{
+		if (myNoiseFloor < 0.0f)
+			myNoiseFloor = myLevel;
+		const double tau = myLevel < myNoiseFloor ? 0.25 : (mySpeaking ? 60.0 : 10.0);
+		myNoiseFloor += (myLevel - myNoiseFloor) * (float)std::min(1.0, seconds / tau);
+	}
+	myThreshold = std::max((float)inputs->getParDouble("Silencelevel"),
+		std::max(0.0f, myNoiseFloor) * (float)inputs->getParDouble("Noiseratio"));
+	const bool voiced = myLevel > myThreshold;
 	if (voiced)
 	{
 		mySpeaking = true;
@@ -225,28 +237,56 @@ void MediaPipeCHOP::transcribe(const OP_Inputs* inputs, const std::vector<float>
 		mySilentFor += seconds;
 	if (mySpeaking)
 		mySegmentFor += seconds;
+
+	// Skip Silence: between utterances audio waits in a short pre-roll (so the first syllable isn't
+	// cut) instead of reaching the model, which would otherwise transcribe noise into text.
+	const bool skipSilence = inputs->getParInt("Skipsilence") != 0;
+	if (!skipSilence || mySpeaking)
+	{
+		if (!myPreroll.empty())
+		{
+			myTranscriber->submit(myPreroll.data(), myPreroll.size());
+			myPreroll.clear();
+		}
+		myTranscriber->submit(fresh.data(), fresh.size());
+	}
+	else
+	{
+		myPreroll.insert(myPreroll.end(), fresh.begin(), fresh.end());
+		const size_t keep = (size_t)std::llround(kPrerollSeconds * mySampleRate);
+		if (myPreroll.size() > keep)
+		{
+			const size_t drop = myPreroll.size() - keep;
+			myTranscriber->skip(drop);
+			myPreroll.erase(myPreroll.begin(), myPreroll.begin() + drop);
+		}
+	}
+
+	// Pause seconds of silence after speech (or Max Segment seconds of continuous speech) flush
+	// the stream so the sentence comes out as a final segment.
 	const bool autoflush = inputs->getParInt("Autoflush") != 0;
-	const bool paused = autoflush && mySpeaking && mySilentFor >= inputs->getParDouble("Pause");
+	const bool paused = mySpeaking && mySilentFor >= inputs->getParDouble("Pause");
 	const bool tooLong = autoflush && mySegmentFor >= std::max(1.0, inputs->getParDouble("Maxsegment"));
-	if (myFlush || paused || tooLong)
+	if (paused)
+		mySpeaking = false;
+	if (myFlush || tooLong || (paused && (autoflush || skipSilence)))
 	{
 		myTranscriber->finishStream();
 		myFlush = false;
 		mySegmentFor = 0.0;
-		if (paused)
-			mySpeaking = false;
 	}
 
 	myNewSegment = false;
 	if (myTranscriber->latest(myTranscript))
 	{
-		const size_t finals = myTranscript.finals.size();
-		if (finals != myLastFinals)
+		// Count from the transcriber's running total: finals.size() stops growing at kMaxFinals.
+		const uint64_t finals = myTranscript.totalFinals;
+		if (finals > myLastFinals)
 		{
-			myTotalFinals += finals > myLastFinals ? finals - myLastFinals : 1;
+			myTotalFinals += finals - myLastFinals;
 			myNewSegment = true;
-			myLastFinals = finals;
 		}
+		myLastFinals = finals;
 	}
 	myError = myTranscriber->error();
 	if (!myTranscriber->loaded() && myError.empty())
@@ -300,7 +340,8 @@ void MediaPipeCHOP::execute(CHOP_Output* output, const OP_Inputs* inputs, void*)
 	if (task == Task::Transcribe)
 	{
 		const float values[] = { mySpeaking ? 1.0f : 0.0f, myLevel, (float)myTotalFinals,
-			myNewSegment ? 1.0f : 0.0f, myTranscriber ? (float)myTranscriber->backlogSeconds() : 0.0f };
+			myNewSegment ? 1.0f : 0.0f, myTranscriber ? (float)myTranscriber->backlogSeconds() : 0.0f,
+			myThreshold };
 		for (int32_t c = 0; c < output->numChannels && c < (int32_t)std::size(values); c++)
 			output->channels[c][0] = values[c];
 		return;
@@ -522,14 +563,22 @@ void MediaPipeCHOP::setupParameters(OP_ParameterManager* manager, void*)
 			"the model's default. Takes effect when the model loads.";
 		check(manager->appendString(sp));
 	}
+	toggle("Skipsilence", "Skip Silence", page, true,
+		"Only send speech (plus a short lead-in) to the model. Models tend to invent text from room "
+		"noise; this also saves CPU. Off = send everything.");
 	toggle("Autoflush", "Finalize On Pause", page, true,
 		"After speech, a pause finalizes the sentence (and Max Segment caps continuous speech). Off = "
-		"only the model's own segmentation and the Flush pulse.");
-	real("Pause", "Pause (Seconds)", page, 0.6, 0.1, 3.0, "Silence after speech that ends a sentence.");
+		"only the model's own segmentation and the Flush pulse (Skip Silence still finalizes on a pause).");
+	real("Pause", "Pause (Seconds)", page, 0.5, 0.1, 3.0,
+		"Silence after speech that ends a sentence. Shorter = captions sooner, but sentences may split.");
 	real("Maxsegment", "Max Segment (Seconds)", page, 12.0, 1.0, 30.0,
 		"Finalize continuous speech after this long, even without a pause.");
-	real("Silencelevel", "Silence Level", page, 0.01, 0.0, 0.1,
-		"Input RMS below this counts as silence (the level channel shows the current RMS).");
+	real("Silencelevel", "Silence Level", page, 0.003, 0.0, 0.1,
+		"The lowest input RMS that counts as speech. The threshold channel shows the level in use; "
+		"the level channel shows the current RMS.");
+	real("Noiseratio", "Noise Ratio", page, 4.0, 1.0, 20.0,
+		"Speech must be this many times louder than the tracked noise floor. Raise it if background "
+		"noise gets transcribed, lower it if quiet speech is missed.");
 	pulse("Flush", "Flush", page, "Finalize whatever has been heard so far.");
 	pulse("Clear", "Clear Transcript", page, "Forget the transcript and start a new stream.");
 }

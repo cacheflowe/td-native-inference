@@ -305,6 +305,12 @@ namespace mpaudio
 		myWake.notify_one();
 	}
 
+	void Transcriber::skip(size_t count)
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		mySkipSamples += count;
+	}
+
 	bool Transcriber::latest(Transcript& out) const
 	{
 		std::lock_guard<std::mutex> lock(myMutex);
@@ -354,6 +360,7 @@ namespace mpaudio
 			if (segment.final)
 			{
 				myTranscript.finals.push_back(std::move(segment));
+				myTranscript.totalFinals++;
 				if (myTranscript.finals.size() > kMaxFinals)
 					myTranscript.finals.erase(myTranscript.finals.begin());
 				myTranscript.interim = Segment();
@@ -416,6 +423,12 @@ namespace mpaudio
 			{
 				{
 					std::lock_guard<std::mutex> lock(myMutex);
+					if (myStreamSamples == 0)
+					{
+						// A new stream: count the audio skipped since the last one.
+						myOffsetSamples += mySkipSamples;
+						mySkipSamples = 0;
+					}
 					myStreamSamples += chunk.size();
 				}
 				status = gApi.asrTranscribe(transcriber, chunk.data(), chunk.size(), false, &result, &msg);
