@@ -7,6 +7,8 @@
 - `fetch_models.cmd`: double-click to download YOLO26 and the Kokoro voice. Right-clicking
   `fetch_models.ps1` > Run with PowerShell failed on machines whose execution policy refuses
   unsigned scripts from a downloaded zip (`RemoteSigned`, common); the window closed with the error.
+- `fetch_models.ps1` checks downloads with .NET's SHA-256 instead of `Get-FileHash`, which can be
+  missing when Windows PowerShell is started from a PowerShell 7 terminal.
 
 ## v0.2.0 (2026-11-07)
 

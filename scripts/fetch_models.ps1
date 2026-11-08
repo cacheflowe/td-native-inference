@@ -39,6 +39,13 @@ $kokoro = @(
 	   sha256 = 'e7b931ee5d4b7104012a838c9eee240d19ea69cb3ca269041a3274f83dbb7fa1' }
 )
 
+function Get-Sha256([string] $path) {
+	# .NET directly: Get-FileHash can be missing when Windows PowerShell inherits PowerShell 7's module path.
+	$stream = [IO.File]::OpenRead($path)
+	try { return ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($stream)) -replace '-', '').ToLower() }
+	finally { $stream.Dispose() }
+}
+
 function Get-Missing($files) { @($files | Where-Object { -not (Test-Path (Join-Path $models $_.path)) }) }
 
 function Save-Models($files) {
@@ -48,7 +55,7 @@ function Save-Models($files) {
 		Write-Host ("[fetch_models] downloading {0} ({1:N0} MB)..." -f $d.path, ($d.size / 1MB))
 		$partial = "$destination.part"
 		Invoke-WebRequest -Uri $d.url -OutFile $partial -UseBasicParsing
-		$hash = (Get-FileHash $partial -Algorithm SHA256).Hash.ToLower()
+		$hash = Get-Sha256 $partial
 		if ($hash -ne $d.sha256) {
 			Remove-Item -Force $partial
 			throw "$($d.path): checksum mismatch (got $hash). Nothing was installed; try again later."
