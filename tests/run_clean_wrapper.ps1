@@ -77,6 +77,12 @@ try {
 			Stop-Process -Force
 		Start-Sleep -Seconds 1
 		try { Remove-Item -Recurse -Force $install -ErrorAction Stop }
-		catch { Write-Warning "Could not remove $install (another TouchDesigner has its DLLs loaded?): close it, then delete the folder. $_" }
+		catch {
+			# Another TD has its DLLs loaded: they can't be deleted but can be moved on the same drive,
+			# so get the folder out of the Plugins path before a TD started later loads it.
+			$parking = Join-Path $env:TEMP "td-native-inference-leftover-$(Get-Date -Format yyyyMMddHHmmss)"
+			Move-Item $install $parking
+			Write-Warning "Could not remove $install (another TouchDesigner has its DLLs loaded). Moved it to $parking; delete that after the TD closes."
+		}
 	}
 }
