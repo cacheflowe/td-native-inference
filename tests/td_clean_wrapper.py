@@ -52,8 +52,8 @@ def _next():
 		source = container.create('moviefileinTOP', 'source')
 		source.par.file = case['image']
 	wrapper.inputConnectors[0].connect(source)
-	if kind == 'text':
-		source.text = 'This line was spoken in a clean project.'
+	# Text to speech ignores what's in its input at startup: _poll sends the line a bit later.
+	container.store('say_at', 60 if kind == 'text' else None)
 	container.store('frames', 0)
 	run('args[0]()', _poll, delayFrames=1)
 
@@ -91,6 +91,8 @@ def _poll():
 	wrapper = _wrapper()
 	frames = container.fetch('frames') + 1
 	container.store('frames', frames)
+	if frames == container.fetch('say_at', None):
+		container.op('source').text = 'This line was spoken in a clean project.'
 	for name in ('debug', 'out_channels', 'out_audio'):
 		node = wrapper.op(name)
 		if node is not None:

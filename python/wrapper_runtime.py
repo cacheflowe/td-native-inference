@@ -88,22 +88,26 @@ def write_top_lines(script_op, comp):
 # queued), voice, text.
 
 def speak_input(comp):
-	"""Speak the newest row of the wired-in DAT: its 'text' column if it has a header with one
-	(e.g. MediaPipeSpeechToText's latest DAT), else the row's last non-empty cell. Each distinct
-	text is spoken once."""
+	"""Called every frame: speak the newest row of the wired-in DAT when it changes. The row's
+	'text' column if the DAT has a header with one (e.g. MediaPipeSpeechToText's latest DAT), else
+	its last non-empty cell. What's there when the wrapper starts isn't spoken (reopening a
+	project doesn't replay the last line); each new text is spoken once."""
 	if not comp.par.Speakinput.eval():
 		return
 	source = comp.op('input')
-	if source.numRows == 0:
-		return
-	header = [cell.val for cell in source.row(0)]
-	if 'text' in header:
-		text = source[source.numRows - 1, 'text'].val if source.numRows > 1 else ''
-	else:
-		cells = [cell.val for cell in source.row(source.numRows - 1) if cell.val.strip()]
-		text = cells[-1] if cells else ''
+	text = ''
+	if source.numRows:
+		header = [cell.val for cell in source.row(0)]
+		if 'text' in header:
+			text = source[source.numRows - 1, 'text'].val if source.numRows > 1 else ''
+		else:
+			cells = [cell.val for cell in source.row(source.numRows - 1) if cell.val.strip()]
+			text = cells[-1] if cells else ''
 	text = text.strip()
-	if not text or text == comp.storage.get('spoken_input'):
+	if 'spoken_input' not in comp.storage:
+		comp.storage['spoken_input'] = text	# already there at startup: not new
+		return
+	if not text or text == comp.storage['spoken_input']:
 		return
 	comp.storage['spoken_input'] = text
 	comp.par.Text = text

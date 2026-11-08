@@ -87,7 +87,7 @@ LAYOUT_AUDIO_SCORES = {
 	'out_channels': (7, -420), 'component': (0, -100), 'model_pulses': (0, -260),
 }
 LAYOUT_AUDIO_SPEECH = {
-	'input': (0, 20), 'input_watch': (1, 20), 'inference': (1, 180), 'keep_cooking': (1, 330),
+	'input': (0, 20), 'inference': (1, 180), 'keep_cooking': (1, 330),
 	'voice_left': (2, 400), 'voice_right': (2, 290), 'stereo': (3, 345), 'audio_out': (4, 345),
 	'out_audio': (7, 180),
 	'speaking_text': (3, 600), 'caption_text': (4, 680), 'caption_canvas': (4, 540), 'captions': (5, 610),
@@ -486,10 +486,12 @@ def _build_audio(comp, spec):
 		_connect(plugin, comp.op('input'))
 	# Nothing may need this wrapper's outputs on a given frame, but audio keeps arriving: cook the
 	# native node every frame so nothing is missed.
+	# Text input is polled here too: a DAT Execute on the In DAT only fires if something cooks it.
 	keep = comp.create('executeDAT', 'keep_cooking')
 	keep.par.framestart = True
 	keep.text = ("def onFrameStart(frame):\n\tif parent().par.Active.eval():\n"
-		"\t\tparent().op('inference').cook()\n")
+		+ ("\t\tparent().op('component').module.speak_input(parent())\n" if text_input else '')
+		+ "\t\tparent().op('inference').cook()\n")
 	comp.create('infoDAT', 'info').par.op = 'inference'
 	comp.create('infoCHOP', 'inference_stats').par.op = 'inference'
 	# The plugin's own info channels only (the Info CHOP adds cook stats and a second sample_rate).
@@ -637,11 +639,7 @@ def _build_speech(comp, spec):
 	_page_par(comp.appendCustomPage('Debug'), 'Toggle', 'Debugoverlay', 'Show Captions', True,
 		'Off = TOP 1 stays transparent and the caption chain does not cook.')
 
-	watch = comp.create('datexecuteDAT', 'input_watch')
-	watch.par.dat = 'input'
-	watch.par.tablechange = True
-	watch.text = "def onTableChange(dat):\n\tparent().op('component').module.speak_input(parent())\n"
-	plugin = comp.op('inference')
+	plugin = comp.op('inference')	# the input DAT is read every frame by keep_cooking (speak_input)
 	# Audio Device Out plays a mono CHOP on one side only: send the voice to both.
 	sides = []
 	for side in ('left', 'right'):
