@@ -16,4 +16,4 @@ First release.
 - **Two native plugins** (Custom OPs): OnnxTOP (GPU, TouchDesigner's ONNX Runtime + TensorRT) and
   MediaPipeTOP (Google MediaPipe Tasks). Install by copying one folder into
   Documents/Derivative/Plugins; relative model paths resolve against that folder.
-- Bundles every redistributable model. YOLO26 (AGPL-3.0) is exported locally by fetch_models.ps1.
+- Bundles every redistributable model. YOLO26 (AGPL-3.0) is fetched by fetch_models.ps1: downloads checksum-verified ONNX exports from Hugging Face, no Python needed.

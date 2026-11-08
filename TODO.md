@@ -9,10 +9,10 @@ CPlusPlus TOP wrappers) is in git history before commit 7ddfb48.
 
 ## v0.1.0 release
 
-- [ ] Test `fetch_models.ps1` end to end (Ultralytics export of yolo26s, yolo26s-seg,
-      yolo26n-pose) and check the exported files with the YOLO wrappers. The current
-      `yolo26s.onnx` / `yolo26n-pose.onnx` have a `pixel_values` input from an unrecorded export;
-      the official export may differ (output layout), so confirm OnnxTOP decodes it.
+- [x] `fetch_models.ps1` downloads the three YOLO26 ONNX files from Hugging Face (byte-identical
+      to the files the wrappers were tested with; tested Nov 7). The seg file is from a personal
+      repo (zwh20081/yolo26-onnx): if it disappears, host it as a separate AGPL release download or
+      export with Ultralytics (the old Python export path is in git history).
 - [ ] Package, test the extracted zip in a clean TD process (`tests/run_clean_wrapper.ps1`), then
       `release.py verify --tested-in-clean-project` and publish (docs/RELEASING.md).
 

@@ -41,9 +41,9 @@ channels; tracking is ByteTrack-style, in Python (see [docs/MODELS.md](docs/MODE
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
    `OnnxTOP.dll` and `MediaPipeTOP.dll`.
-3. **Optional, for the three YOLO26 models:** YOLO26 is AGPL-3.0, so it isn't in the zip. In the
-   installed folder, right-click `fetch_models.ps1` > **Run with PowerShell** (needs Python 3.9–3.12).
-   It exports the models into the folder's `models\` with Ultralytics.
+3. **Optional, for the YOLO26 models:** YOLO26 is AGPL-3.0, so it isn't in the zip. In the
+   installed folder, right-click `fetch_models.ps1` > **Run with PowerShell**. It downloads the
+   three models (about 90 MB, checksum-verified) into the folder's `models\`.
 
 Keep the `tox` folder wherever you like, for example next to your projects.
 

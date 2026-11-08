@@ -12,7 +12,7 @@ One zip, `td-native-inference-vX.Y.Z.zip`, with a single top folder:
 td-native-inference-vX.Y.Z/
   td-native-inference/      <- users copy this into Documents/Derivative/Plugins/
     OnnxTOP.dll  onnxtop_tool.exe  MediaPipeTOP.dll  libmediapipe.dll
-    fetch_models.ps1        (exports YOLO26, AGPL, which isn't bundled)
+    fetch_models.ps1        (fetches YOLO26, AGPL, which isn't bundled)
     models/mediapipe/...  models/onnx/...
   tox/                      the 13 model toxes + VisionDemo.tox
   README.md  docs/MODELS.md  LICENSE  NOTICE  CHANGELOG.md  VERSION  release.json

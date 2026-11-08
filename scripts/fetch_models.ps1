@@ -1,20 +1,16 @@
-# Exports the YOLO26 models used by Yolo26Detect / Yolo26Seg / Yolo26Pose into models/onnx/yolo26/.
+# Downloads the YOLO26 models used by Yolo26Detect / Yolo26Seg / Yolo26Pose into models/onnx/yolo26/.
 #
-# YOLO26 is licensed by Ultralytics under AGPL-3.0, so it isn't bundled in the release: this
-# script exports it on your machine with the official Ultralytics package (which downloads
-# Ultralytics' own weights). Every other model ships in the release.
+# YOLO26 is licensed by Ultralytics under AGPL-3.0, so it isn't bundled in the release (every other
+# model is). These are ONNX exports of Ultralytics' weights published on Hugging Face, pinned to a
+# revision and checked by SHA-256: the same files the wrappers were tested with. About 90 MB, no
+# Python needed.
 #
-# Needs Python 3.9-3.12 (python.org or conda). Creates a temporary virtual environment
-# (CPU PyTorch + ultralytics, about 1 GB) and removes it afterwards unless -KeepEnv.
-#
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1
-#   ... -Python "C:\path\to\python.exe" -AcceptAgpl -KeepEnv
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl]
 param(
-	[string] $Python = 'python',
-	[switch] $AcceptAgpl,
-	[switch] $KeepEnv
+	[switch] $AcceptAgpl
 )
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
 
 # Installed (next to OnnxTOP.dll in Documents/Derivative/Plugins/...) or in the source checkout.
 if (Test-Path (Join-Path $PSScriptRoot 'OnnxTOP.dll')) {
@@ -23,14 +19,20 @@ if (Test-Path (Join-Path $PSScriptRoot 'OnnxTOP.dll')) {
 	$models = Join-Path (Split-Path $PSScriptRoot -Parent) 'models'
 }
 $target = Join-Path $models 'onnx\yolo26'
-# Exports: Ultralytics weights name -> file name the wrappers expect.
-$exports = [ordered]@{
-	'yolo26s.pt' = 'yolo26s.onnx'
-	'yolo26s-seg.pt' = 'yolo26s-seg.onnx'
-	'yolo26n-pose.pt' = 'yolo26n-pose.onnx'
-}
 
-$missing = @($exports.Values | Where-Object { -not (Test-Path (Join-Path $target $_)) })
+$downloads = @(
+	@{ name = 'yolo26s.onnx'; size = 38239663
+	   url = 'https://huggingface.co/onnx-community/yolo26s-ONNX/resolve/37669b009f416cb1df28751257d6ec5f8e4b4e20/onnx/model.onnx'
+	   sha256 = 'c72bc5ad4e7f7c87666a051d0f01fc02d084688c1ca78e825031827a0590efb1' },
+	@{ name = 'yolo26s-seg.onnx'; size = 41911848
+	   url = 'https://huggingface.co/zwh20081/yolo26-onnx/resolve/08680d55d85937d5b759a9926fd2b1378d413c74/yolo26s-seg.onnx'
+	   sha256 = '66e12271280d46570f6afb3da87521b2392848a52ce27223dcfc801847b07c67' },
+	@{ name = 'yolo26n-pose.onnx'; size = 12081961
+	   url = 'https://huggingface.co/onnx-community/yolo26n-pose-ONNX/resolve/8a9197eeec75fdb4953322a455126ca6d9780b41/onnx/model.onnx'
+	   sha256 = '6ca5dc9681e0305708085715427f50779c761d5abfddaa0c38ac7c2d89b56085' }
+)
+
+$missing = @($downloads | Where-Object { -not (Test-Path (Join-Path $target $_.name)) })
 if ($missing.Count -eq 0) {
 	Write-Host "[fetch_models] All YOLO26 models are present in $target"
 	exit 0
@@ -42,40 +44,22 @@ Using it in a project you distribute or run as a network service carries AGPL ob
 unless you hold an Ultralytics Enterprise license.
 "@
 if (-not $AcceptAgpl) {
-	$answer = Read-Host 'Export the YOLO26 models under these terms? [y/N]'
+	$answer = Read-Host 'Download the YOLO26 models under these terms? [y/N]'
 	if ($answer -notmatch '^[yY]') { Write-Host '[fetch_models] Cancelled.'; exit 1 }
 }
+New-Item -ItemType Directory -Force $target | Out-Null
 
-$work = Join-Path ([IO.Path]::GetTempPath()) 'td-native-inference-yolo'
-$venv = Join-Path $work 'venv'
-New-Item -ItemType Directory -Force $work, $target | Out-Null
-$venvPython = Join-Path $venv 'Scripts\python.exe'
-if (-not (Test-Path $venvPython)) {
-	Write-Host '[fetch_models] Creating a temporary Python environment...'
-	& $Python -m venv $venv
-	if ($LASTEXITCODE -ne 0) { throw "Could not create a virtual environment with '$Python'. Pass -Python <path to python.exe>." }
-	& $venvPython -m pip install -q --upgrade pip
-	& $venvPython -m pip install -q --index-url https://download.pytorch.org/whl/cpu torch torchvision
-	& $venvPython -m pip install -q ultralytics onnx onnxslim
-	if ($LASTEXITCODE -ne 0) { throw 'pip install failed (see above).' }
-}
-
-Push-Location $work
-try {
-	foreach ($weights in $exports.Keys) {
-		$name = $exports[$weights]
-		$destination = Join-Path $target $name
-		if (Test-Path $destination) { Write-Host "[fetch_models] have $name"; continue }
-		Write-Host "[fetch_models] exporting $name..."
-		# The settings the wrappers were tested with: NMS-free end2end head, fixed 640x640, opset 12.
-		$code = "from ultralytics import YOLO; print(YOLO('$weights').export(format='onnx', opset=12, simplify=True, dynamic=False))"
-		$exported = (& $venvPython -c $code | Select-Object -Last 1).Trim()
-		if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exported)) { throw "Export of $weights failed." }
-		Move-Item -Force $exported $destination
-		Write-Host "[fetch_models] -> $destination"
+foreach ($d in $missing) {
+	$destination = Join-Path $target $d.name
+	Write-Host ("[fetch_models] downloading {0} ({1:N0} MB)..." -f $d.name, ($d.size / 1MB))
+	$partial = "$destination.part"
+	Invoke-WebRequest -Uri $d.url -OutFile $partial -UseBasicParsing
+	$hash = (Get-FileHash $partial -Algorithm SHA256).Hash.ToLower()
+	if ($hash -ne $d.sha256) {
+		Remove-Item -Force $partial
+		throw "$($d.name): checksum mismatch (got $hash). Nothing was installed; try again later."
 	}
-} finally {
-	Pop-Location
-	if (-not $KeepEnv) { Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue }
+	Move-Item -Force $partial $destination
+	Write-Host "[fetch_models] -> $destination"
 }
 Write-Host '[fetch_models] Done. The first run of each model builds a TensorRT engine (a few minutes).'
