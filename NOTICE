@@ -45,6 +45,24 @@ HSEmotion enet_b2_7 (renamed onnx/hsemotion/emotion.onnx)
   Copyright Andrey Savchenko. Apache License 2.0.
   https://github.com/sb-ai-lab/EmotiEffLib
 
+YAMNet sound classifier: mediapipe/yamnet.tflite
+  Copyright Google LLC. Apache License 2.0.
+  https://ai.google.dev/edge/mediapipe/solutions/audio/audio_classifier
+
+Moonshine Tiny speech to text, LiteRT bundle: asr/moonshine_tiny_5s_i8.litertlm
+  Moonshine by Moonshine AI (formerly Useful Sensors), MIT License; LiteRT conversion by
+  litert-community (MIT License).
+  https://huggingface.co/litert-community/moonshine-tiny
+
+Whisper Tiny speech to text, LiteRT bundle: asr/whisper_tiny_30s_i8.litertlm
+  Whisper by OpenAI, MIT License; LiteRT conversion by litert-community (Apache License 2.0).
+  https://huggingface.co/litert-community/whisper-tiny
+
+Kokoro-82M text to speech, LiteRT bundle: tts/kokoro_int8_fp16.litertlm
+  Kokoro by hexgrad, Apache License 2.0; LiteRT-LM bundle with its voices and text front ends by
+  litert-community (Apache License 2.0).
+  https://huggingface.co/litert-community/Kokoro-82M
+
 Not included
 ------------
 YOLO26 detection, segmentation and pose models (Ultralytics) are licensed under AGPL-3.0 and are

@@ -25,7 +25,7 @@ BINARY_FILES = {
 # Our plugins compile in "td-native-inference <VERSION>" (CMake reads VERSION); packaging refuses
 # a plugin built for another version.
 VERSIONED_PLUGINS = {'plugins/OnnxTOP.dll', 'plugins/MediaPipeTOP.dll', 'plugins/MediaPipeCHOP.dll'}
-MODEL_SUFFIXES = ('.onnx', '.task', '.tflite')
+MODEL_SUFFIXES = ('.onnx', '.task', '.tflite', '.litertlm')
 # Licenses that don't allow bundling in this Apache-2.0 package (fetch_models.ps1 gets them).
 BLOCKED_MODELS = ('yolo',)
 

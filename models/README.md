@@ -8,7 +8,9 @@ every model below except YOLO26.
 
 ```
 models/
-  mediapipe/                 MediaPipeTOP (Google's .task / .tflite bundles)
+  mediapipe/                 MediaPipeTOP (Google's .task / .tflite bundles), yamnet.tflite
+  asr/                       MediaPipeCHOP speech to text (.litertlm)
+  tts/                       MediaPipeCHOP text to speech (.litertlm)
   onnx/<model>/              OnnxTOP; TensorRT engines are cached in onnx/<model>/trt_cache/
 ```
 
@@ -26,6 +28,18 @@ models/
 | `holistic_landmarker.task` | Holistic |
 | `blaze_face_short_range.tflite` | Face Detector |
 | `selfie_segmenter.tflite` | Segment |
+
+## Audio (MediaPipeCHOP)
+
+| File | Task | Source | License |
+|---|---|---|---|
+| `mediapipe/yamnet.tflite` | Classify Sounds | [MediaPipe audio classifier](https://ai.google.dev/edge/mediapipe/solutions/audio/audio_classifier) (`storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite`) | Apache-2.0 |
+| `asr/moonshine_tiny_5s_i8.litertlm` | Transcribe Speech (default) | [litert-community/moonshine-tiny](https://huggingface.co/litert-community/moonshine-tiny) | MIT |
+| `asr/whisper_tiny_30s_i8.litertlm` | Transcribe Speech | [litert-community/whisper-tiny](https://huggingface.co/litert-community/whisper-tiny) | Apache-2.0 (Whisper: MIT) |
+| `tts/kokoro_int8_fp16.litertlm` | Speak Text | [litert-community/Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M) at revision `33ad69f` (the CPU build; `kokoro_int8_gpu_fp16` needs a GPU delegate) | Apache-2.0 |
+
+Larger speech-to-text bundles (Parakeet TDT, Qwen3-ASR) are in litert-community too; point
+**Transcriber Model** at one to try it.
 
 ## ONNX (OnnxTOP)
 

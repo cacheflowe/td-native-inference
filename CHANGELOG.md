@@ -2,11 +2,19 @@
 
 ## Unreleased
 
-- `MediaPipeSpeech.tox`: streaming speech to text from any audio CHOP (Moonshine or Whisper),
-  with transcript / latest-sentence DATs, speaking and new-sentence channels, and a
-  closed-caption TOP. Uses the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU).
-- MediaPipeCHOP: Skip Silence (only speech reaches the model), a speech threshold that follows
-  the background noise, segment numbers that keep counting past the 200-sentence transcript.
+Audio, through the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU):
+
+- `MediaPipeSpeechToText.tox`: streaming speech to text from any audio CHOP (Moonshine or
+  Whisper), with transcript / latest-sentence DATs, speaking and new-sentence channels, and a
+  closed-caption TOP. Only speech reaches the model (Skip Silence, against a tracked noise floor),
+  so room noise doesn't turn into text.
+- `MediaPipeTextToSpeech.tox`: Kokoro text to speech (54 voices, 9 languages) from a parameter or
+  any DAT, played on the default audio device and output as 24 kHz audio, with a caption of the
+  line being spoken.
+- `MediaPipeSoundClassifier.tox`: YAMNet's 521 sound classes as smoothed channels, a top-results
+  DAT and display, and score / active / onset channels for chosen classes.
+- `AudioDemo.tox`: the three together, with an option to speak what it hears.
+- The plugins report the package version in their info popup.
 
 ## v0.1.0 (2026-11-07)
 

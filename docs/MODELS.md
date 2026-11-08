@@ -138,13 +138,15 @@ All 13 models in one COMP for trying them side by side. Wire a video TOP in and 
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
 overlay composited together (image results behind the overlays); TOP 2 is the input.
 
-## Audio models (v0.2, in development)
+## Audio models
 
-Audio toxes take an audio CHOP (Audio Device In, Audio File In, ...; any sample rate, channels are
-mixed to mono) and run on the CPU through `MediaPipeCHOP.dll`. They keep cooking every frame by
-themselves, so audio isn't missed when nothing downstream looks at their outputs.
+Coming in v0.2. The audio toxes run on the CPU through `MediaPipeCHOP.dll`:
+- **Speech to text and the sound classifier** take an audio CHOP: Audio Device In, Audio File In, and so on. Any sample rate works, and channels are mixed to mono.
+- **Text to speech** takes text.
 
-### MediaPipe Speech to Text (`MediaPipeSpeech.tox`)
+They keep cooking every frame by themselves, so nothing is missed when nothing downstream reads their outputs.
+
+### MediaPipe Speech to Text (`MediaPipeSpeechToText.tox`)
 Streaming speech to text with closed captions.
 
 | Output | Content |
@@ -176,3 +178,59 @@ Streaming speech to text with closed captions.
 **Debug > Show Captions** off skips the caption drawing.
 
 Models: Moonshine Tiny (MIT), Whisper Tiny (Apache-2.0), as LiteRT `.litertlm` bundles.
+
+### MediaPipe Text to Speech (`MediaPipeTextToSpeech.tox`)
+Speaks text in a natural voice. Lines are queued and spoken one after another. The first audio
+arrives a second or two after a line is queued, since the model synthesizes a sentence at a time.
+
+Give it text in either of two ways:
+- Type into **Text** and pulse **Speak** (or turn on **Speak On Change**).
+- Wire a DAT into the input. Each time its newest row changes, that row is spoken: its `text` column, else its last cell. Wiring in MediaPipe Speech to Text's `latest` DAT makes it repeat what it hears.
+
+| Output | Content |
+|---|---|
+| TOP 1 | A caption of the line being spoken, in the same style as speech to text's. |
+| CHOP 1 | The voice: `audio` at 24 kHz, plus `speaking` (1 while a line is being synthesized or played). |
+| CHOP 2 | `loaded`, `loading`, `infer_ms` (time for the last audio chunk), `results` (lines spoken), `queued`. |
+| DAT `lines` | `line, state, voice, text`: the line being spoken, then the queue. |
+
+**Model** page:
+- **Voice** picks one of 54 voices. The first letters give the language and voice type: `af_` American female, `am_` American male, `bf_` / `bm_` British, `ef_` Spanish, `ff_` French, `hf_` Hindi, `if_` Italian, `jf_` Japanese, `pf_` Portuguese, `zf_` Chinese, and so on. Middle-click the inner `inference` node to list them all. The default is `af_heart`.
+- **Speaking Rate** sets the speed. Changing it reloads the model, which takes about half a second.
+- **Stop** stops speaking and clears the queue.
+
+**Output** page:
+- **Speak Input DAT** turns speaking from the wired DAT on and off.
+- **Play Audio** and **Volume** play the voice on the default audio device. Turn Play Audio off to route CHOP 1 yourself.
+
+Model: Kokoro-82M (Apache-2.0), as a LiteRT `.litertlm` bundle with its voices and text front ends.
+
+### MediaPipe Sound Classifier (`MediaPipeSoundClassifier.tox`)
+Recognizes 521 kinds of sound, from speech and music to dogs, sirens, clapping and engines. Each
+classification looks at the last second of audio, and a new one runs every quarter second.
+
+| Output | Content |
+|---|---|
+| TOP 1 | The top results with score bars. |
+| CHOP 1 | Every class's score (0–1), smoothed, one channel per class: `Speech`, `Music`, `Dog`, `Finger_snapping`, ... |
+| CHOP 2 | For each class in **Watch Classes**: `<name>` (its score), `<name>_active` (above **Active Threshold**) and `<name>_onset` (1 on the frame it becomes active; trigger on it). Plus `loaded`, `infer_ms`, `results`. |
+| DAT `top` | `rank, class, label, score`: the **Top Results** highest scores. |
+
+**Classes** page:
+- **Score Smoothing** lags the scores, which steadies them but makes them slower to react.
+- **Watch Classes** lists channel names from CHOP 1, separated by spaces.
+
+Model page: **Window** (how much audio each classification hears) and **Hop** (how often one runs).
+
+Model: YAMNet (Apache-2.0).
+
+## AudioDemo (`AudioDemo.tox`)
+
+The three audio models together. Wire an audio CHOP into input 1 and, optionally, a DAT of lines to speak into input 2. Switch models on its **Models** page; a model that's off doesn't cook at all.
+
+**Speak What It Hears** sends each sentence speech to text hears to text to speech. Use headphones for it: with speakers the mic hears the voice, and it repeats itself.
+
+Outputs:
+- **TOP 1:** the classifier's top results over the captions.
+- **CHOP 1:** the voice.
+- **DATs:** the transcript and the top sounds.
