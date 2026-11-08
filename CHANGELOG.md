@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.0 (2026-11-07)
+
 Audio, through the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU):
 
 - `MediaPipeSpeechToText.tox`: streaming speech to text from any audio CHOP (Moonshine or
