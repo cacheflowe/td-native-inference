@@ -1,0 +1,9 @@
+# Text files are stored with LF and checked out with LF (Windows tools here all handle LF); this
+# overrides core.autocrlf, which warned on every commit. Windows scripts keep CRLF in the work tree.
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+*.toe binary
+*.tox binary
