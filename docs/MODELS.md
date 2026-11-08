@@ -102,16 +102,16 @@ MediaPipe (selfie segmenter), Apache-2.0.
 ### YOLO26 Object Detection (`Yolo26Detect.tox`)
 Boxes for the 80 COCO classes (`class_name` column: person, car, dog, ...). **Class Filter** keeps
 one class (-1 = all). GPU. Ultralytics YOLO26s, **AGPL-3.0**: not bundled, run
-`fetch_models.ps1` once (see the README).
+`fetch_models.cmd` once (see the README).
 
 ### YOLO26 Segmentation (`Yolo26Seg.tox`)
 Like Object Detection, plus a per-object mask. TOP 1 is the native segmentation matte (at the
 model's resolution), TOP 2 the input, TOP 3 the box overlay. `mask_area_ratio` and `presence`
-columns per track. GPU. Ultralytics YOLO26s-seg, **AGPL-3.0**: run `fetch_models.ps1`.
+columns per track. GPU. Ultralytics YOLO26s-seg, **AGPL-3.0**: run `fetch_models.cmd`.
 
 ### YOLO26 Pose (`Yolo26Pose.tox`)
 Many people at once, 17 COCO body keypoints each. GPU, and much cheaper per person than MediaPipe
-Pose in crowds. Ultralytics YOLO26n-pose, **AGPL-3.0**: run `fetch_models.ps1`.
+Pose in crowds. Ultralytics YOLO26n-pose, **AGPL-3.0**: run `fetch_models.cmd`.
 
 ### MoveNet MultiPose (`MoveNet.tox`)
 Up to 6 people, 17 keypoints each. GPU. **Dynamic Size** sets the inference resolution (multiple
@@ -204,7 +204,7 @@ Give it text in either of two ways:
 - **Play Audio** and **Volume** play the voice on the default audio device. Turn Play Audio off to route CHOP 1 yourself.
 
 Model: Kokoro-82M (Apache-2.0), as a LiteRT `.litertlm` bundle with its voices and text front ends.
-It isn't in the zip (280 MB): run `fetch_models.ps1` once (see the README).
+It isn't in the zip (280 MB): run `fetch_models.cmd` once (see the README).
 
 ### MediaPipe Sound Classifier (`MediaPipeSoundClassifier.tox`)
 Recognizes 521 kinds of sound, from speech and music to dogs, sirens, clapping and engines. Each

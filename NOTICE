@@ -58,8 +58,8 @@ Whisper Tiny speech to text, LiteRT bundle: asr/whisper_tiny_30s_i8.litertlm
   Whisper by OpenAI, MIT License; LiteRT conversion by litert-community (Apache License 2.0).
   https://huggingface.co/litert-community/whisper-tiny
 
-Downloaded by td-native-inference/fetch_models.ps1
---------------------------------------------------
+Downloaded by td-native-inference/fetch_models.cmd (fetch_models.ps1)
+---------------------------------------------------------------------
 Kokoro-82M text to speech, LiteRT bundle: tts/kokoro_int8_fp16.litertlm
   Kokoro by hexgrad, Apache License 2.0; LiteRT-LM bundle with its voices and text front ends by
   litert-community (Apache License 2.0). Left out of the zip only for its size.

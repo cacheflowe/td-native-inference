@@ -32,6 +32,7 @@
 		"plugins/MediaPipeCHOP.dll": "td-native-inference/MediaPipeCHOP.dll",
 		"plugins/libmediapipe.dll": "td-native-inference/libmediapipe.dll",
 		"scripts/fetch_models.ps1": "td-native-inference/fetch_models.ps1",
+		"scripts/fetch_models.cmd": "td-native-inference/fetch_models.cmd",
 		"models/mediapipe/face_landmarker.task": "td-native-inference/models/mediapipe/face_landmarker.task",
 		"models/mediapipe/hand_landmarker.task": "td-native-inference/models/mediapipe/hand_landmarker.task",
 		"models/mediapipe/gesture_recognizer.task": "td-native-inference/models/mediapipe/gesture_recognizer.task",

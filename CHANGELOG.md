@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `fetch_models.cmd`: double-click to download YOLO26 and the Kokoro voice. Right-clicking
+  `fetch_models.ps1` > Run with PowerShell failed on machines whose execution policy refuses
+  unsigned scripts from a downloaded zip (`RemoteSigned`, common); the window closed with the error.
+
 ## v0.2.0 (2026-11-07)
 
 Audio, through the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU):
