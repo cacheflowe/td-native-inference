@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- `MediaPipeSpeech.tox`: streaming speech to text from any audio CHOP (Moonshine or Whisper),
+  with transcript / latest-sentence DATs, speaking and new-sentence channels, and a
+  closed-caption TOP. Uses the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU).
+- MediaPipeCHOP: Skip Silence (only speech reaches the model), a speech threshold that follows
+  the background noise, segment numbers that keep counting past the 200-sentence transcript.
+
 ## v0.1.0 (2026-11-07)
 
 First release.

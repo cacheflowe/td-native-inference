@@ -137,3 +137,42 @@ surprise. **Classify Interval** runs the classifier every Nth frame to save GPU 
 All 13 models in one COMP for trying them side by side. Wire a video TOP in and switch models on
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
 overlay composited together (image results behind the overlays); TOP 2 is the input.
+
+## Audio models (v0.2, in development)
+
+Audio toxes take an audio CHOP (Audio Device In, Audio File In, ...; any sample rate, channels are
+mixed to mono) and run on the CPU through `MediaPipeCHOP.dll`. They keep cooking every frame by
+themselves, so audio isn't missed when nothing downstream looks at their outputs.
+
+### MediaPipe Speech to Text (`MediaPipeSpeech.tox`)
+Streaming speech to text with closed captions.
+
+| Output | Content |
+|---|---|
+| TOP 1 | Closed captions: the newest words in a dark strip along the bottom of a transparent image (**Captions** page sets its size). Composite it over your video. |
+| CHOP | `speaking` (1 while speech is detected), `level` / `threshold` (input RMS and the level that counts as speech), `segments` (sentences so far), `new_segment` (1 on the cook a sentence is finalized; trigger on it), `backlog` (seconds of audio waiting; above ~1 the model is too slow), plus `loaded`, `loading`, `infer_ms`. |
+| DAT 1 `transcript` | `segment, final, start_ms, end_ms, text`: the last 200 sentences, oldest first, then the current interim guess (`final` 0). `segment` keeps counting; times are milliseconds since the model started. |
+| DAT 2 `latest` | One row: the newest sentence (`segment, start_ms, end_ms, text`) and the current `interim` guess. |
+
+**Model** page:
+- **Transcriber Model** picks the speech model:
+  - `models/asr/moonshine_tiny_5s_i8.litertlm` (default, fast, shows words while you speak).
+  - `whisper_tiny_30s_i8` (more accurate, sentence at a time).
+  - Larger models such as Parakeet or Qwen3-ASR can be downloaded from huggingface.co/litert-community.
+- **Skip Silence** sends only speech to the model; without it, models tend to invent text from room noise.
+- Speech is detected when the input is **Noise Ratio** times louder than the tracked background noise, and at least **Silence Level**:
+  - If noise still turns into text, raise Noise Ratio.
+  - If quiet speech is missed, lower it.
+- A **Pause** of that many seconds ends a sentence; **Max Segment** caps continuous speech.
+- **Prompt** gives generative models words to expect.
+- **Flush** finalizes what's been heard; **Clear** starts over.
+
+**Captions** page:
+- **Max Characters**: the longest caption.
+- **New Caption After**: a quiet gap that starts a fresh caption instead of adding to the old one.
+- **Hold**: how long a caption stays after the last words.
+- **Font Size** and **Resolution**.
+
+**Debug > Show Captions** off skips the caption drawing.
+
+Models: Moonshine Tiny (MIT), Whisper Tiny (Apache-2.0), as LiteRT `.litertlm` bundles.

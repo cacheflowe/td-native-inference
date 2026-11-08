@@ -1,0 +1,23 @@
+{
+	"name": "MediaPipeSpeech",
+	"label": "MediaPipe Speech to Text",
+	"input": "audio",
+	"plugin": "MediapipeaudioCHOP",
+	"kind": "transcript",
+	"preset": {
+		"Task": "transcribe",
+		"Autoflush": true
+	},
+	"model": [
+		"Transcribermodel",
+		"Interim",
+		"Prompt",
+		"Skipsilence",
+		"Pause",
+		"Maxsegment",
+		"Silencelevel",
+		"Noiseratio",
+		"Flush",
+		"Clear"
+	]
+}

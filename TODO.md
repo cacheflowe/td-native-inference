@@ -45,9 +45,13 @@ per slot when the first non-video model lands, not before:
       (`build/asr_test.exe`, synthesized speech): whisper-tiny word-perfect at 0.06x real time,
       moonshine-tiny one word off at 0.10x; 48 kHz input is resampled internally. Our own pause
       detection flushes the stream so sentences finalize (whisper otherwise waits for 30 s).
-- [ ] Live-test Transcribe Speech in TD (restart for the new DLL); a `MediaPipeSpeech` wrapper
-      (`transcript` kind: text DAT, latest-sentence DAT, new-sentence pulse, subtitle debug TOP);
-      try parakeet-tdt and Qwen3-ASR; models fetch for the large ones.
+- [x] Transcribe Speech live-tested (file + mic); Skip Silence and a noise-floor threshold stop
+      noise hallucinations. `MediaPipeSpeech` wrapper (`input: audio`, `transcript` kind:
+      transcript / latest DATs, channels, closed-caption TOP), lab-tested with a thumbnail.
+- [ ] v0.2 release: add MediaPipeCHOP.dll, `models/asr/*.litertlm` (moonshine MIT, whisper
+      Apache-2.0) and yamnet.tflite to the manifest + NOTICE; a clean-process test for audio
+      wrappers (`run_clean_wrapper.ps1` only feeds images today).
+- [ ] Try parakeet-tdt and Qwen3-ASR; a fetch for the large ones.
 - [ ] The DLL also has text-to-speech (`text_to_speech.h`; Kokoro-82M, Qwen3-TTS .litertlm).
 - [ ] Also exported and cheap to add: MediaPipe text classifier/embedder, language detector,
       object detector, image classifier/embedder, interactive segmenter.

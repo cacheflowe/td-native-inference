@@ -4,7 +4,8 @@ build/wrapper-lab.json when done (poll for it).
 
 Each wrapper gets a suitable example image, docs/images/sources/hand.jpg, face.jpg or body.jpg
 (replace those files to change the README thumbnails), and is cooked until it reports a detection
-(or, for image models, a non-empty result), or until MAX_FRAMES, then SETTLE_FRAMES more. With
+(or, for image models, a non-empty result), or until MAX_FRAMES, then SETTLE_FRAMES more. Audio
+wrappers listen to the lab's audio_source (a speech clip) until a sentence shows as a caption. With
 THUMBNAILS on, docs/images/models/<Name>.jpg shows its overlay over the input (image results beside
 it). Afterwards the lab source is restored.
 """
@@ -83,6 +84,10 @@ def _poll():
 
 def _detected(comp):
 	spec = comp.fetch('wrapper_spec')
+	if spec['kind'] == 'transcript':
+		# A final sentence, and the caption showing (it's cleared again after Hold seconds).
+		latest, lines = comp.op('latest'), comp.op('caption_lines')
+		return latest.numRows > 1 and bool(latest[1, 'text'].val) and bool(lines.numRows and lines[0, 0].val)
 	if spec['kind'] == 'image':
 		return comp.op('debug').numpyArray()[..., :3].max() > 0
 	tracks = comp.op('tracks')
@@ -100,6 +105,17 @@ def _detected(comp):
 def _measure(comp, frames, detected):
 	spec = comp.fetch('wrapper_spec')
 	nodes = [comp, *comp.findChildren()]
+	if spec['kind'] == 'transcript':
+		transcript = comp.op('transcript')
+		return {
+			'detected': bool(detected), 'frames': frames, 'kind': spec['kind'],
+			'sentences': [transcript[row, 'text'].val for row in range(1, transcript.numRows)][-4:],
+			'caption': comp.op('caption_lines')[0, 0].val if comp.op('caption_lines').numRows else '',
+			'channels': {channel.name: round(channel[0], 4) for channel in comp.op('out_channels').chans()},
+			'debug_size': [comp.op('debug').width, comp.op('debug').height],
+			'errors': {node.path: node.errors() for node in nodes if node.errors()},
+			'warnings': {node.path: node.warnings() for node in nodes if node.warnings()},
+		}
 	tracks = comp.op('tracks')
 	header = [cell.val for cell in tracks.row(0)] if tracks.numRows else []
 	label = next((column for column in ('emotion_label', 'gesture', 'label') if column in header), None)
@@ -138,8 +154,17 @@ def _thumbnail(comp):
 			node.inputConnectors[1].connect(bottom)
 			return node
 
-		source = select('passthrough')
-		if spec['kind'] == 'image':
+		if spec['kind'] == 'transcript':
+			# The caption over a dark backdrop at the caption image's size.
+			source = work.create('constantTOP')
+			source.par.outputresolution = 'custom'
+			source.par.resolutionw, source.par.resolutionh = comp.op('debug').width, comp.op('debug').height
+			source.par.colorr, source.par.colorg, source.par.colorb = 0.12, 0.13, 0.15
+		else:
+			source = select('passthrough')
+		if spec['kind'] == 'transcript':
+			panels = [over(select('debug'), source)]
+		elif spec['kind'] == 'image':
 			panels = [source, select('debug')]
 		elif spec.get('result') == 'inference':
 			panels = [over(select('out_boxes'), source), select('debug')]

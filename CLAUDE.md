@@ -9,9 +9,9 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 
 | Path | What |
 |---|---|
-| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image. `/project1/VisionDemo`: the generated video workbench (one toggle per model). `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
+| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`). `/project1/VisionDemo`: the generated video workbench (one toggle per model). `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
 | `wrappers/<Model>.json` | One spec per model tox: custom OP type, presets, output kind, tracker mode, and the curated parameters the wrapper exposes |
-| `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side |
+| `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/`, `cpp/MediaPipeCHOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side. MediaPipeCHOP (audio: classify, transcribe) loads `libmediapipe.dll` from next to itself |
 | `plugins/` | Build output. On Windows this *is* the project's `Plugins/` folder, so TD registers the custom OPs (`OnnxTOP`, `MediapipeTOP`) from it at startup. `onnxtop_tool.exe` must sit next to `OnnxTOP.dll`, `libmediapipe.dll` next to `MediaPipeTOP.dll`. Gitignored |
 | `models/mediapipe/`, `models/onnx/<model>/` | Model files, gitignored. Sources and licenses: `models/README.md` |
 | `python/` | `onnxtop_tables.py` (Info DAT → trackers → tables) and `object_tracker`, `pose_`/`box_`/`face_tracker_pipeline`, `mediapipe_skeletons`. numpy only; `cv2` lazily for solvePnP head pose. `wrapper_builder.py` builds/exports wrappers; `wrapper_runtime.py` is embedded in each. |

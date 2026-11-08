@@ -17,6 +17,8 @@ The spec decides what differs:
 	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
 	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
 	detector, classes  classifier only: the nested detector spec and the score column settings
+	input            'audio' builds an audio wrapper instead (_build_audio): audio CHOP in, the
+	                 MediaPipe audio CHOP, kind transcript (DATs + closed-caption TOP)
 Everything not exposed stays preset on the inner nodes.
 """
 
@@ -29,7 +31,8 @@ MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
-KINDS = ('landmarks', 'boxes', 'image', 'classifier')
+KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript')
+AUDIO_KINDS = ('transcript',)
 ALWAYS_EXPOSED = ('Active',)
 ALWAYS_PULSES = ('Reload',)
 
@@ -67,6 +70,17 @@ LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (
 DOCKED = ('channels_callbacks', 'scores_callbacks', 'tracker/script_tracks_callbacks',
 	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
 
+# Audio wrappers, same banding: the caption chain on top, the DAT outputs, then the CHOP outputs.
+LAYOUT_AUDIO = {
+	'input': (0, 180), 'inference': (1, 180), 'keep_cooking': (1, 330),
+	'caption_lines': (3, 180), 'caption_text': (4, 300), 'caption_canvas': (4, 160),
+	'captions': (5, 230), 'transparent': (5, 380), 'preview': (6, 230), 'debug': (7, 230),
+	'transcript': (2, -100), 'out_transcript': (7, -100), 'latest': (3, -240), 'out_latest': (7, -240),
+	'inference_stats': (0, -540), 'status': (1, -540), 'channels': (2, -470), 'out_channels': (7, -470),
+	'component': (0, -100), 'model_pulses': (0, -260),
+}
+DOCKED_AUDIO = ('caption_lines_callbacks', 'latest_callbacks')
+
 DEMO_ROW = 180
 
 
@@ -74,8 +88,10 @@ def root():
 	return Path(td.project.folder)
 
 
-def spec_names():
-	return sorted(path.stem for path in (root() / 'wrappers').glob('*.json'))
+def spec_names(input_kind=None):
+	"""Every spec name, or only those for one input ('video' or 'audio')."""
+	names = sorted(path.stem for path in (root() / 'wrappers').glob('*.json'))
+	return names if input_kind is None else [name for name in names if load_spec(name).get('input', 'video') == input_kind]
 
 
 def load_spec(name):
@@ -83,6 +99,8 @@ def load_spec(name):
 	assert spec.get('name') == name, f'[WrapperBuilder] {name}.json names itself {spec.get("name")!r}'
 	assert spec.get('kind') in KINDS, f'[WrapperBuilder] {name}: kind must be one of {KINDS}'
 	assert spec['kind'] != 'classifier' or spec.get('detector'), f'[WrapperBuilder] {name}: classifier needs a detector'
+	audio = spec.get('input', 'video') == 'audio'
+	assert audio == (spec['kind'] in AUDIO_KINDS), f'[WrapperBuilder] {name}: kind {spec["kind"]} needs input {"video" if audio else "audio"}'
 	return spec
 
 
@@ -151,10 +169,12 @@ def _restrict_menu(parameter, choices):
 		parameter.default = names[0]
 
 
-def _add_code(comp):
+def _add_code(comp, module_names=MODULES):
 	_synced_dat(comp, 'component', 'python/wrapper_runtime.py')
+	if not module_names:
+		return
 	modules = comp.create('baseCOMP', 'local').create('baseCOMP', 'modules')
-	for module_name in MODULES:
+	for module_name in module_names:
 		_synced_dat(modules, module_name, f'python/{module_name}.py')
 
 
@@ -321,14 +341,17 @@ def _build_pages(comp, spec, plugin, tracker):
 
 
 def _layout(comp, spec):
-	positions = dict(LAYOUT, **LAYOUT_KIND.get(spec['kind'], {}))
-	if spec.get('result') == 'inference':
-		positions.update(LAYOUT_RESULT_INFERENCE)
+	if spec.get('input') == 'audio':
+		positions, docked = LAYOUT_AUDIO, DOCKED_AUDIO
+	else:
+		positions, docked = dict(LAYOUT, **LAYOUT_KIND.get(spec['kind'], {})), DOCKED
+		if spec.get('result') == 'inference':
+			positions.update(LAYOUT_RESULT_INFERENCE)
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:
 			node.nodeX, node.nodeY = column * COLUMN, y
-	for path in DOCKED:
+	for path in docked:
 		callbacks = comp.op(path)
 		host = comp.op(path.removesuffix('_callbacks'))
 		if callbacks is not None and host is not None:
@@ -366,6 +389,11 @@ def build(spec, parent_comp, name=None):
 	if position is not None:
 		comp.nodeX, comp.nodeY = position
 	comp.store('wrapper_spec', spec)
+	if spec.get('input') == 'audio':
+		_build_audio(comp, spec)
+		_layout(comp, spec)
+		_restore_wires(comp, inputs, outputs)
+		return comp
 	_add_code(comp)
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
@@ -411,6 +439,129 @@ def build(spec, parent_comp, name=None):
 	comp.par.opviewer = 'debug'
 	_restore_wires(comp, inputs, outputs)
 	return comp
+
+
+def _page_par(page, kind, name, label, value, help_text, low=None, high=None):
+	parameter = getattr(page, 'append' + kind)(name, label=label)[0]
+	parameter.val = parameter.default = value
+	if low is not None:
+		parameter.normMin, parameter.normMax = low, high
+	parameter.help = help_text
+	return parameter
+
+
+def _build_audio(comp, spec):
+	"""Audio wrapper: input CHOP -> the MediaPipe audio CHOP. Transcript kind: transcript (Info
+	DAT) and latest (newest sentence + interim) DATs, the native channels plus stats as a CHOP, and
+	a closed-caption TOP: caption_lines (text) -> caption_text on a transparent canvas."""
+	_add_code(comp, ())
+	comp.create('inCHOP', 'input')
+	plugin = comp.create(spec['plugin'], 'inference')
+	for parameter, value in spec.get('preset', {}).items():
+		_set(plugin, parameter, value)
+	_connect(plugin, comp.op('input'))
+	# Nothing may need this wrapper's outputs on a given frame, but audio keeps arriving: cook the
+	# native node every frame so no speech is missed.
+	keep = comp.create('executeDAT', 'keep_cooking')
+	keep.par.framestart = True
+	keep.text = ("def onFrameStart(frame):\n\tif parent().par.Active.eval():\n"
+		"\t\tparent().op('inference').cook()\n")
+	transcript = comp.create('infoDAT', 'transcript')
+	transcript.par.op = 'inference'
+	stats = comp.create('infoCHOP', 'inference_stats')
+	stats.par.op = 'inference'
+
+	model_page = comp.appendCustomPage('Model')
+	pulses = []
+	for name in (*ALWAYS_EXPOSED, *spec.get('model', ()), *ALWAYS_PULSES):
+		pulses += _expose(model_page, plugin, name)[1]
+	captions_page = comp.appendCustomPage('Captions')
+	_page_par(captions_page, 'Int', 'Maxchars', 'Max Characters', 90,
+		'Show at most this many characters (the newest, cut at a word boundary).', 20, 200)
+	_page_par(captions_page, 'Float', 'Newcaption', 'New Caption After (Seconds)', 1.0,
+		'Speech after this many seconds without new text starts a fresh caption (0 = keep adding).', 0, 5)
+	_page_par(captions_page, 'Float', 'Hold', 'Hold (Seconds)', 4.0,
+		'Clear the caption after this many seconds without new text.', 0.5, 15)
+	_page_par(captions_page, 'Float', 'Fontsize', 'Font Size', 56, 'Caption text size in pixels.', 16, 120)
+	resolution = captions_page.appendInt('Captionresolution', label='Resolution', size=2)
+	for parameter, value in zip(resolution, (1920, 1080)):
+		parameter.val = parameter.default = value
+	resolution[0].help = 'Size of the caption image (transparent; the caption sits along the bottom).'
+	debug_page = comp.appendCustomPage('Debug')
+	_page_par(debug_page, 'Toggle', 'Debugoverlay', 'Show Captions', True,
+		'Off = TOP 1 stays transparent and the caption chain does not cook.')
+	release = comp.appendCustomPage('About').appendStr('Version', label='Version')[0]
+	release.val = release.default = version()
+	release.readOnly = True
+	if pulses:
+		forward = comp.create('parameterexecuteDAT', 'model_pulses')
+		forward.par.op = '..'
+		forward.par.pars = ' '.join(pulses)
+		forward.par.valuechange = False
+		forward.par.onpulse = True
+		forward.text = "def onPulse(par):\n\tparent().op('inference').par[par.name].pulse()\n"
+
+	latest = comp.create('scriptDAT', 'latest')
+	comp.op('latest_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_latest(scriptOp, parent())\n")
+	_connect(latest, transcript)
+	lines = comp.create('scriptDAT', 'caption_lines')
+	comp.op('caption_lines_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_captions(scriptOp, parent())\n")
+	_connect(lines, transcript)
+	# The Hold timeout needs a cook every frame while the captions are shown.
+	frame = lines.appendCustomPage('Cook').appendInt('Frame', label='Frame')[0]
+	frame.expr = 'absTime.frame'
+	frame.readOnly = True
+
+	shown = "op('caption_lines')[0, 0] is not None and op('caption_lines')[0, 0].val"
+	text = comp.create('textTOP', 'caption_text')
+	text.par.outputresolution = 'custom'
+	text.par.resolutionw.expr = 'int(parent().par.Captionresolution1 * 0.78)'
+	text.par.resolutionh.expr = 'int(parent().par.Fontsize * 3.4)'
+	text.par.dat = 'caption_lines'
+	text.par.text = ''	# else its default text is drawn as well
+	text.par.wordwrap = True
+	text.par.alignx, text.par.aligny = 'center', 'center'
+	text.par.fontsizex.expr = 'parent().par.Fontsize'
+	text.par.fontcolorr = text.par.fontcolorg = text.par.fontcolorb = 1.0
+	text.par.bgcolorr = text.par.bgcolorg = text.par.bgcolorb = 0.0
+	text.par.bgalpha.expr = f'0.65 if {shown} else 0'
+	text.par.fontalpha.expr = f'1 if {shown} else 0'
+	canvas = comp.create('constantTOP', 'caption_canvas')
+	transparent = comp.create('constantTOP', 'transparent')
+	for node in (canvas, transparent):
+		node.par.outputresolution = 'custom'
+		node.par.resolutionw.expr = 'parent().par.Captionresolution1'
+		node.par.resolutionh.expr = 'parent().par.Captionresolution2'
+		for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
+			node.par[channel] = 0
+	captions = comp.create('overTOP', 'captions')
+	# Over TOP: input 1 goes over input 2, and the output takes input 2's resolution (the canvas).
+	_connect(captions, text, canvas)
+	captions.par.prefit = 'nativeres'
+	captions.par.justifyv, captions.par.justifyh = 'bottom', 'center'
+	captions.par.tunit = 'pixels'
+	captions.par.ty.expr = 'int(parent().par.Captionresolution2 * 0.055)'
+	preview = comp.create('switchTOP', 'preview')
+	preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
+	_connect(preview, transparent, captions)
+	_connect(comp.create('outTOP', 'debug'), preview)
+
+	for index, suffix in enumerate(('transcript', 'latest'), 1):
+		output = comp.create('outDAT', 'out_' + suffix)
+		output.par.connectorder = index
+		_connect(output, comp.op(suffix))
+	# The plugin's own info channels only (the Info CHOP adds cook stats and a second sample_rate).
+	status = comp.create('selectCHOP', 'status')
+	status.par.chop = 'inference_stats'
+	status.par.channames = 'loaded loading infer_ms results'
+	channels = comp.create('mergeCHOP', 'channels')
+	_connect(channels, plugin, status)
+	_connect(comp.create('outCHOP', 'out_channels'), channels)
+	for node in comp.findChildren():
+		node.viewer = False
+	comp.par.opviewer = 'debug'
 
 
 def build_demo(parent_comp, names, name='VisionDemo'):
