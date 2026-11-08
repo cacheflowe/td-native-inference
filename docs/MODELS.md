@@ -204,6 +204,7 @@ Give it text in either of two ways:
 - **Play Audio** and **Volume** play the voice on the default audio device. Turn Play Audio off to route CHOP 1 yourself.
 
 Model: Kokoro-82M (Apache-2.0), as a LiteRT `.litertlm` bundle with its voices and text front ends.
+It isn't in the zip (280 MB): run `fetch_models.ps1` once (see the README).
 
 ### MediaPipe Sound Classifier (`MediaPipeSoundClassifier.tox`)
 Recognizes 521 kinds of sound, from speech and music to dogs, sirens, clapping and engines. Each

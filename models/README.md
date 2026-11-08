@@ -4,7 +4,7 @@ Model files aren't committed (they're large, and some licenses don't allow redis
 Put them here with this layout. The wrappers refer to them as `models/...`; the plugins look for
 that path under the project folder first, then under the folder holding the plugin DLL (an
 installed `Documents/Derivative/Plugins/td-native-inference/models/`). The release zip bundles
-every model below except YOLO26.
+every model below except YOLO26 and Kokoro, which `scripts/fetch_models.ps1` downloads.
 
 ```
 models/
@@ -36,7 +36,7 @@ models/
 | `mediapipe/yamnet.tflite` | Classify Sounds | [MediaPipe audio classifier](https://ai.google.dev/edge/mediapipe/solutions/audio/audio_classifier) (`storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite`) | Apache-2.0 |
 | `asr/moonshine_tiny_5s_i8.litertlm` | Transcribe Speech (default) | [litert-community/moonshine-tiny](https://huggingface.co/litert-community/moonshine-tiny) | MIT |
 | `asr/whisper_tiny_30s_i8.litertlm` | Transcribe Speech | [litert-community/whisper-tiny](https://huggingface.co/litert-community/whisper-tiny) | Apache-2.0 (Whisper: MIT) |
-| `tts/kokoro_int8_fp16.litertlm` | Speak Text | [litert-community/Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M) at revision `33ad69f` (the CPU build; `kokoro_int8_gpu_fp16` needs a GPU delegate) | Apache-2.0 |
+| `tts/kokoro_int8_fp16.litertlm` | Speak Text | [litert-community/Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M) at revision `33ad69f` (the CPU build; `kokoro_int8_gpu_fp16` needs a GPU delegate). Not in the zip (size): `scripts/fetch_models.ps1` downloads it, SHA-256 checked | Apache-2.0 |
 
 Larger speech-to-text bundles (Parakeet TDT, Qwen3-ASR) are in litert-community too; point
 **Transcriber Model** at one to try it.

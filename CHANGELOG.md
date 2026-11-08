@@ -10,7 +10,8 @@ Audio, through the new `MediaPipeCHOP.dll` (MediaPipe audio tasks, CPU):
   so room noise doesn't turn into text.
 - `MediaPipeTextToSpeech.tox`: Kokoro text to speech (54 voices, 9 languages) from a parameter or
   any DAT, played on the default audio device and output as 24 kHz audio, with a caption of the
-  line being spoken.
+  line being spoken. Its voice model (280 MB) downloads with `fetch_models.ps1`, which now also
+  continues without YOLO26 if you decline its license.
 - `MediaPipeSoundClassifier.tox`: YAMNet's 521 sound classes as smoothed channels, a top-results
   DAT and display, and score / active / onset channels for chosen classes.
 - `AudioDemo.tox`: the three together, with an option to speak what it hears.

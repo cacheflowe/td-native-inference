@@ -52,9 +52,11 @@ model also outputs a tracking table and CHOP channels; tracking is ByteTrack-sty
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
    `OnnxTOP.dll`, `MediaPipeTOP.dll` and `MediaPipeCHOP.dll`.
-3. **Optional, for the YOLO26 models:** YOLO26 is AGPL-3.0, so it isn't in the zip. In the
-   installed folder, right-click `fetch_models.ps1` > **Run with PowerShell**. It downloads the
-   three models (about 90 MB, checksum-verified) into the folder's `models\`.
+3. **Optional, for YOLO26 and text to speech:** in the installed folder, right-click
+   `fetch_models.ps1` > **Run with PowerShell**. It downloads, checksum-verified, into the folder's
+   `models\`:
+   - **YOLO26** (about 90 MB). It's AGPL-3.0, so it isn't in the zip, and the script asks first.
+   - **The Kokoro voice** for text to speech (about 280 MB).
 
 Keep the `tox` folder wherever you like, for example next to your projects.
 
@@ -87,7 +89,7 @@ frame rate meanwhile); after that it loads in seconds.
 - **No sound from text to speech**: **Play Audio** (Output page) uses the default audio device; to
   pick a device, turn it off and wire CHOP 1 into your own Audio Device Out.
 - **"Model not found ... Looked for models/... in the project folder and in ..."**: the model isn't
-  in the installed `models\` folder. For YOLO26, run `fetch_models.ps1`.
+  in the installed `models\` folder. For YOLO26 or text to speech, run `fetch_models.ps1`.
 - **ONNX models run on CUDA with a TensorRT warning**: the engine is still building (the
   `trt_building` channel is 1), or an NVIDIA Background TOP loaded its own TensorRT first in this
   session; see [cpp/OnnxTOP/README.md](cpp/OnnxTOP/README.md).

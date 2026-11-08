@@ -58,14 +58,16 @@ Whisper Tiny speech to text, LiteRT bundle: asr/whisper_tiny_30s_i8.litertlm
   Whisper by OpenAI, MIT License; LiteRT conversion by litert-community (Apache License 2.0).
   https://huggingface.co/litert-community/whisper-tiny
 
+Downloaded by td-native-inference/fetch_models.ps1
+--------------------------------------------------
 Kokoro-82M text to speech, LiteRT bundle: tts/kokoro_int8_fp16.litertlm
   Kokoro by hexgrad, Apache License 2.0; LiteRT-LM bundle with its voices and text front ends by
-  litert-community (Apache License 2.0).
+  litert-community (Apache License 2.0). Left out of the zip only for its size.
   https://huggingface.co/litert-community/Kokoro-82M
 
 Not included
 ------------
 YOLO26 detection, segmentation and pose models (Ultralytics) are licensed under AGPL-3.0 and are
-not part of this package. td-native-inference/fetch_models.ps1 exports them on your machine with
-the Ultralytics package; their use is governed by Ultralytics' license
+not part of this package. td-native-inference/fetch_models.ps1 downloads ONNX exports of them
+(from Hugging Face, after asking); their use is governed by Ultralytics' license
 (https://www.ultralytics.com/license).

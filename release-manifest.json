@@ -42,7 +42,6 @@
 		"models/mediapipe/yamnet.tflite": "td-native-inference/models/mediapipe/yamnet.tflite",
 		"models/asr/moonshine_tiny_5s_i8.litertlm": "td-native-inference/models/asr/moonshine_tiny_5s_i8.litertlm",
 		"models/asr/whisper_tiny_30s_i8.litertlm": "td-native-inference/models/asr/whisper_tiny_30s_i8.litertlm",
-		"models/tts/kokoro_int8_fp16.litertlm": "td-native-inference/models/tts/kokoro_int8_fp16.litertlm",
 		"models/onnx/yunet/face_detection_yunet_2023mar.onnx": "td-native-inference/models/onnx/yunet/face_detection_yunet_2023mar.onnx",
 		"models/onnx/movenet/movenet-multipose-lightning.onnx": "td-native-inference/models/onnx/movenet/movenet-multipose-lightning.onnx",
 		"models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx": "td-native-inference/models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx",
