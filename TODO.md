@@ -67,10 +67,10 @@ per slot when the first non-video model lands, not before:
 ## Housekeeping
 
 - [x] Retired `/project1/ONNX_Native` and `python/mediapipe_hands_component.py` (Nov 7).
-- [ ] Delete the stale `cache/trt/` engine folder.
+- [x] Deleted the stale `cache/trt/` engine folder (Nov 7); `.gitattributes` added.
 - [ ] AudioDemo COMP once MediaPipeAudio/MediaPipeSpeech toxes exist (v0.2).
 - [ ] TensorRT cache: a per-user cache (`%LOCALAPPDATA%`) keyed by model content, for read-only
       installs. Today it's `trt_cache/` next to each model, which is writable in Documents.
-- [ ] Plugin metadata version from `VERSION`; CI build (GitHub Actions, CUDA toolkit).
-- [ ] `.gitattributes` (LF/CRLF warnings on every commit).
+- [x] Plugins compile in the version from `VERSION`; `package` checks it.
+- [ ] CI build (GitHub Actions, CUDA toolkit).
 - [ ] haxlib side: point its scripts at this repo's Python or keep a copy; remove its `cpp/`.

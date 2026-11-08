@@ -567,7 +567,8 @@ void MediaPipeTOP::getErrorString(OP_String* error, void*)
 void MediaPipeTOP::getInfoPopupString(OP_String* info, void*)
 {
 	std::string lib = mpapi::loadedPath();
-	std::string s = "MediaPipe Tasks C API (CPU / XNNPACK)\n" + (lib.empty() ? std::string("libmediapipe.dll not loaded") : lib) + "\n";
+	std::string s = "td-native-inference " TDNI_VERSION "\nMediaPipe Tasks C API (CPU / XNNPACK)\n" +
+		(lib.empty() ? std::string("libmediapipe.dll not loaded") : lib) + "\n";
 	s += std::string("Task: ") + kTaskLabels[(int)myTask] + "\nModel: " + myModelPath + "\n";
 	s += "Frame sent to MediaPipe: " + std::to_string(myFrameW) + "x" + std::to_string(myFrameH) + "\n";
 	char buf[128];

@@ -3,6 +3,12 @@ project(OnnxTOP LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The release version (VERSION at the repo root) is compiled in: the info popup shows it and
+# scripts/release.py checks that packaged plugins carry it.
+set(TDNI_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION")
+file(STRINGS "${TDNI_VERSION_FILE}" TDNI_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TDNI_VERSION_FILE}")
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
@@ -42,6 +48,7 @@ set_target_properties(onnx_core PROPERTIES
 add_library(OnnxTOP SHARED src/OnnxTOP.cpp)
 target_include_directories(OnnxTOP PRIVATE "${TD_SDK_DIR}")
 target_link_libraries(OnnxTOP PRIVATE onnx_core)
+target_compile_definitions(OnnxTOP PRIVATE TDNI_VERSION="${TDNI_VERSION}")
 set_target_properties(OnnxTOP PROPERTIES CUDA_RUNTIME_LIBRARY Shared)
 
 # Companion exe: out-of-process TensorRT engine builder (launched by the TOP) + bench.

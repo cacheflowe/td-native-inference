@@ -25,7 +25,8 @@ class ReleaseTests(unittest.TestCase):
 		for name in self.files:
 			path = self.root / name
 			path.parent.mkdir(parents=True, exist_ok=True)
-			path.write_text('fixture\n', encoding='utf-8')
+			# Versioned plugins carry the version string the build compiles in.
+			path.write_text('fixture td-native-inference 0.1.0\n' if name in release.VERSIONED_PLUGINS else 'fixture\n', encoding='utf-8')
 		(self.root / 'VERSION').write_text('0.1.0\n', encoding='utf-8')
 		(self.root / 'CHANGELOG.md').write_text('# Changes\n\n## Unreleased\n\n- First release.\n', encoding='utf-8')
 		(self.root / 'release-manifest.json').write_text(json.dumps({'files': self.files}), encoding='utf-8')
@@ -105,6 +106,14 @@ class ReleaseTests(unittest.TestCase):
 			self.assertEqual(source.read(f'{prefix}/pkg/models/mediapipe/hand.task'), b'model')
 		with contextlib.redirect_stdout(io.StringIO()):
 			release.verify(self.root)
+
+	def test_plugin_built_for_another_version_blocks_packaging(self):
+		(self.root / 'plugins/MediaPipeTOP.dll').write_text('fixture td-native-inference 0.0.9\n', encoding='utf-8')
+		with contextlib.redirect_stdout(io.StringIO()):
+			release.prepare(self.root, '0.1.0')
+			self.commit()
+			with self.assertRaisesRegex(ValueError, 'MediaPipeTOP.dll was not built for v0.1.0'):
+				release.package(self.root)
 
 	def test_rejects_agpl_models(self):
 		model = self.root / 'models/onnx/yolo26/yolo26s.onnx'

@@ -1048,7 +1048,8 @@ void OnnxTOP::getErrorString(OP_String* error, void*)
 
 void OnnxTOP::getInfoPopupString(OP_String* info, void*)
 {
-	std::string s = "ONNX Runtime " + ortload::version() + "\n" + ortload::loadedPath() + "\n";
+	std::string s = "td-native-inference " TDNI_VERSION "\nONNX Runtime " + ortload::version() + "\n" +
+		ortload::loadedPath() + "\n";
 	if (myEngine)
 	{
 		s += "Provider: " + myEngine->providerDescription() + "\n";

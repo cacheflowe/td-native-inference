@@ -3,6 +3,12 @@ project(MediaPipeCHOP LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The release version (VERSION at the repo root) is compiled in: the info popup shows it and
+# scripts/release.py checks that packaged plugins carry it.
+set(TDNI_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION")
+file(STRINGS "${TDNI_VERSION_FILE}" TDNI_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TDNI_VERSION_FILE}")
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
 # TouchDesigner CHOP plugin SDK headers, read straight from the installed TD.
@@ -18,7 +24,7 @@ set(MP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../MediaPipeTOP/third_party/medi
 
 add_library(MediaPipeCHOP SHARED src/MediaPipeCHOP.cpp src/MpAudio.cpp)
 target_include_directories(MediaPipeCHOP PRIVATE src "${TD_SDK_DIR}" "${MP_INCLUDE_DIR}")
-target_compile_definitions(MediaPipeCHOP PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(MediaPipeCHOP PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN TDNI_VERSION="${TDNI_VERSION}")
 
 # Console test: classifies a synthetic sine and silence (no TD).
 add_executable(audio_test tools/audio_test.cpp src/MpAudio.cpp)

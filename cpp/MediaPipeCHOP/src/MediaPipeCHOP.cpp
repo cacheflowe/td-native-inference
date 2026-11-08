@@ -465,7 +465,8 @@ void MediaPipeCHOP::getErrorString(OP_String* error, void*)
 
 void MediaPipeCHOP::getInfoPopupString(OP_String* info, void*)
 {
-	std::string s = std::string("MediaPipe audio, CPU, worker thread: ") + kTaskLabels[(int)myTask] + "\n" +
+	std::string s = std::string("td-native-inference " TDNI_VERSION "\nMediaPipe audio, CPU, worker thread: ") +
+		kTaskLabels[(int)myTask] + "\n" +
 		number(mySampleRate) + " Hz input\n";
 	info->setString(s.c_str());
 }

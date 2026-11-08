@@ -20,8 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATTERN = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
 BINARY_FILES = {
 	'plugins/OnnxTOP.dll', 'plugins/onnxtop_tool.exe',
-	'plugins/MediaPipeTOP.dll', 'plugins/libmediapipe.dll',
+	'plugins/MediaPipeTOP.dll', 'plugins/libmediapipe.dll', 'plugins/MediaPipeCHOP.dll',
 }
+# Our plugins compile in "td-native-inference <VERSION>" (CMake reads VERSION); packaging refuses
+# a plugin built for another version.
+VERSIONED_PLUGINS = {'plugins/OnnxTOP.dll', 'plugins/MediaPipeTOP.dll', 'plugins/MediaPipeCHOP.dll'}
 MODEL_SUFFIXES = ('.onnx', '.task', '.tflite')
 # Licenses that don't allow bundling in this Apache-2.0 package (fetch_models.ps1 gets them).
 BLOCKED_MODELS = ('yolo',)
@@ -181,6 +184,10 @@ def package(root):
 	if archive.exists():
 		fail(f'{archive.name} already exists; use a new version or remove the local artifact yourself.')
 	payload = {target: (root / source).read_bytes() for source, target in files}
+	marker = f'td-native-inference {version(root)}'.encode()
+	for source, target in files:
+		if source in VERSIONED_PLUGINS and marker not in payload[target]:
+			fail(f'{source} was not built for v{version(root)}: rebuild it from this commit.')
 	metadata = {
 		'version': version(root), 'source_commit': commit,
 		'files': {name: sha256(data) for name, data in payload.items()},

@@ -3,6 +3,12 @@ project(MediaPipeTOP LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# The release version (VERSION at the repo root) is compiled in: the info popup shows it and
+# scripts/release.py checks that packaged plugins carry it.
+set(TDNI_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../../VERSION")
+file(STRINGS "${TDNI_VERSION_FILE}" TDNI_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TDNI_VERSION_FILE}")
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
@@ -34,7 +40,7 @@ add_library(MediaPipeTOP SHARED
 	"${ONNXTOP_SRC}/Kernels.cu"
 )
 target_include_directories(MediaPipeTOP PRIVATE src "${ONNXTOP_SRC}" "${TD_SDK_DIR}" "${MP_INCLUDE_DIR}")
-target_compile_definitions(MediaPipeTOP PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+target_compile_definitions(MediaPipeTOP PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN TDNI_VERSION="${TDNI_VERSION}")
 target_link_libraries(MediaPipeTOP PRIVATE CUDA::cudart)
 set_target_properties(MediaPipeTOP PROPERTIES CUDA_RUNTIME_LIBRARY Shared)
 

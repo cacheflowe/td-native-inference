@@ -22,19 +22,20 @@ td-native-inference-vX.Y.Z/
 different archive path. `release.py` refuses anything else: media, caches, TensorRT engines,
 unknown binaries, model files not listed one by one, and any YOLO model. Built binaries and
 models are gitignored, so they're recorded by SHA-256 in `release.json` instead of being checked
-against HEAD; build both plugins from the release commit. `VERSION` is the version source of
-truth (it doesn't update the plugins' own metadata yet).
+against HEAD; build the plugins from the release commit. `VERSION` is the version source of
+truth: CMake compiles it into each plugin (shown in its info popup), and `package` refuses a
+plugin built for another version.
 
 ## Workflow
 
 1. **Regenerate the toxes** if anything in `wrappers/`, `python/` or `tox/shared/` changed: POST
    `scripts/build_wrappers.py` (with `DEMO = True`) to the bridge's `/run`, then
    `tests/td_wrapper_lab.py` and check `build/wrapper-lab.json`.
-2. **Build both plugins** from the source you'll commit (`cpp\OnnxTOP\build.cmd`,
-   `cpp\MediaPipeTOP\build.cmd`).
-3. Add notes under `## Unreleased` in `CHANGELOG.md`, commit, then
-   `python scripts/release.py prepare patch` (or `minor`, `major`, `X.Y.Z`; the first release can
-   use the current `0.1.0`). Review and commit `VERSION` + `CHANGELOG.md`.
+2. Add notes under `## Unreleased` in `CHANGELOG.md`, commit, then
+   `python scripts/release.py prepare patch` (or `minor`, `major`, `X.Y.Z`). Review and commit
+   `VERSION` + `CHANGELOG.md`.
+3. **Build the plugins** after that commit, so they carry the new version
+   (`cpp\OnnxTOP\build.cmd`, `cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd`).
 4. `python scripts/release.py package` builds `build/td-native-inference-vX.Y.Z.zip` from the clean
    committed tree.
 5. **Test the extracted zip** in a fresh TD process with the plugins installed the way users
