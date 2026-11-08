@@ -1,0 +1,20 @@
+{
+	"name": "MediaPipeTextToSpeech",
+	"label": "MediaPipe Text to Speech",
+	"input": "text",
+	"plugin": "MediapipeaudioCHOP",
+	"kind": "speech",
+	"preset": {
+		"Task": "speak",
+		"Text": "Hello from TouchDesigner."
+	},
+	"model": [
+		"Speakmodel",
+		"Text",
+		"Speak",
+		"Speakonchange",
+		"Voice",
+		"Rate",
+		"Stop"
+	]
+}

@@ -1,0 +1,20 @@
+{
+	"name": "MediaPipeSoundClassifier",
+	"label": "MediaPipe Sound Classifier",
+	"input": "audio",
+	"plugin": "MediapipeaudioCHOP",
+	"kind": "scores",
+	"preset": {
+		"Task": "classify"
+	},
+	"model": [
+		"Classifiermodel",
+		"Window",
+		"Hop"
+	],
+	"classes": {
+		"smoothing": 0.3,
+		"watch": "Speech Music Clapping Finger_snapping Whistling",
+		"threshold": 0.3
+	}
+}

@@ -48,6 +48,13 @@ def _begin_next():
 		return _finish()
 	name = state['queue'][0]
 	op(LAB).op('source').par.file = (SOURCES / IMAGES.get(name, DEFAULT_IMAGE)).as_posix()
+	comp = op(LAB).op(name)
+	if comp.fetch('wrapper_spec')['kind'] == 'speech':
+		# Muted while tested; a new line in the input DAT is what gets spoken.
+		state['play_audio'] = comp.par.Playaudio.eval()
+		comp.par.Playaudio = False
+		comp.unstore('lab_heard')
+		op(LAB).op('text_source').text = f'This is the wrapper lab, test number {absTime.frame}.'
 	state['frames'] = 0
 	op(LAB).store('lab_test', state)
 	run('args[0]()', _poll, delayFrames=2)
@@ -57,7 +64,7 @@ def _poll():
 	state = op(LAB).fetch('lab_test')
 	name = state['queue'][0]
 	comp = op(LAB).op(name)
-	for output in ('debug', 'out_channels', 'out_boxes'):
+	for output in ('debug', 'out_channels', 'out_boxes', 'out_audio'):
 		node = comp.op(output)
 		if node is not None:
 			node.cook(force=True)
@@ -77,6 +84,8 @@ def _poll():
 	state['results'][name] = _measure(comp, state['frames'], done)
 	if THUMBNAILS and done:
 		state['results'][name]['thumbnail'] = _thumbnail(comp)
+	if 'play_audio' in state:
+		comp.par.Playaudio = state.pop('play_audio')
 	state['queue'].pop(0)
 	op(LAB).store('lab_test', state)
 	run('args[0]()', _begin_next, delayFrames=1)
@@ -88,6 +97,17 @@ def _detected(comp):
 		# A final sentence, and the caption showing (it's cleared again after Hold seconds).
 		latest, lines = comp.op('latest'), comp.op('caption_lines')
 		return latest.numRows > 1 and bool(latest[1, 'text'].val) and bool(lines.numRows and lines[0, 0].val)
+	if spec['kind'] == 'scores':
+		# A confident sound other than Silence (the clip has pauses), for a useful thumbnail.
+		top = comp.op('top')
+		return top.numRows > 1 and top[1, 'class'].val != 'Silence' and float(top[1, 'score'].val or 0) > 0.5
+	if spec['kind'] == 'speech':
+		# Audible output (on any cook so far: speech has pauses) and the caption showing the line.
+		audio = comp.op('out_audio')['audio'].vals
+		if audio and max(abs(v) for v in audio) > 0.01:
+			comp.store('lab_heard', True)
+		text = comp.op('speaking_text')
+		return bool(comp.fetch('lab_heard', False)) and bool(text.numRows and text[0, 0].val)
 	if spec['kind'] == 'image':
 		return comp.op('debug').numpyArray()[..., :3].max() > 0
 	tracks = comp.op('tracks')
@@ -113,6 +133,27 @@ def _measure(comp, frames, detected):
 			'caption': comp.op('caption_lines')[0, 0].val if comp.op('caption_lines').numRows else '',
 			'channels': {channel.name: round(channel[0], 4) for channel in comp.op('out_channels').chans()},
 			'debug_size': [comp.op('debug').width, comp.op('debug').height],
+			'errors': {node.path: node.errors() for node in nodes if node.errors()},
+			'warnings': {node.path: node.warnings() for node in nodes if node.warnings()},
+		}
+	if spec['kind'] == 'speech':
+		lines = comp.op('out_lines')
+		return {
+			'detected': bool(detected), 'frames': frames, 'kind': spec['kind'],
+			'lines': [[cell.val for cell in row] for row in lines.rows()],
+			'caption': comp.op('speaking_text')[0, 0].val if comp.op('speaking_text').numRows else '',
+			'audio_rate': comp.op('out_audio').rate,
+			'channels': {channel.name: round(channel[0], 3) for channel in comp.op('out_channels').chans()},
+			'errors': {node.path: node.errors() for node in nodes if node.errors()},
+			'warnings': {node.path: node.warnings() for node in nodes if node.warnings()},
+		}
+	if spec['kind'] == 'scores':
+		top = comp.op('top')
+		return {
+			'detected': bool(detected), 'frames': frames, 'kind': spec['kind'],
+			'top': [f"{top[row, 'label'].val} {top[row, 'score'].val}" for row in range(1, top.numRows)],
+			'events': {channel.name: round(channel[0], 3) for channel in comp.op('out_channels').chans()},
+			'score_channels': comp.op('out_scores').numChans,
 			'errors': {node.path: node.errors() for node in nodes if node.errors()},
 			'warnings': {node.path: node.warnings() for node in nodes if node.warnings()},
 		}
@@ -154,15 +195,15 @@ def _thumbnail(comp):
 			node.inputConnectors[1].connect(bottom)
 			return node
 
-		if spec['kind'] == 'transcript':
-			# The caption over a dark backdrop at the caption image's size.
+		if spec.get('input') in ('audio', 'text'):
+			# The caption / top results over a dark backdrop at the debug image's size.
 			source = work.create('constantTOP')
 			source.par.outputresolution = 'custom'
 			source.par.resolutionw, source.par.resolutionh = comp.op('debug').width, comp.op('debug').height
 			source.par.colorr, source.par.colorg, source.par.colorb = 0.12, 0.13, 0.15
 		else:
 			source = select('passthrough')
-		if spec['kind'] == 'transcript':
+		if spec.get('input') in ('audio', 'text'):
 			panels = [over(select('debug'), source)]
 		elif spec['kind'] == 'image':
 			panels = [source, select('debug')]

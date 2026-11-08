@@ -31,8 +31,7 @@ MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
-KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript')
-AUDIO_KINDS = ('transcript',)
+KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript', 'scores', 'speech')
 ALWAYS_EXPOSED = ('Active',)
 ALWAYS_PULSES = ('Reload',)
 
@@ -79,7 +78,28 @@ LAYOUT_AUDIO = {
 	'inference_stats': (0, -540), 'status': (1, -540), 'channels': (2, -470), 'out_channels': (7, -470),
 	'component': (0, -100), 'model_pulses': (0, -260),
 }
-DOCKED_AUDIO = ('caption_lines_callbacks', 'latest_callbacks')
+LAYOUT_AUDIO_SCORES = {
+	'input': (0, 180), 'inference': (1, 180), 'keep_cooking': (1, 330), 'info': (1, 20),
+	'scores': (2, 180), 'out_scores': (7, 180),
+	'top_lines': (3, 380), 'top_text': (4, 380), 'transparent': (5, 520), 'preview': (6, 450), 'debug': (7, 450),
+	'top': (2, -100), 'out_top': (7, -100),
+	'events': (2, -300), 'inference_stats': (0, -540), 'status': (1, -540), 'channels': (3, -420),
+	'out_channels': (7, -420), 'component': (0, -100), 'model_pulses': (0, -260),
+}
+LAYOUT_AUDIO_SPEECH = {
+	'input': (0, 20), 'input_watch': (1, 20), 'inference': (1, 180), 'keep_cooking': (1, 330),
+	'voice_left': (2, 400), 'voice_right': (2, 290), 'stereo': (3, 345), 'audio_out': (4, 345),
+	'out_audio': (7, 180),
+	'speaking_text': (3, 600), 'caption_text': (4, 680), 'caption_canvas': (4, 540), 'captions': (5, 610),
+	'transparent': (5, 760), 'preview': (6, 610), 'debug': (7, 610),
+	'info': (2, -100), 'out_lines': (7, -100),
+	'inference_stats': (0, -540), 'status': (1, -540), 'out_channels': (7, -540),
+	'component': (0, -260), 'model_pulses': (0, -400),
+}
+DOCKED_AUDIO = ('caption_lines_callbacks', 'latest_callbacks', 'top_callbacks', 'events_callbacks',
+	'top_lines_callbacks', 'speaking_text_callbacks')
+# Non-video wrappers by input: audio (an audio CHOP) or text (an optional DAT).
+INPUT_KINDS = {'audio': ('transcript', 'scores'), 'text': ('speech',)}
 
 DEMO_ROW = 180
 
@@ -89,7 +109,7 @@ def root():
 
 
 def spec_names(input_kind=None):
-	"""Every spec name, or only those for one input ('video' or 'audio')."""
+	"""Every spec name, or only those for one input ('video', 'audio' or 'text')."""
 	names = sorted(path.stem for path in (root() / 'wrappers').glob('*.json'))
 	return names if input_kind is None else [name for name in names if load_spec(name).get('input', 'video') == input_kind]
 
@@ -99,8 +119,9 @@ def load_spec(name):
 	assert spec.get('name') == name, f'[WrapperBuilder] {name}.json names itself {spec.get("name")!r}'
 	assert spec.get('kind') in KINDS, f'[WrapperBuilder] {name}: kind must be one of {KINDS}'
 	assert spec['kind'] != 'classifier' or spec.get('detector'), f'[WrapperBuilder] {name}: classifier needs a detector'
-	audio = spec.get('input', 'video') == 'audio'
-	assert audio == (spec['kind'] in AUDIO_KINDS), f'[WrapperBuilder] {name}: kind {spec["kind"]} needs input {"video" if audio else "audio"}'
+	source = spec.get('input', 'video')
+	expected = next((kind for kind, kinds in INPUT_KINDS.items() if spec['kind'] in kinds), 'video')
+	assert source == expected, f'[WrapperBuilder] {name}: kind {spec["kind"]} needs input {expected!r}, not {source!r}'
 	return spec
 
 
@@ -341,8 +362,9 @@ def _build_pages(comp, spec, plugin, tracker):
 
 
 def _layout(comp, spec):
-	if spec.get('input') == 'audio':
-		positions, docked = LAYOUT_AUDIO, DOCKED_AUDIO
+	if spec.get('input') in INPUT_KINDS:
+		positions = {'scores': LAYOUT_AUDIO_SCORES, 'speech': LAYOUT_AUDIO_SPEECH}.get(spec['kind'], LAYOUT_AUDIO)
+		docked = DOCKED_AUDIO
 	else:
 		positions, docked = dict(LAYOUT, **LAYOUT_KIND.get(spec['kind'], {})), DOCKED
 		if spec.get('result') == 'inference':
@@ -389,7 +411,7 @@ def build(spec, parent_comp, name=None):
 	if position is not None:
 		comp.nodeX, comp.nodeY = position
 	comp.store('wrapper_spec', spec)
-	if spec.get('input') == 'audio':
+	if spec.get('input') in INPUT_KINDS:
 		_build_audio(comp, spec)
 		_layout(comp, spec)
 		_restore_wires(comp, inputs, outputs)
@@ -451,48 +473,34 @@ def _page_par(page, kind, name, label, value, help_text, low=None, high=None):
 
 
 def _build_audio(comp, spec):
-	"""Audio wrapper: input CHOP -> the MediaPipe audio CHOP. Transcript kind: transcript (Info
-	DAT) and latest (newest sentence + interim) DATs, the native channels plus stats as a CHOP, and
-	a closed-caption TOP: caption_lines (text) -> caption_text on a transparent canvas."""
+	"""Audio wrapper: input (an audio CHOP, or for text input an optional DAT) -> the MediaPipe audio
+	CHOP (`inference`, cooked every frame), `info` (its Info DAT), the Model page, then the kind's
+	own outputs (_build_transcript, _build_scores, _build_speech) and the About page."""
 	_add_code(comp, ())
-	comp.create('inCHOP', 'input')
+	text_input = spec['input'] == 'text'
+	comp.create('inDAT' if text_input else 'inCHOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
 		_set(plugin, parameter, value)
-	_connect(plugin, comp.op('input'))
+	if not text_input:
+		_connect(plugin, comp.op('input'))
 	# Nothing may need this wrapper's outputs on a given frame, but audio keeps arriving: cook the
-	# native node every frame so no speech is missed.
+	# native node every frame so nothing is missed.
 	keep = comp.create('executeDAT', 'keep_cooking')
 	keep.par.framestart = True
 	keep.text = ("def onFrameStart(frame):\n\tif parent().par.Active.eval():\n"
 		"\t\tparent().op('inference').cook()\n")
-	transcript = comp.create('infoDAT', 'transcript')
-	transcript.par.op = 'inference'
-	stats = comp.create('infoCHOP', 'inference_stats')
-	stats.par.op = 'inference'
+	comp.create('infoDAT', 'info').par.op = 'inference'
+	comp.create('infoCHOP', 'inference_stats').par.op = 'inference'
+	# The plugin's own info channels only (the Info CHOP adds cook stats and a second sample_rate).
+	status = comp.create('selectCHOP', 'status')
+	status.par.chop = 'inference_stats'
+	status.par.channames = 'loaded loading infer_ms results' + (' queued' if text_input else '')
 
 	model_page = comp.appendCustomPage('Model')
 	pulses = []
 	for name in (*ALWAYS_EXPOSED, *spec.get('model', ()), *ALWAYS_PULSES):
 		pulses += _expose(model_page, plugin, name)[1]
-	captions_page = comp.appendCustomPage('Captions')
-	_page_par(captions_page, 'Int', 'Maxchars', 'Max Characters', 90,
-		'Show at most this many characters (the newest, cut at a word boundary).', 20, 200)
-	_page_par(captions_page, 'Float', 'Newcaption', 'New Caption After (Seconds)', 1.0,
-		'Speech after this many seconds without new text starts a fresh caption (0 = keep adding).', 0, 5)
-	_page_par(captions_page, 'Float', 'Hold', 'Hold (Seconds)', 4.0,
-		'Clear the caption after this many seconds without new text.', 0.5, 15)
-	_page_par(captions_page, 'Float', 'Fontsize', 'Font Size', 56, 'Caption text size in pixels.', 16, 120)
-	resolution = captions_page.appendInt('Captionresolution', label='Resolution', size=2)
-	for parameter, value in zip(resolution, (1920, 1080)):
-		parameter.val = parameter.default = value
-	resolution[0].help = 'Size of the caption image (transparent; the caption sits along the bottom).'
-	debug_page = comp.appendCustomPage('Debug')
-	_page_par(debug_page, 'Toggle', 'Debugoverlay', 'Show Captions', True,
-		'Off = TOP 1 stays transparent and the caption chain does not cook.')
-	release = comp.appendCustomPage('About').appendStr('Version', label='Version')[0]
-	release.val = release.default = version()
-	release.readOnly = True
 	if pulses:
 		forward = comp.create('parameterexecuteDAT', 'model_pulses')
 		forward.par.op = '..'
@@ -500,6 +508,60 @@ def _build_audio(comp, spec):
 		forward.par.valuechange = False
 		forward.par.onpulse = True
 		forward.text = "def onPulse(par):\n\tparent().op('inference').par[par.name].pulse()\n"
+
+	{'transcript': _build_transcript, 'scores': _build_scores, 'speech': _build_speech}[spec['kind']](comp, spec)
+	release = comp.appendCustomPage('About').appendStr('Version', label='Version')[0]
+	release.val = release.default = version()
+	release.readOnly = True
+	for node in comp.findChildren():
+		node.viewer = False
+	comp.par.opviewer = 'debug'
+
+
+def _transparent_switch(comp, shown, width_expr, height_expr):
+	"""`preview` -> Out TOP `debug`: `shown` when Debug Overlay is on, else transparent."""
+	transparent = comp.create('constantTOP', 'transparent')
+	transparent.par.outputresolution = 'custom'
+	transparent.par.resolutionw.expr = width_expr
+	transparent.par.resolutionh.expr = height_expr
+	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
+		transparent.par[channel] = 0
+	preview = comp.create('switchTOP', 'preview')
+	preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
+	_connect(preview, transparent, shown)
+	_connect(comp.create('outTOP', 'debug'), preview)
+
+
+def _out_dats(comp, names):
+	for index, name in enumerate(names, 1):
+		output = comp.create('outDAT', 'out_' + name)
+		output.par.connectorder = index
+		_connect(output, comp.op(name))
+
+
+def _per_frame(script):
+	"""A custom parameter that changes every frame, so the script re-cooks whenever it's pulled."""
+	frame = script.appendCustomPage('Cook').appendInt('Frame', label='Frame')[0]
+	frame.expr = 'absTime.frame'
+	frame.readOnly = True
+
+
+def _build_transcript(comp, spec):
+	"""Speech to text: transcript (the Info DAT) and latest (newest sentence + interim) DATs, the
+	native channels plus status as a CHOP, and a closed-caption TOP: caption_lines (text) ->
+	caption_text over a transparent canvas."""
+	comp.op('info').name = 'transcript'
+	transcript = comp.op('transcript')
+	captions_page = comp.appendCustomPage('Captions')
+	_page_par(captions_page, 'Int', 'Maxchars', 'Max Characters', 90,
+		'Show at most this many characters (the newest, cut at a word boundary).', 20, 200)
+	_page_par(captions_page, 'Float', 'Newcaption', 'New Caption After (Seconds)', 1.0,
+		'Speech after this many seconds without new text starts a fresh caption (0 = keep adding).', 0, 5)
+	_page_par(captions_page, 'Float', 'Hold', 'Hold (Seconds)', 4.0,
+		'Clear the caption after this many seconds without new text.', 0.5, 15)
+	_caption_size_pars(captions_page)
+	_page_par(comp.appendCustomPage('Debug'), 'Toggle', 'Debugoverlay', 'Show Captions', True,
+		'Off = TOP 1 stays transparent and the caption chain does not cook.')
 
 	latest = comp.create('scriptDAT', 'latest')
 	comp.op('latest_callbacks').text = (
@@ -509,17 +571,32 @@ def _build_audio(comp, spec):
 	comp.op('caption_lines_callbacks').text = (
 		"def onCook(scriptOp):\n\tparent().op('component').module.write_captions(scriptOp, parent())\n")
 	_connect(lines, transcript)
-	# The Hold timeout needs a cook every frame while the captions are shown.
-	frame = lines.appendCustomPage('Cook').appendInt('Frame', label='Frame')[0]
-	frame.expr = 'absTime.frame'
-	frame.readOnly = True
+	_per_frame(lines)	# the Hold timeout needs a cook every frame while the captions are shown
+	_caption_image(comp, 'caption_lines')
 
-	shown = "op('caption_lines')[0, 0] is not None and op('caption_lines')[0, 0].val"
+	_out_dats(comp, ('transcript', 'latest'))
+	channels = comp.create('mergeCHOP', 'channels')
+	_connect(channels, comp.op('inference'), comp.op('status'))
+	_connect(comp.create('outCHOP', 'out_channels'), channels)
+
+
+def _caption_size_pars(page):
+	_page_par(page, 'Float', 'Fontsize', 'Font Size', 56, 'Caption text size in pixels.', 16, 120)
+	resolution = page.appendInt('Captionresolution', label='Resolution', size=2)
+	for parameter, value in zip(resolution, (1920, 1080)):
+		parameter.val = parameter.default = value
+	resolution[0].help = 'Size of the caption image (transparent; the caption sits along the bottom).'
+
+
+def _caption_image(comp, dat_name):
+	"""TOP 1: the text in cell [0, 0] of `dat_name` in a dark strip along the bottom of a
+	transparent Captionresolution image (caption_text over caption_canvas), hidden when empty."""
+	shown = f"op('{dat_name}')[0, 0] is not None and op('{dat_name}')[0, 0].val"
 	text = comp.create('textTOP', 'caption_text')
 	text.par.outputresolution = 'custom'
 	text.par.resolutionw.expr = 'int(parent().par.Captionresolution1 * 0.78)'
 	text.par.resolutionh.expr = 'int(parent().par.Fontsize * 3.4)'
-	text.par.dat = 'caption_lines'
+	text.par.dat = dat_name
 	text.par.text = ''	# else its default text is drawn as well
 	text.par.wordwrap = True
 	text.par.alignx, text.par.aligny = 'center', 'center'
@@ -529,13 +606,11 @@ def _build_audio(comp, spec):
 	text.par.bgalpha.expr = f'0.65 if {shown} else 0'
 	text.par.fontalpha.expr = f'1 if {shown} else 0'
 	canvas = comp.create('constantTOP', 'caption_canvas')
-	transparent = comp.create('constantTOP', 'transparent')
-	for node in (canvas, transparent):
-		node.par.outputresolution = 'custom'
-		node.par.resolutionw.expr = 'parent().par.Captionresolution1'
-		node.par.resolutionh.expr = 'parent().par.Captionresolution2'
-		for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
-			node.par[channel] = 0
+	canvas.par.outputresolution = 'custom'
+	canvas.par.resolutionw.expr = 'parent().par.Captionresolution1'
+	canvas.par.resolutionh.expr = 'parent().par.Captionresolution2'
+	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
+		canvas.par[channel] = 0
 	captions = comp.create('overTOP', 'captions')
 	# Over TOP: input 1 goes over input 2, and the output takes input 2's resolution (the canvas).
 	_connect(captions, text, canvas)
@@ -543,25 +618,118 @@ def _build_audio(comp, spec):
 	captions.par.justifyv, captions.par.justifyh = 'bottom', 'center'
 	captions.par.tunit = 'pixels'
 	captions.par.ty.expr = 'int(parent().par.Captionresolution2 * 0.055)'
-	preview = comp.create('switchTOP', 'preview')
-	preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
-	_connect(preview, transparent, captions)
-	_connect(comp.create('outTOP', 'debug'), preview)
+	_transparent_switch(comp, captions, 'parent().par.Captionresolution1', 'parent().par.Captionresolution2')
 
-	for index, suffix in enumerate(('transcript', 'latest'), 1):
-		output = comp.create('outDAT', 'out_' + suffix)
-		output.par.connectorder = index
-		_connect(output, comp.op(suffix))
-	# The plugin's own info channels only (the Info CHOP adds cook stats and a second sample_rate).
-	status = comp.create('selectCHOP', 'status')
-	status.par.chop = 'inference_stats'
-	status.par.channames = 'loaded loading infer_ms results'
+
+def _build_speech(comp, spec):
+	"""Text to speech: Text + Speak on the Model page, or a DAT wired in (its newest row is spoken
+	whenever it changes, while Speak Input is on). CHOP 1 is the voice as 24 kHz audio plus
+	`speaking`, also played on the default audio device while Play Audio is on; CHOP 2 the status;
+	DAT `lines` (speaking + queued); TOP 1 a caption of the line being spoken."""
+	page = comp.appendCustomPage('Output')
+	_page_par(page, 'Toggle', 'Speakinput', 'Speak Input DAT', True,
+		"Speak the newest row of the DAT wired into the input whenever it changes (its 'text' column, "
+		'else its last cell).')
+	_page_par(page, 'Toggle', 'Playaudio', 'Play Audio', True,
+		'Play the voice on the default audio device. Off = only CHOP 1 (route it yourself).')
+	_page_par(page, 'Float', 'Volume', 'Volume', 1.0, 'Playback volume.', 0, 1)
+	_caption_size_pars(comp.appendCustomPage('Captions'))
+	_page_par(comp.appendCustomPage('Debug'), 'Toggle', 'Debugoverlay', 'Show Captions', True,
+		'Off = TOP 1 stays transparent and the caption chain does not cook.')
+
+	watch = comp.create('datexecuteDAT', 'input_watch')
+	watch.par.dat = 'input'
+	watch.par.tablechange = True
+	watch.text = "def onTableChange(dat):\n\tparent().op('component').module.speak_input(parent())\n"
+	plugin = comp.op('inference')
+	# Audio Device Out plays a mono CHOP on one side only: send the voice to both.
+	sides = []
+	for side in ('left', 'right'):
+		voice = comp.create('selectCHOP', 'voice_' + side)
+		voice.par.channames = 'audio'
+		voice.par.renamefrom, voice.par.renameto = 'audio', side
+		_connect(voice, plugin)
+		sides.append(voice)
+	stereo = comp.create('mergeCHOP', 'stereo')
+	_connect(stereo, *sides)
+	device = comp.create('audiodeviceoutCHOP', 'audio_out')
+	_connect(device, stereo)
+	device.par.active.expr = 'parent().par.Active.eval() and parent().par.Playaudio.eval()'
+	device.par.volume.expr = 'parent().par.Volume'
+
+	speaking = comp.create('scriptDAT', 'speaking_text')
+	comp.op('speaking_text_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_speaking(scriptOp, parent())\n")
+	_per_frame(speaking)
+	_caption_image(comp, 'speaking_text')
+
+	_out_dats(comp, ('info',))
+	comp.op('out_info').name = 'out_lines'
+	audio_out = comp.create('outCHOP', 'out_audio')
+	audio_out.par.connectorder = 1
+	_connect(audio_out, plugin)
+	status_out = comp.create('outCHOP', 'out_channels')
+	status_out.par.connectorder = 2
+	_connect(status_out, comp.op('status'))
+
+
+def _build_scores(comp, spec):
+	"""Sound classification: CHOP 1 every class score, smoothed (Lag CHOP `scores`); CHOP 2
+	`events`: per watched class its score, _active and _onset, plus status; DAT `top` (the top
+	results of the smoothed scores) and a top-results TOP."""
+	classes = spec.get('classes', {})
+	page = comp.appendCustomPage('Classes')
+	_page_par(page, 'Float', 'Smoothing', 'Score Smoothing (Seconds)', classes.get('smoothing', 0.3),
+		'Lag on every class score: higher = steadier, slower to react.', 0, 2)
+	_page_par(page, 'Int', 'Topcount', 'Top Results', 5, 'Rows in the top DAT and the debug display.', 1, 20)
+	_page_par(page, 'Str', 'Watch', 'Watch Classes', classes.get('watch', 'Speech Music Clapping'),
+		'Space-separated class channel names (as in CHOP 1, e.g. Speech Dog Finger_snapping). Each gets '
+		'<name>, <name>_active and <name>_onset channels in CHOP 2.')
+	_page_par(page, 'Float', 'Threshold', 'Active Threshold', classes.get('threshold', 0.3),
+		'A watched class is active while its smoothed score is above this.', 0, 1)
+	_page_par(comp.appendCustomPage('Debug'), 'Toggle', 'Debugoverlay', 'Show Top Results', True,
+		'Off = TOP 1 stays transparent and the display does not cook.')
+
+	scores = comp.create('lagCHOP', 'scores')
+	_connect(scores, comp.op('inference'))
+	scores.par.lag1.expr = scores.par.lag2.expr = 'parent().par.Smoothing'
+	top = comp.create('scriptDAT', 'top')
+	comp.op('top_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_top(scriptOp, parent())\n")
+	_per_frame(top)
+	events = comp.create('scriptCHOP', 'events')
+	comp.op('events_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_events(scriptOp, parent())\n")
+	_per_frame(events)
+
+	# Reads `top` by name (no wire across the CHOP lane); per-frame like `top`.
+	lines = comp.create('scriptDAT', 'top_lines')
+	comp.op('top_lines_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_top_lines(scriptOp, parent())\n")
+	_per_frame(lines)
+	text = comp.create('textTOP', 'top_text')
+	text.par.outputresolution = 'custom'
+	text.par.resolutionw = 640
+	text.par.resolutionh.expr = '44 + 29 * parent().par.Topcount'	# one ~29 px line per result
+	text.par.dat = 'top_lines'
+	text.par.text = ''
+	text.par.font = 'Consolas'
+	text.par.alignx, text.par.aligny = 'left', 'top'
+	text.par.position1, text.par.position2 = 24, -24
+	text.par.fontsizex = 19	# 38 monospace characters per line fit the 640 px width
+	text.par.fontcolorr = text.par.fontcolorg = text.par.fontcolorb = 1.0
+	text.par.bgcolorr = text.par.bgcolorg = text.par.bgcolorb = 0.0
+	text.par.bgalpha = 0.65
+	_transparent_switch(comp, text, "op('top_text').width", "op('top_text').height")
+
+	_out_dats(comp, ('top',))
+	_connect(comp.create('outCHOP', 'out_scores'), scores)
 	channels = comp.create('mergeCHOP', 'channels')
-	_connect(channels, plugin, status)
-	_connect(comp.create('outCHOP', 'out_channels'), channels)
-	for node in comp.findChildren():
-		node.viewer = False
-	comp.par.opviewer = 'debug'
+	_connect(channels, events, comp.op('status'))
+	output = comp.create('outCHOP', 'out_channels')
+	_connect(output, channels)
+	comp.op('out_scores').par.connectorder = 1
+	output.par.connectorder = 2
 
 
 def build_demo(parent_comp, names, name='VisionDemo'):
@@ -614,6 +782,21 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 	passthrough = demo.create('outTOP', 'out_input')
 	passthrough.par.connectorder = 2
 	_connect(passthrough, frame)
+	gate, startup = _model_gate(demo, controls)
+	middle = -(len(specs) - 1) * DEMO_ROW // 2
+	for node, (column, y) in {source: (0, 200), frame: (1, 200), passthrough: (5, 200), transparent: (3, 200),
+		composite: (4, middle), output: (5, middle), gate: (0, -200), startup: (0, -350)}.items():
+		node.nodeX, node.nodeY = column * COLUMN, y
+	for node in (source, frame, transparent, composite, gate, startup):
+		node.viewer = False
+	demo.par.opviewer = 'out_debug'
+	_restore_wires(demo, inputs, outputs)
+	return demo
+
+
+def _model_gate(demo, controls):
+	"""`model_controls` switches each wrapper's cooking with its Models toggle ({toggle: wrapper});
+	`initialize` applies the toggles when the COMP is created or the project starts."""
 	gate = demo.create('parameterexecuteDAT', 'model_controls')
 	gate.par.op = '..'
 	gate.par.pars = ' '.join(controls)
@@ -627,11 +810,96 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 	startup.par.start = True
 	startup.text = ("def onCreate():\n\trun(\"args[0].module.apply()\", parent().op('model_controls'), delayFrames=1)\n"
 		"def onStart():\n\tonCreate()\n")
-	middle = -(len(specs) - 1) * DEMO_ROW // 2
-	for node, (column, y) in {source: (0, 200), frame: (1, 200), passthrough: (5, 200), transparent: (3, 200),
-		composite: (4, middle), output: (5, middle), gate: (0, -200), startup: (0, -350)}.items():
+	return gate, startup
+
+
+def build_audio_demo(parent_comp, name='AudioDemo'):
+	"""(Re)build the audio workbench: an audio CHOP into the sound classifier and speech to text, and
+	text to speech fed by a DAT input or (Speak What It Hears) by speech to text's newest sentence.
+	Each model is enabled from the Models page and doesn't cook while off. TOP 1: the classifier's top
+	results (top left) over the speech captions; CHOP 1 the spoken audio; DATs the transcript and the
+	top results."""
+	classifier, listener, speaker = 'MediaPipeSoundClassifier', 'MediaPipeSpeechToText', 'MediaPipeTextToSpeech'
+	position, inputs, outputs = _take_place(parent_comp, name)
+	demo = parent_comp.create('baseCOMP', name)
+	if position is not None:
+		demo.nodeX, demo.nodeY = position
+	models = demo.appendCustomPage('Models')
+	controls = {}
+	for wrapper_name in (classifier, listener, speaker):
+		spec = load_spec(wrapper_name)
+		toggle = models.appendToggle(wrapper_name.capitalize(), label=spec.get('label', wrapper_name))[0]
+		toggle.val = toggle.default = False
+		controls[toggle.name] = wrapper_name
+	echo = models.appendToggle('Echo', label='Speak What It Hears')[0]
+	echo.val = echo.default = False
+	echo.help = ('Text to speech says each sentence speech to text hears. With speakers (not headphones) '
+		'the mic hears the voice too and it repeats itself.')
+	about = demo.appendCustomPage('About')
+	release = about.appendStr('Version', label='Version')[0]
+	release.val = release.default = version()
+	release.readOnly = True
+
+	audio_in = demo.create('inCHOP', 'audio_in')
+	text_in = demo.create('inDAT', 'text_in')
+	audio = demo.create('nullCHOP', 'audio')
+	_connect(audio, audio_in)
+	wrappers = {}
+	for wrapper_name in (classifier, listener, speaker):
+		wrapper = build(load_spec(wrapper_name), demo)
+		toggle = next(key for key, value in controls.items() if value == wrapper_name)
+		wrapper.allowCooking = False
+		wrapper.par.Active.expr = f'parent().par.{toggle}.eval()'
+		wrappers[wrapper_name] = wrapper
+	_connect(wrappers[classifier], audio)
+	_connect(wrappers[listener], audio)
+	# Text to speech's input: the DAT wired in, or speech to text's newest sentence.
+	heard = demo.create('selectDAT', 'heard')
+	heard.par.dat = f'{listener}/out_latest'
+	to_speak = demo.create('switchDAT', 'to_speak')
+	_connect(to_speak, text_in, heard)
+	to_speak.par.index.expr = 'int(parent().par.Echo.eval())'
+	_connect(wrappers[speaker], to_speak)
+
+	listener_toggle, classifier_toggle = (next(k for k, v in controls.items() if v == n) for n in (listener, classifier))
+	canvas = demo.create('constantTOP', 'transparent')
+	canvas.par.outputresolution = 'custom'
+	canvas.par.resolutionw, canvas.par.resolutionh = 1920, 1080
+	for channel in ('colorr', 'colorg', 'colorb', 'alpha'):
+		canvas.par[channel] = 0
+	# Referenced, not wired: a disabled wrapper keeps its last frame, so pick transparent.
+	captions = demo.create('selectTOP', 'layer_captions')
+	captions.par.top.expr = f"'{listener}/debug' if parent().par.{listener_toggle} else 'transparent'"
+	readout = demo.create('selectTOP', 'layer_top_results')
+	readout.par.top.expr = f"'{classifier}/debug' if parent().par.{classifier_toggle} else 'transparent'"
+	view = demo.create('overTOP', 'debug_composite')
+	_connect(view, readout, captions)	# the readout over the captions, at the captions' size
+	view.par.prefit = 'nativeres'
+	view.par.justifyh, view.par.justifyv = 'left', 'top'
+	view.par.tunit = 'pixels'
+	view.par.tx, view.par.ty = 40, -40
+
+	outputs_spec = (('outTOP', 'out_debug', view), ('outCHOP', 'out_voice', wrappers[speaker]),
+		('outDAT', 'out_transcript', wrappers[listener]), ('outDAT', 'out_top', wrappers[classifier]))
+	out_nodes = {}
+	for order, (op_type, out_name, source) in enumerate(outputs_spec, 1):
+		output = demo.create(op_type, out_name)
+		output.par.connectorder = order
+		out_nodes[out_name] = output
+	_connect(out_nodes['out_debug'], view)
+	out_nodes['out_voice'].inputConnectors[0].connect(_output(wrappers[speaker], 'out_audio'))
+	out_nodes['out_transcript'].inputConnectors[0].connect(_output(wrappers[listener], 'out_transcript'))
+	out_nodes['out_top'].inputConnectors[0].connect(_output(wrappers[classifier], 'out_top'))
+	gate, startup = _model_gate(demo, controls)
+
+	for node, (column, y) in {audio_in: (0, 0), audio: (1, 0), wrappers[classifier]: (2, 180),
+		wrappers[listener]: (2, 0), text_in: (0, -320), heard: (1, -180), to_speak: (2, -250),
+		wrappers[speaker]: (3, -250), canvas: (3, 330), readout: (3, 180), captions: (3, 30),
+		view: (4, 110), out_nodes['out_debug']: (5, 110), out_nodes['out_top']: (5, 250),
+		out_nodes['out_transcript']: (5, -40), out_nodes['out_voice']: (5, -250),
+		gate: (0, -480), startup: (0, -620)}.items():
 		node.nodeX, node.nodeY = column * COLUMN, y
-	for node in (source, frame, transparent, composite, gate, startup):
+	for node in (audio_in, text_in, audio, heard, to_speak, canvas, readout, captions, view, gate, startup):
 		node.viewer = False
 	demo.par.opviewer = 'out_debug'
 	_restore_wires(demo, inputs, outputs)

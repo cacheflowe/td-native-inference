@@ -1,5 +1,5 @@
 {
-	"name": "MediaPipeSpeech",
+	"name": "MediaPipeSpeechToText",
 	"label": "MediaPipe Speech to Text",
 	"input": "audio",
 	"plugin": "MediapipeaudioCHOP",

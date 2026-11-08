@@ -3,9 +3,10 @@
 	curl -X POST --data-binary @scripts/build_wrappers.py http://127.0.0.1:3031/run
 
 Edit the settings below. NAMES empty = every spec. Wrappers are rebuilt in /project1/WrapperLab,
-keeping their position and wires. Audio wrappers are wired to the lab's audio_source (TEST_AUDIO). DEMO rebuilds
-/project1/VisionDemo (every video spec, all models off,
-keeping its input wire) and exports tox/VisionDemo.tox. The project is not saved.
+keeping their position and wires; audio wrappers are wired to the lab's audio_source (TEST_AUDIO),
+text wrappers to text_source. DEMO rebuilds /project1/VisionDemo (every video spec) and
+/project1/AudioDemo (the audio wrappers), all models off, keeping their wires, and exports
+tox/VisionDemo.tox and tox/AudioDemo.tox. The project is not saved.
 """
 
 import importlib
@@ -44,13 +45,19 @@ if WRAPPERS:
 		audio_source = lab.create('audiofileinCHOP', 'audio_source')
 		audio_source.par.file = TEST_AUDIO
 		audio_source.nodeX, audio_source.nodeY = 0, -400
+	text_source = lab.op('text_source')
+	if text_source is None:
+		text_source = lab.create('textDAT', 'text_source')
+		text_source.text = 'Hello from the wrapper lab.'
+		text_source.nodeX, text_source.nodeY = 0, -600
+	sources = {'video': source, 'audio': audio_source, 'text': text_source}
 	for name in names:
 		spec = wrapper_builder.load_spec(name)
 		existed = lab.op(name) is not None
 		comp = wrapper_builder.build(spec, lab)
 		if not existed:
 			comp.nodeX, comp.nodeY = 300, -wrapper_builder.spec_names().index(name) * 200
-			comp.inputConnectors[0].connect(audio_source if spec.get('input') == 'audio' else source)
+			comp.inputConnectors[0].connect(sources[spec.get('input', 'video')])
 		entry = {'nodes': len(comp.findChildren())}
 		if EXPORT:
 			destination = Path(project.folder) / 'tox' / f'{name}.tox'
@@ -65,4 +72,14 @@ if DEMO:
 		wrapper_builder.export_demo(demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
 	report['VisionDemo'] = entry
+	existed = op('/project1/AudioDemo') is not None
+	audio_demo = wrapper_builder.build_audio_demo(op('/project1'))
+	if not existed:
+		audio_demo.nodeX, audio_demo.nodeY = demo.nodeX, demo.nodeY - 200
+	entry = {'path': audio_demo.path, 'nodes': len(audio_demo.findChildren())}
+	if EXPORT:
+		destination = Path(project.folder) / 'tox' / 'AudioDemo.tox'
+		wrapper_builder.export_demo(audio_demo, destination)
+		entry['export_problems'] = wrapper_builder.check_export(destination)
+	report['AudioDemo'] = entry
 print(json.dumps(report, indent=1))

@@ -6,7 +6,9 @@ this) with:
 	TDNI_CASES   JSON list of {"tox": path, "image": path}, tested one after another
 	TDNI_RESULT  JSON report path (TD quits after writing it)
 Each case reports the inner node type, errors/warnings, tracks, joints and overlay pixels. A case
-passes when it has a real track (or, for image models, a non-empty result image).
+passes when it has a real track (or, for image models, a non-empty result image). Audio wrappers
+get "image" as an audio file and pass on a sentence / a non-silent sound; text to speech gets a
+line of text (muted) and passes once it's heard.
 """
 
 import json
@@ -36,12 +38,22 @@ def _next():
 		return
 	case = cases[0]
 	for child in list(container.children):
-		if child.family in ('COMP', 'TOP') and child.name not in ('test_driver', 'startup'):
+		if child.name not in ('test_driver', 'startup'):
 			child.destroy()
 	wrapper = container.loadTox(case['tox'])
-	source = container.create('moviefileinTOP', 'source')
-	source.par.file = case['image']
+	kind = wrapper.fetch('wrapper_spec', {}).get('input', 'video')
+	if kind == 'audio':
+		source = container.create('audiofileinCHOP', 'source')
+		source.par.file = case['image']
+	elif kind == 'text':
+		wrapper.par.Playaudio = False
+		source = container.create('textDAT', 'source')
+	else:
+		source = container.create('moviefileinTOP', 'source')
+		source.par.file = case['image']
 	wrapper.inputConnectors[0].connect(source)
+	if kind == 'text':
+		source.text = 'This line was spoken in a clean project.'
 	container.store('frames', 0)
 	run('args[0]()', _poll, delayFrames=1)
 
@@ -52,6 +64,18 @@ def _wrapper():
 
 
 def _detected(wrapper):
+	kind = wrapper.fetch('wrapper_spec', {}).get('kind')
+	if kind == 'transcript':
+		latest = wrapper.op('latest')
+		return latest.numRows > 1 and bool(latest[1, 'text'].val)
+	if kind == 'scores':
+		top = wrapper.op('top')
+		return top.numRows > 1 and top[1, 'class'].val != 'Silence' and float(top[1, 'score'].val or 0) > 0.5
+	if kind == 'speech':
+		audio = wrapper.op('out_audio')['audio'].vals
+		if audio and max(abs(v) for v in audio) > 0.01:
+			wrapper.store('heard', True)
+		return bool(wrapper.fetch('heard', False))
 	tracks = wrapper.op('tracks')
 	header = [cell.val for cell in tracks.row(0)] if tracks is not None and tracks.numRows else []
 	if 'track_id' in header and tracks.numRows > 1:
@@ -67,7 +91,7 @@ def _poll():
 	wrapper = _wrapper()
 	frames = container.fetch('frames') + 1
 	container.store('frames', frames)
-	for name in ('debug', 'out_channels'):
+	for name in ('debug', 'out_channels', 'out_audio'):
 		node = wrapper.op(name)
 		if node is not None:
 			node.cook(force=True)
@@ -99,6 +123,10 @@ def _record(wrapper, frames):
 		'overlay_pixels': int((debug[..., 3] > 0).sum()),
 		'pages': {page.name: [par.name for par in page.pars] for page in wrapper.customPages},
 	}
+	for name in ('latest', 'top', 'out_lines'):	# audio wrappers: what they heard / said
+		table = wrapper.op(name)
+		if table is not None:
+			report[wrapper.name][name] = [[cell.val for cell in row] for row in table.rows()][:4]
 	me.parent().store('report', report)
 
 
