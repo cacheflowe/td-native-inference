@@ -36,6 +36,11 @@ add_executable(asr_test tools/asr_test.cpp src/MpAudio.cpp)
 target_include_directories(asr_test PRIVATE src "${MP_INCLUDE_DIR}")
 target_compile_definitions(asr_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 
+# Console test: speaks a line with text to speech, plays it out in real time, writes a WAV (no TD).
+add_executable(tts_test tools/tts_test.cpp src/MpAudio.cpp)
+target_include_directories(tts_test PRIVATE src "${MP_INCLUDE_DIR}")
+target_compile_definitions(tts_test PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+
 # Copy the plugin into <repo>/plugins/, next to libmediapipe.dll (shared with MediaPipeTOP).
 set(PLUGIN_OUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../plugins")
 add_custom_command(TARGET MediaPipeCHOP POST_BUILD

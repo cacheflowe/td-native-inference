@@ -1,5 +1,6 @@
 #include "MpAudio.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -22,6 +23,18 @@ namespace
 		decltype(&MpAudioTranscriberFinishStream)	asrFinish = nullptr;
 		decltype(&MpAudioTranscriberCloseResult)	asrCloseResult = nullptr;
 		decltype(&MpAudioTranscriberClose)		asrClose = nullptr;
+		decltype(&MpTextToSpeechOptionsInitDefault)	ttsOptionsInit = nullptr;
+		decltype(&MpTextToSpeechSynthesisOptionsInitDefault)	ttsSynthesisOptionsInit = nullptr;
+		decltype(&MpTextToSpeechCreate)			ttsCreate = nullptr;
+		decltype(&MpTextToSpeechListVoices)		ttsListVoices = nullptr;
+		decltype(&MpTextToSpeechVoiceListFree)	ttsVoiceListFree = nullptr;
+		decltype(&MpTextToSpeechStartStream)	ttsStartStream = nullptr;
+		decltype(&MpTextToSpeechStreamReadNext)	ttsReadNext = nullptr;
+		decltype(&MpTextToSpeechStreamCancel)	ttsStreamCancel = nullptr;
+		decltype(&MpTextToSpeechStreamClose)	ttsStreamClose = nullptr;
+		decltype(&MpTextToSpeechFreeAudioResult)	ttsFreeAudio = nullptr;
+		decltype(&MpTextToSpeechClose)			ttsClose = nullptr;
+		decltype(&MpTextToSpeechFreeError)		ttsFreeError = nullptr;
 	};
 
 	Api			gApi;
@@ -74,6 +87,18 @@ namespace
 				bind(lib, gApi.asrFinish, "MpAudioTranscriberFinishStream", missing);
 				bind(lib, gApi.asrCloseResult, "MpAudioTranscriberCloseResult", missing);
 				bind(lib, gApi.asrClose, "MpAudioTranscriberClose", missing);
+				bind(lib, gApi.ttsOptionsInit, "MpTextToSpeechOptionsInitDefault", missing);
+				bind(lib, gApi.ttsSynthesisOptionsInit, "MpTextToSpeechSynthesisOptionsInitDefault", missing);
+				bind(lib, gApi.ttsCreate, "MpTextToSpeechCreate", missing);
+				bind(lib, gApi.ttsListVoices, "MpTextToSpeechListVoices", missing);
+				bind(lib, gApi.ttsVoiceListFree, "MpTextToSpeechVoiceListFree", missing);
+				bind(lib, gApi.ttsStartStream, "MpTextToSpeechStartStream", missing);
+				bind(lib, gApi.ttsReadNext, "MpTextToSpeechStreamReadNext", missing);
+				bind(lib, gApi.ttsStreamCancel, "MpTextToSpeechStreamCancel", missing);
+				bind(lib, gApi.ttsStreamClose, "MpTextToSpeechStreamClose", missing);
+				bind(lib, gApi.ttsFreeAudio, "MpTextToSpeechFreeAudioResult", missing);
+				bind(lib, gApi.ttsClose, "MpTextToSpeechClose", missing);
+				bind(lib, gApi.ttsFreeError, "MpTextToSpeechFreeError", missing);
 				if (!missing.empty())
 					gApiError = "libmediapipe.dll is missing " + missing + " (needs the mediapipe 1.2.2 build)";
 				else
@@ -89,6 +114,16 @@ namespace
 		std::string s = msg ? msg : "unknown error";
 		if (msg && gApi.errorFree)
 			gApi.errorFree(msg);
+		return s;
+	}
+
+	// Text to speech frees its error strings with its own function.
+	std::string takeTtsError(char*& msg)
+	{
+		std::string s = msg ? msg : "unknown error";
+		if (msg && gApi.ttsFreeError)
+			gApi.ttsFreeError(msg);
+		msg = nullptr;
 		return s;
 	}
 }
@@ -457,5 +492,223 @@ namespace mpaudio
 		gApi.asrClose(transcriber, &msg);
 		if (msg)
 			takeError(msg);
+	}
+
+	Speaker::Speaker(const std::string& modelPath, float rate) : myModelPath(modelPath), myRate(rate)
+	{
+		myThread = std::thread(&Speaker::run, this);
+	}
+
+	Speaker::~Speaker()
+	{
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myStop = true;
+			if (myStream)
+				gApi.ttsStreamCancel(myStream);	// lock-free; unblocks ReadNext
+		}
+		myWake.notify_all();
+		if (myThread.joinable())
+			myThread.join();
+	}
+
+	void Speaker::say(const std::string& text, const std::string& voice)
+	{
+		if (text.find_first_not_of(" \t\r\n") == std::string::npos)
+			return;
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			Utterance line;
+			line.id = myNextId++;
+			line.text = text;
+			line.voice = voice;
+			myQueue.push_back(std::move(line));
+		}
+		myWake.notify_one();
+	}
+
+	void Speaker::stop()
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		myQueue.clear();
+		myPlaying.clear();
+		myAudio.clear();
+		myGeneration++;
+		if (myStream)
+			gApi.ttsStreamCancel(myStream);
+	}
+
+	size_t Speaker::read(float* out, size_t count)
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		const size_t n = std::min(count, myAudio.size());
+		std::copy(myAudio.begin(), myAudio.begin() + n, out);
+		myAudio.erase(myAudio.begin(), myAudio.begin() + n);
+		// Account the played samples to their lines, oldest first; a fully played, closed line is done.
+		size_t left = n;
+		while (!myPlaying.empty())
+		{
+			Utterance& line = myPlaying.front();
+			const size_t used = std::min(left, line.samples);
+			line.samples -= used;
+			left -= used;
+			if (line.samples > 0 || line.open)
+				break;
+			myPlaying.pop_front();
+			mySpoken++;
+		}
+		return n;
+	}
+
+	bool Speaker::loaded() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myLoaded;
+	}
+
+	std::string Speaker::error() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myError;
+	}
+
+	int Speaker::sampleRate() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return mySampleRate;
+	}
+
+	SpeakerStatus Speaker::status() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		SpeakerStatus s;
+		s.lines.assign(myPlaying.begin(), myPlaying.end());
+		s.lines.insert(s.lines.end(), myQueue.begin(), myQueue.end());
+		s.spoken = mySpoken;
+		s.synthMs = mySynthMs;
+		s.speaking = !myPlaying.empty();
+		return s;
+	}
+
+	std::vector<std::string> Speaker::voices() const
+	{
+		std::lock_guard<std::mutex> lock(myMutex);
+		return myVoices;
+	}
+
+	void Speaker::run()
+	{
+		std::string err;
+		if (!loadApi(err))
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myError = err;
+			return;
+		}
+		MpTextToSpeechOptions options;
+		gApi.ttsOptionsInit(&options);
+		options.base_options.model_asset_path = myModelPath.c_str();
+		options.base_options.delegate = MP_DELEGATE_CPU;
+		options.speaking_rate = myRate;
+		MpTextToSpeechPtr tts = nullptr;
+		char* msg = nullptr;
+		if (gApi.ttsCreate(&options, &tts, &msg) != kMpOk)
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myError = "Could not load " + myModelPath + ": " + takeTtsError(msg);
+			return;
+		}
+		std::vector<std::string> voices;
+		MpTextToSpeechVoiceList list = {};
+		if (gApi.ttsListVoices(tts, &list, &msg) == kMpOk)
+		{
+			for (size_t i = 0; i < list.num_voices; i++)
+				if (list.voices[i].voice_id)
+					voices.push_back(list.voices[i].voice_id);
+			gApi.ttsVoiceListFree(&list);
+		}
+		else
+			takeTtsError(msg);
+		{
+			std::lock_guard<std::mutex> lock(myMutex);
+			myLoaded = true;
+			myVoices = std::move(voices);
+		}
+		for (;;)
+		{
+			Utterance line;
+			uint64_t generation = 0;
+			{
+				std::unique_lock<std::mutex> lock(myMutex);
+				myWake.wait(lock, [this] { return myStop || !myQueue.empty(); });
+				if (myStop)
+					break;
+				line = std::move(myQueue.front());
+				myQueue.pop_front();
+				line.open = true;
+				line.samples = 0;
+				myPlaying.push_back(line);
+				generation = myGeneration;
+			}
+			MpTextToSpeechSynthesisOptions synthesis;
+			gApi.ttsSynthesisOptionsInit(&synthesis);
+			synthesis.voice_id = line.voice.empty() ? nullptr : line.voice.c_str();
+			MpTextToSpeechStreamPtr stream = nullptr;
+			MpStatus status = gApi.ttsStartStream(tts, line.text.c_str(), &synthesis, true, &stream, &msg);
+			std::string failure = status == kMpOk ? "" : "Speaking failed: " + takeTtsError(msg);
+			if (stream)
+			{
+				std::lock_guard<std::mutex> lock(myMutex);
+				myStream = stream;
+				if (myStop || myGeneration != generation)
+					gApi.ttsStreamCancel(stream);	// stop() came before the stream existed
+			}
+			while (stream)
+			{
+				auto start = std::chrono::steady_clock::now();
+				MpTextToSpeechAudioResult chunk = {};
+				int32_t index = 0;
+				bool final = false;
+				status = gApi.ttsReadNext(stream, &chunk, &index, &final, &msg);
+				const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+				if (status == kMpOk && chunk.samples && chunk.num_samples)
+				{
+					std::lock_guard<std::mutex> lock(myMutex);
+					if (myGeneration == generation && !myPlaying.empty() && myPlaying.back().id == line.id)
+					{
+						myAudio.insert(myAudio.end(), chunk.samples, chunk.samples + chunk.num_samples);
+						myPlaying.back().samples += chunk.num_samples;
+						if (chunk.sample_rate_hz > 0)
+							mySampleRate = chunk.sample_rate_hz;
+						mySynthMs = ms;
+					}
+				}
+				gApi.ttsFreeAudio(&chunk);
+				if (status == kMpOk && !final)
+					continue;
+				if (status != kMpOk && status != kMpOutOfRange && status != kMpCancelled)
+					failure = "Speaking failed: " + takeTtsError(msg);
+				else if (msg)
+					takeTtsError(msg);
+				break;
+			}
+			std::lock_guard<std::mutex> lock(myMutex);
+			if (stream)
+			{
+				myStream = nullptr;
+				gApi.ttsStreamClose(stream);
+			}
+			myError = failure;	// a line that works clears an earlier line's error
+			// The line is complete: once its audio has played, read() retires it.
+			for (Utterance& playing : myPlaying)
+				if (playing.id == line.id)
+					playing.open = false;
+			while (!myPlaying.empty() && !myPlaying.front().open && myPlaying.front().samples == 0)
+			{
+				myPlaying.pop_front();
+				mySpoken++;
+			}
+		}
+		gApi.ttsClose(tts);
 	}
 }

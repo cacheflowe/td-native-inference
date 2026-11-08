@@ -9,8 +9,11 @@
 
 namespace
 {
-	const char* kTaskNames[] = { "classify", "transcribe" };
-	const char* kTaskLabels[] = { "Classify Sounds", "Transcribe Speech" };
+	const char* kTaskNames[] = { "classify", "transcribe", "speak" };
+	const char* kTaskLabels[] = { "Classify Sounds", "Transcribe Speech", "Speak Text" };
+	const char* kSpeakPars[] = { "Speakmodel", "Text", "Speak", "Speakonchange", "Voice", "Rate", "Stop" };
+	const char* kSpeakChannels[] = { "audio", "speaking" };
+	const int kDefaultSpeakRate = 24000;	// Kokoro's; the speaker reports the real rate once loaded
 	const char* kClassifyPars[] = { "Classifiermodel", "Window", "Hop", "Topresults" };
 	const char* kTranscribePars[] = { "Transcribermodel", "Interim", "Prompt", "Skipsilence", "Autoflush",
 		"Pause", "Maxsegment", "Silencelevel", "Noiseratio", "Flush", "Clear" };
@@ -59,7 +62,7 @@ DLLEXPORT void FillCHOPPluginInfo(CHOP_PluginInfo* info)
 	info->customOPInfo.opLabel->setString("MediaPipe Audio");
 	info->customOPInfo.opIcon->setString("MPA");
 	info->customOPInfo.authorName->setString("td-native-inference");
-	info->customOPInfo.minInputs = 1;
+	info->customOPInfo.minInputs = 0;	// Speak Text needs no input
 	info->customOPInfo.maxInputs = 1;
 }
 
@@ -80,16 +83,33 @@ MediaPipeCHOP::MediaPipeCHOP(const OP_NodeInfo*)
 
 MediaPipeCHOP::~MediaPipeCHOP() = default;
 
-void MediaPipeCHOP::getGeneralInfo(CHOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
+MediaPipeCHOP::Task MediaPipeCHOP::taskOf(const OP_Inputs* inputs)
+{
+	const int task = inputs->getParInt("Task");
+	return task == (int)Task::Transcribe ? Task::Transcribe : task == (int)Task::Speak ? Task::Speak : Task::Classify;
+}
+
+void MediaPipeCHOP::getGeneralInfo(CHOP_GeneralInfo* ginfo, const OP_Inputs* inputs, void*)
 {
 	ginfo->cookEveryFrameIfAsked = true;	// audio keeps arriving even when nothing else changes
-	ginfo->timeslice = false;
+	// Speak Text outputs audio: a timeslice at the speech sample rate, like an Audio File In.
+	ginfo->timeslice = taskOf(inputs) == Task::Speak;
 }
 
 bool MediaPipeCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs, void*)
 {
-	const bool transcribe = inputs->getParInt("Task") == (int)Task::Transcribe;
-	info->numChannels = transcribe ? (int32_t)std::size(kTranscribeChannels) : (int32_t)myChannelNames.size();
+	switch (taskOf(inputs))
+	{
+		case Task::Speak:
+			info->numChannels = (int32_t)std::size(kSpeakChannels);
+			info->sampleRate = (float)(mySpeaker ? mySpeaker->sampleRate() : kDefaultSpeakRate);
+			return true;
+		case Task::Transcribe:
+			info->numChannels = (int32_t)std::size(kTranscribeChannels);
+			break;
+		default:
+			info->numChannels = (int32_t)myChannelNames.size();
+	}
 	info->numSamples = 1;
 	info->startIndex = 0;
 	return true;
@@ -97,7 +117,10 @@ bool MediaPipeCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs
 
 void MediaPipeCHOP::getChannelName(int32_t index, OP_String* name, const OP_Inputs* inputs, void*)
 {
-	if (inputs->getParInt("Task") == (int)Task::Transcribe)
+	const Task task = taskOf(inputs);
+	if (task == Task::Speak)
+		name->setString(index < (int32_t)std::size(kSpeakChannels) ? kSpeakChannels[index] : "chan");
+	else if (task == Task::Transcribe)
 		name->setString(index < (int32_t)std::size(kTranscribeChannels) ? kTranscribeChannels[index] : "chan");
 	else
 		name->setString(index >= 0 && index < (int32_t)myChannelNames.size() ? myChannelNames[index].c_str() : "chan");
@@ -296,13 +319,45 @@ void MediaPipeCHOP::transcribe(const OP_Inputs* inputs, const std::vector<float>
 			" s behind real time: try a smaller model";
 }
 
+void MediaPipeCHOP::speak(const OP_Inputs* inputs, const std::string& model)
+{
+	// Speaking Rate is a model option: changing it reloads the model (about half a second).
+	const float rate = (float)std::max(0.25, std::min(4.0, inputs->getParDouble("Rate")));
+	if (mySpeaker && (mySpeaker->modelPath() != model || mySpeaker->rate() != rate))
+		mySpeaker.reset();
+	if (!mySpeaker)
+		mySpeaker = std::make_unique<mpaudio::Speaker>(model, rate);
+	const char* textPar = inputs->getParString("Text");
+	const std::string text = textPar ? textPar : "";
+	const char* voicePar = inputs->getParString("Voice");
+	const std::string voice = voicePar ? voicePar : "";
+	if (myStopPulse)
+		mySpeaker->stop();
+	// Speak On Change: a new Text value is spoken as soon as it's set (e.g. from a DAT expression).
+	const bool changed = inputs->getParInt("Speakonchange") != 0 && myHasLastText && text != myLastText;
+	if (mySpeakPulse || changed)
+		mySpeaker->say(text, voice);
+	myLastText = text;
+	myHasLastText = true;
+	mySpeakerStatus = mySpeaker->status();
+	myError = mySpeaker->error();
+	if (!mySpeaker->loaded() && myError.empty())
+		myWarning = "Loading " + model + "...";
+	else if (myError.empty() && !voice.empty())
+	{
+		const std::vector<std::string> voices = mySpeaker->voices();
+		if (!voices.empty() && std::find(voices.begin(), voices.end(), voice) == voices.end())
+			myWarning = "Unknown voice " + voice + " (the info popup lists the voices)";
+	}
+}
+
 void MediaPipeCHOP::execute(CHOP_Output* output, const OP_Inputs* inputs, void*)
 {
 	myError.clear();
 	myWarning.clear();
-	const Task task = inputs->getParInt("Task") == (int)Task::Transcribe ? Task::Transcribe : Task::Classify;
+	const Task task = taskOf(inputs);
 	const bool active = inputs->getParInt("Active") != 0;
-	const char* modelPar = task == Task::Transcribe ? "Transcribermodel" : "Classifiermodel";
+	const char* modelPar = task == Task::Transcribe ? "Transcribermodel" : task == Task::Speak ? "Speakmodel" : "Classifiermodel";
 	const std::string model = mpaudio::resolveModelPath(inputs->getParFilePath(modelPar),
 		inputs->getParString(modelPar), myModelHint);
 
@@ -310,6 +365,8 @@ void MediaPipeCHOP::execute(CHOP_Output* output, const OP_Inputs* inputs, void*)
 	{
 		myClassifier.reset();
 		myTranscriber.reset();
+		mySpeaker.reset();
+		mySpeakerStatus = mpaudio::SpeakerStatus();
 		myResult = mpaudio::Result();
 		if (task != myTask)
 		{
@@ -320,6 +377,22 @@ void MediaPipeCHOP::execute(CHOP_Output* output, const OP_Inputs* inputs, void*)
 		resetStream();
 		myTask = task;
 		myReload = false;
+	}
+	if (task == Task::Speak)
+	{
+		if (active && model.empty())
+			myWarning = "Set Speech Model";
+		else if (active)
+			speak(inputs, model);
+		myStopPulse = mySpeakPulse = false;
+		// Audio out: the buffered speech, silence when there's none.
+		const size_t n = (size_t)std::max(0, output->numSamples);
+		float* audio = output->channels[0];
+		std::fill(audio, audio + n, 0.0f);
+		const size_t played = mySpeaker ? mySpeaker->read(audio, n) : 0;
+		const float speaking = played > 0 || mySpeakerStatus.speaking ? 1.0f : 0.0f;
+		std::fill(output->channels[1], output->channels[1] + n, speaking);
+		return;
 	}
 	const OP_CHOPInput* input = inputs->getInputCHOP(0);
 	if (!active)
@@ -368,6 +441,20 @@ int32_t MediaPipeCHOP::getNumInfoCHOPChans(void*)
 void MediaPipeCHOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 {
 	const bool transcribe = myTask == Task::Transcribe;
+	if (myTask == Task::Speak)
+	{
+		const bool loaded = mySpeaker && mySpeaker->loaded();
+		switch (index)
+		{
+			case 0: chan->name->setString("loaded");		chan->value = loaded ? 1.f : 0.f; break;
+			case 1: chan->name->setString("loading");		chan->value = mySpeaker && !loaded && myError.empty() ? 1.f : 0.f; break;
+			case 2: chan->name->setString("infer_ms");		chan->value = (float)mySpeakerStatus.synthMs; break;
+			case 3: chan->name->setString("results");		chan->value = (float)mySpeakerStatus.spoken; break;
+			case 4: chan->name->setString("queued");		chan->value = (float)mySpeakerStatus.lines.size(); break;
+			case 5: chan->name->setString("sample_rate");	chan->value = (float)(mySpeaker ? mySpeaker->sampleRate() : kDefaultSpeakRate); break;
+		}
+		return;
+	}
 	const bool loaded = transcribe ? myTranscriber && myTranscriber->loaded() : myClassifier && myClassifier->loaded();
 	const bool exists = transcribe ? (bool)myTranscriber : (bool)myClassifier;
 	switch (index)
@@ -384,6 +471,13 @@ void MediaPipeCHOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 bool MediaPipeCHOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 {
 	infoSize->byColumn = false;
+	if (myTask == Task::Speak)
+	{
+		// One row per line: the one speaking first, then the queue.
+		infoSize->rows = 1 + (int32_t)mySpeakerStatus.lines.size();
+		infoSize->cols = 4;
+		return true;
+	}
 	if (myTask == Task::Transcribe)
 	{
 		// One row per final segment (oldest first), then the interim hypothesis if there is one.
@@ -402,6 +496,30 @@ void MediaPipeCHOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDA
 		if (col < nEntries)
 			entries->values[col]->setString(value.c_str());
 	};
+	if (myTask == Task::Speak)
+	{
+		// Columns: line (running number), state (speaking / queued), voice, text.
+		if (index == 0)
+		{
+			const char* header[] = { "line", "state", "voice", "text" };
+			for (int col = 0; col < 4; col++)
+				set(col, header[col]);
+			return;
+		}
+		const size_t row = (size_t)index - 1;
+		if (row >= mySpeakerStatus.lines.size())
+		{
+			for (int col = 0; col < nEntries; col++)
+				set(col, "");
+			return;
+		}
+		const mpaudio::Utterance& line = mySpeakerStatus.lines[row];
+		set(0, number((double)line.id));
+		set(1, row == 0 && mySpeakerStatus.speaking ? "speaking" : "queued");
+		set(2, line.voice);
+		set(3, line.text);
+		return;
+	}
 	if (myTask == Task::Transcribe)
 	{
 		// Columns: segment (running number), final, start_ms, end_ms, text.
@@ -466,18 +584,29 @@ void MediaPipeCHOP::getErrorString(OP_String* error, void*)
 void MediaPipeCHOP::getInfoPopupString(OP_String* info, void*)
 {
 	std::string s = std::string("td-native-inference " TDNI_VERSION "\nMediaPipe audio, CPU, worker thread: ") +
-		kTaskLabels[(int)myTask] + "\n" +
-		number(mySampleRate) + " Hz input\n";
+		kTaskLabels[(int)myTask] + "\n";
+	if (myTask == Task::Speak)
+	{
+		const std::vector<std::string> voices = mySpeaker ? mySpeaker->voices() : std::vector<std::string>();
+		s += number(mySpeaker ? mySpeaker->sampleRate() : kDefaultSpeakRate) + " Hz output\nVoices:";
+		for (size_t i = 0; i < voices.size(); i++)
+			s += (i % 8 ? " " : "\n  ") + voices[i];
+		s += "\n";
+	}
+	else
+		s += number(mySampleRate) + " Hz input\n";
 	info->setString(s.c_str());
 }
 
 void MediaPipeCHOP::setParameterEnableStates(const OP_Inputs* inputs, OP_ParEnableState* state, void*)
 {
-	const bool transcribe = inputs->getParInt("Task") == (int)Task::Transcribe;
+	const Task task = taskOf(inputs);
 	for (const char* name : kClassifyPars)
-		state->setEnableState(name, !transcribe);
+		state->setEnableState(name, task == Task::Classify);
 	for (const char* name : kTranscribePars)
-		state->setEnableState(name, transcribe);
+		state->setEnableState(name, task == Task::Transcribe);
+	for (const char* name : kSpeakPars)
+		state->setEnableState(name, task == Task::Speak);
 }
 
 void MediaPipeCHOP::setupParameters(OP_ParameterManager* manager, void*)
@@ -525,8 +654,9 @@ void MediaPipeCHOP::setupParameters(OP_ParameterManager* manager, void*)
 		sp.label = "Task";
 		sp.page = page;
 		sp.defaultValue = kTaskNames[0];
-		sp.help = "Classify Sounds: 521 sound classes (YAMNet). Transcribe Speech: streaming speech to text.";
-		check(manager->appendMenu(sp, 2, kTaskNames, kTaskLabels));
+		sp.help = "Classify Sounds: 521 sound classes (YAMNet). Transcribe Speech: streaming speech to text. "
+			"Speak Text: text to speech (Kokoro), output as audio.";
+		check(manager->appendMenu(sp, (int)std::size(kTaskNames), kTaskNames, kTaskLabels));
 	}
 	toggle("Active", "Active", page, true, "Off = stop and release the model.");
 	pulse("Reload", "Reload Model", page, "Reload the model (and restart the transcript).");
@@ -582,6 +712,31 @@ void MediaPipeCHOP::setupParameters(OP_ParameterManager* manager, void*)
 		"noise gets transcribed, lower it if quiet speech is missed.");
 	pulse("Flush", "Flush", page, "Finalize whatever has been heard so far.");
 	pulse("Clear", "Clear Transcript", page, "Forget the transcript and start a new stream.");
+
+	page = "Speak";
+	file("Speakmodel", "Speech Model", page, "models/tts/kokoro_int8_fp16.litertlm",
+		"A MediaPipe text-to-speech .litertlm bundle (Kokoro-82M: 54 voices, 9 languages, 24 kHz).");
+	{
+		OP_StringParameter sp("Text");
+		sp.label = "Text";
+		sp.page = page;
+		sp.help = "What to say. Pulse Speak, or turn on Speak On Change to say each new value.";
+		check(manager->appendString(sp));
+	}
+	pulse("Speak", "Speak", page, "Queue Text to be spoken (lines play one after another).");
+	toggle("Speakonchange", "Speak On Change", page, false,
+		"Speak Text whenever its value changes, e.g. from an expression on a DAT cell.");
+	{
+		OP_StringParameter sp("Voice");
+		sp.label = "Voice";
+		sp.page = page;
+		sp.defaultValue = "af_heart";
+		sp.help = "Kokoro voice id; the first letters give the language and voice (af_ American female, "
+			"bm_ British male, ff_ French, jf_ Japanese, ...). The info popup lists them all.";
+		check(manager->appendString(sp));
+	}
+	real("Rate", "Speaking Rate", page, 1.0, 0.25, 2.0, "1 = normal speed. Changing it reloads the model.");
+	pulse("Stop", "Stop", page, "Stop speaking and clear the queue.");
 }
 
 void MediaPipeCHOP::pulsePressed(const char* name, void*)
@@ -593,4 +748,8 @@ void MediaPipeCHOP::pulsePressed(const char* name, void*)
 		myFlush = true;
 	else if (pulse == "Clear")
 		myClear = true;
+	else if (pulse == "Speak")
+		mySpeakPulse = true;
+	else if (pulse == "Stop")
+		myStopPulse = true;
 }

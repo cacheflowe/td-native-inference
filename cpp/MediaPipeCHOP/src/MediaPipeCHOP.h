@@ -10,6 +10,9 @@
 //                      inventing text from room noise. After speech and a pause (or Max Segment
 //                      seconds) the stream is flushed so the sentence is finalized. The Info DAT
 //                      holds the transcript; channels report speaking / new segments / backlog.
+//   Speak Text         text to speech (Kokoro .litertlm), no input needed. Speak queues Text; a
+//                      worker streams each line's audio and the CHOP plays it out as a 24 kHz
+//                      timeslice (`audio`, plus `speaking`). The Info DAT lists the lines.
 #pragma once
 
 #include "CHOP_CPlusPlusBase.h"
@@ -44,11 +47,13 @@ public:
 	void		setParameterEnableStates(const OP_Inputs* inputs, OP_ParEnableState* state, void*) override;
 
 private:
-	enum class Task { Classify = 0, Transcribe = 1 };
+	enum class Task { Classify = 0, Transcribe = 1, Speak = 2 };
 
+	static Task	taskOf(const OP_Inputs* inputs);
 	std::vector<float>	takeNewSamples(const OP_CHOPInput* input);	// new samples since last cook, mono
 	void		classify(const OP_Inputs* inputs, const std::vector<float>& fresh, const std::string& model);
 	void		transcribe(const OP_Inputs* inputs, const std::vector<float>& fresh, const std::string& model);
+	void		speak(const OP_Inputs* inputs, const std::string& model);
 	void		updateChannelNames();
 	void		resetStream();
 
@@ -79,6 +84,14 @@ private:
 	float						myNoiseFloor = -1.0f;	// tracked input RMS between words; < 0 = not measured yet
 	float						myThreshold = 0.0f;		// RMS that counts as speech this cook
 	std::vector<float>			myPreroll;		// Skip Silence: the latest unsent audio, sent when speech starts
+
+	// Speak Text
+	std::unique_ptr<mpaudio::Speaker>	mySpeaker;
+	mpaudio::SpeakerStatus		mySpeakerStatus;	// taken once per cook for the Info DAT / CHOP
+	bool						mySpeakPulse = false;
+	bool						myStopPulse = false;
+	std::string					myLastText;		// Speak On Change compares against it
+	bool						myHasLastText = false;
 
 	// Input tracking
 	double						mySampleRate = 0.0;

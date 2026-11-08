@@ -26,6 +26,7 @@ models/**/*.task
 models/**/*.tflite
 models/**/*.engine
 models/**/*.litertlm
+models/**/*.xnnpack_cache
 models/**/*.onnx_data
 models/**/*.bin
 **/trt_cache/
