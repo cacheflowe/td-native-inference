@@ -37,6 +37,16 @@ Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (I
       object detector, image classifier/embedder, interactive segmenter.
 - [ ] Other ONNX candidates: RF-DETR (Apache-2.0), RVM (GPL-3.0: fetch only).
 
+## Dev vs installed plugins (pinned: decide together)
+
+- [ ] With a release installed in `Documents/Derivative/Plugins/`, the dev project loads two copies
+      of each Custom OP (the install plus its own `plugins/` folder, which TD scans as the
+      project's Plugins folder); which one serves a node is undefined. Options discussed Nov 8:
+      move the build out of `plugins/` and switch the one system-wide folder between the dev build
+      and a release with a junction (`use_plugins dev|release|off`); tell users "one install per
+      machine" (or a show's own `Plugins/`, never both); a tox/plugin version check that warns on a
+      mismatch.
+
 ## Tracking (area of interest)
 
 - [ ] The Python tracker (`python/object_tracker.py`, `*_tracker_pipeline.py`) is ByteTrack-based
