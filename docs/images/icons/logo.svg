@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 120" fill="none">
+	<!-- Placeholder mark: a small network (input frame, hidden nodes, output). Replace freely. -->
+	<rect x="14" y="30" width="56" height="60" rx="8" stroke="#F2A541" stroke-width="6"/>
+	<path d="M70 60 L120 30 M70 60 L120 60 M70 60 L120 90 M120 30 L170 60 M120 60 L170 60 M120 90 L170 60" stroke="#91A0A5" stroke-width="4"/>
+	<circle cx="120" cy="30" r="11" fill="#F2F5F4"/>
+	<circle cx="120" cy="60" r="11" fill="#F2F5F4"/>
+	<circle cx="120" cy="90" r="11" fill="#F2F5F4"/>
+	<circle cx="184" cy="60" r="16" fill="#F2A541"/>
+	<path d="M200 60 L226 60" stroke="#F2A541" stroke-width="6" stroke-linecap="round"/>
+</svg>

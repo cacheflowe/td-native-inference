@@ -35,7 +35,9 @@ plugin built for another version.
    `python scripts/release.py prepare patch` (or `minor`, `major`, `X.Y.Z`). Review and commit
    `VERSION` + `CHANGELOG.md`.
 3. **Build the plugins** after that commit, so they carry the new version
-   (`cpp\OnnxTOP\build.cmd`, `cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd`).
+   (`cpp\OnnxTOP\build.cmd`, `cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd`). Then
+   **re-render the icons** (`python scripts/build_icons.py`; each card shows the version) and
+   **rebuild the toxes** (step 1) so each tox's About page and node icon carry it too; commit.
 4. `python scripts/release.py package` builds `build/td-native-inference-vX.Y.Z.zip` from the clean
    committed tree.
 5. **Test the extracted zip** in a fresh TD process with the plugins installed the way users

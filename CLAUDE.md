@@ -33,6 +33,11 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   shared-tox links are stripped from the saved copy only. Wrappers use the registered custom OPs,
   so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`. Set
   `DEMO = True` in the script to regenerate both demos and `tox/VisionDemo.tox` / `tox/AudioDemo.tox`.
+- **Node icons:** `python scripts/build_icons.py` (outside TD; headless Chrome/Edge) renders each
+  tox's card to `docs/images/icons/<Name>.png` (td-http-api's app-icon layout; logo in
+  `docs/images/icons/logo.svg`). The builder loads it into a locked `icon` TOP as the COMP's
+  viewer, so no renderer runs in the toxes. Re-render before rebuilding whenever `VERSION`, a
+  spec's label or the plugin changes.
 - **Testing wrappers:** POST `tests/td_wrapper_lab.py` to `/run` (checks every lab wrapper on the
   official MediaPipe images in `build/`, report in `build/wrapper-lab.json`);
   `tests/run_clean_wrapper.ps1` tests an exported tox in a fresh TD process.

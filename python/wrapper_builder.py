@@ -507,9 +507,36 @@ def build(spec, parent_comp, name=None):
 	for node in comp.findChildren():
 		node.viewer = False
 	_layout(comp, spec)
-	comp.par.opviewer = 'debug'
+	_add_icon(comp, comp.name, 'debug')
 	_restore_wires(comp, inputs, outputs)
 	return comp
+
+
+ICON_SIZE = (320, 260)	# the 16:13 card at node size: sharp in the network, 4x smaller in the tox than 2x
+
+
+def _add_icon(comp, name, fallback_viewer):
+	"""Show docs/images/icons/<name>.png (scripts/build_icons.py) as the COMP's node viewer: loaded,
+	resized and locked, so the pixels are saved in the tox and nothing renders at runtime. Without
+	the PNG (or for nested wrappers like HSEmotion's detector) the viewer stays `fallback_viewer`."""
+	png = root() / 'docs' / 'images' / 'icons' / f'{name}.png'
+	if not png.exists():
+		comp.par.opviewer = fallback_viewer
+		if name != 'detector':
+			print(f'[WrapperBuilder] no icon for {name}: run scripts/build_icons.py')
+		return None
+	icon = comp.create('moviefileinTOP', 'icon')
+	icon.par.file = png.as_posix()
+	icon.par.outputresolution = 'custom'
+	icon.par.resolutionw, icon.par.resolutionh = ICON_SIZE
+	icon.cook(force=True)
+	icon.lock = True
+	icon.par.file = ''	# the locked pixels stay; no path back to this checkout
+	icon.viewer = False
+	icon.nodeX, icon.nodeY = 0, 560
+	comp.par.opviewer = 'icon'
+	comp.viewer = True	# a dropped-in tox shows its card right away
+	return icon
 
 
 def _page_par(page, kind, name, label, value, help_text, low=None, high=None):
@@ -566,7 +593,7 @@ def _build_audio(comp, spec):
 	release.readOnly = True
 	for node in comp.findChildren():
 		node.viewer = False
-	comp.par.opviewer = 'debug'
+	_add_icon(comp, comp.name, 'debug')
 
 
 def _transparent_switch(comp, shown, width_expr, height_expr):
@@ -836,7 +863,7 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 		node.nodeX, node.nodeY = column * COLUMN, y
 	for node in (source, frame, transparent, composite, gate, startup):
 		node.viewer = False
-	demo.par.opviewer = 'out_debug'
+	_add_icon(demo, name, 'out_debug')
 	_restore_wires(demo, inputs, outputs)
 	return demo
 
@@ -948,7 +975,7 @@ def build_audio_demo(parent_comp, name='AudioDemo'):
 		node.nodeX, node.nodeY = column * COLUMN, y
 	for node in (audio_in, text_in, audio, heard, to_speak, canvas, readout, captions, view, gate, startup):
 		node.viewer = False
-	demo.par.opviewer = 'out_debug'
+	_add_icon(demo, name, 'out_debug')
 	_restore_wires(demo, inputs, outputs)
 	return demo
 
