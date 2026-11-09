@@ -4,7 +4,11 @@
 
 Native (C++) machine learning operators for TouchDesigner. Track hands, bodies, faces and objects,
 segment people and estimate depth on live video; transcribe speech, speak text and recognize
-sounds from audio. No Python ML stack to install.
+sounds from audio.
+
+The ONNX models run on the ONNX Runtime, CUDA and TensorRT that ship with TouchDesigner, and frames
+stay on the GPU from the input TOP to the result. Nothing is copied to the CPU and back, and there's
+no Python ML stack to install. The MediaPipe models (Google's own library, bundled) run on the CPU.
 
 Each model is a ready-made `.tox`: drag it in, wire video (or audio) into it, and get a debug
 image, tables with stable track ids, and CHOP channels. More detail on each:
