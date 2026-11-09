@@ -1,5 +1,7 @@
 # td-native-inference
 
+![](./docs/images/screenshot.png)
+
 Native (C++) machine learning operators for TouchDesigner. Track hands, bodies, faces and objects,
 segment people and estimate depth on live video; transcribe speech, speak text and recognize
 sounds from audio. No Python ML stack to install.
