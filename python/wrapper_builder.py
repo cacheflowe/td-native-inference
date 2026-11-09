@@ -507,7 +507,7 @@ def build(spec, parent_comp, name=None):
 	for node in comp.findChildren():
 		node.viewer = False
 	_layout(comp, spec)
-	_add_icon(comp, comp.name, 'debug')
+	_add_icon(comp, comp.name, './debug')
 	_restore_wires(comp, inputs, outputs)
 	return comp
 
@@ -534,7 +534,7 @@ def _add_icon(comp, name, fallback_viewer):
 	icon.par.file = ''	# the locked pixels stay; no path back to this checkout
 	icon.viewer = False
 	icon.nodeX, icon.nodeY = 0, 560
-	comp.par.opviewer = 'icon'
+	comp.par.opviewer = './icon'	# ./: a bare name resolves next to the COMP, not inside it
 	comp.viewer = True	# a dropped-in tox shows its card right away
 	return icon
 
@@ -593,7 +593,7 @@ def _build_audio(comp, spec):
 	release.readOnly = True
 	for node in comp.findChildren():
 		node.viewer = False
-	_add_icon(comp, comp.name, 'debug')
+	_add_icon(comp, comp.name, './debug')
 
 
 def _transparent_switch(comp, shown, width_expr, height_expr):
@@ -863,7 +863,7 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 		node.nodeX, node.nodeY = column * COLUMN, y
 	for node in (source, frame, transparent, composite, gate, startup):
 		node.viewer = False
-	_add_icon(demo, name, 'out_debug')
+	_add_icon(demo, name, './out_debug')
 	_restore_wires(demo, inputs, outputs)
 	return demo
 
@@ -975,7 +975,7 @@ def build_audio_demo(parent_comp, name='AudioDemo'):
 		node.nodeX, node.nodeY = column * COLUMN, y
 	for node in (audio_in, text_in, audio, heard, to_speak, canvas, readout, captions, view, gate, startup):
 		node.viewer = False
-	_add_icon(demo, name, 'out_debug')
+	_add_icon(demo, name, './out_debug')
 	_restore_wires(demo, inputs, outputs)
 	return demo
 
