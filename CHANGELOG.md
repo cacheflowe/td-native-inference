@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- MediaPipe models (Hands, Gestures, Face, Pose, Holistic, Face Detector, Segmentation) recover
+  from a MediaPipe graph error within about a second. Before, the node stayed dead (0 detections)
+  until TouchDesigner restarted; seen with the gesture recognizer's "Packet isn't the sole owner of
+  the holder" warning.
+
 ## v0.2.2 (2026-11-09)
 
 - YOLO26 Segmentation: masks fade out past their box (**Mask Box Margin**) instead of being cut at
