@@ -22,6 +22,9 @@ class Skeleton:
 	# default Relmatchdist: mean distance over distance_indices in skeleton sizes (box diagonal).
 	# Each matches max_match_dist at a typical on-screen size (body ~0.5 of the frame, hand ~0.15).
 	rel_match_dist: float = 0.15
+	# Keypoints 0..world_count-1 have MediaPipe world landmarks (w{i}_x/y/z, metres) when the
+	# MediaPipeTOP's World Landmark Columns is on. Holistic's face has none.
+	world_count: int = 0
 
 	@property
 	def count(self):
@@ -111,9 +114,10 @@ def _stable(names):
 
 COCO_17 = Skeleton('coco17', COCO_17_NAMES, COCO_17_EDGES, _stable(COCO_17_NAMES), 0.5)
 # Pose: face + shoulders + hips (15 points vs COCO's 9, so the threshold scales up to match).
-MP_POSE = Skeleton('mp_pose', POSE_NAMES, POSE_EDGES, _stable(POSE_NAMES), 0.5 * 15 / 9)
+MP_POSE = Skeleton('mp_pose', POSE_NAMES, POSE_EDGES, _stable(POSE_NAMES), 0.5 * 15 / 9, world_count=33)
 # Hands: wrist + the five finger bases (the palm), which move together.
-MP_HANDS = Skeleton('mp_hands', HAND_NAMES, HAND_EDGES, [0, 1, 5, 9, 13, 17], 0.3, rel_match_dist=0.35)
+MP_HANDS = Skeleton('mp_hands', HAND_NAMES, HAND_EDGES, [0, 1, 5, 9, 13, 17], 0.3, rel_match_dist=0.35,
+	world_count=21)
 # Face: nose tip, eye corners, mouth corners, chin.
 MP_FACE = Skeleton('mp_face', FACE_NAMES, FACE_EDGES, [1, 33, 263, 61, 291, 152], 0.3, rel_match_dist=0.2)
 
@@ -136,4 +140,4 @@ MP_HOLISTIC = Skeleton(
 		[f'right_hand_{n}' for n in HAND_NAMES] + FACE_NAMES,
 	POSE_EDGES + _offset(HAND_EDGES, HOLISTIC_LEFT_HAND) + _offset(HAND_EDGES, HOLISTIC_RIGHT_HAND) +
 		_offset(FACE_EDGES, HOLISTIC_FACE),
-	_stable(POSE_NAMES), 0.5 * 15 / 9, hide_missing=True)
+	_stable(POSE_NAMES), 0.5 * 15 / 9, hide_missing=True, world_count=HOLISTIC_FACE)

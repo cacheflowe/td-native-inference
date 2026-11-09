@@ -37,15 +37,39 @@ Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (I
       object detector, image classifier/embedder, interactive segmenter.
 - [ ] Other ONNX candidates: RF-DETR (Apache-2.0), RVM (GPL-3.0: fetch only).
 
-## Dev vs installed plugins (pinned: decide together)
+## Dev vs installed plugins
 
-- [ ] With a release installed in `Documents/Derivative/Plugins/`, the dev project loads two copies
-      of each Custom OP (the install plus its own `plugins/` folder, which TD scans as the
-      project's Plugins folder); which one serves a node is undefined. Options discussed Nov 8:
-      move the build out of `plugins/` and switch the one system-wide folder between the dev build
-      and a release with a junction (`use_plugins dev|release|off`); tell users "one install per
-      machine" (or a show's own `Plugins/`, never both); a tox/plugin version check that warns on a
-      mismatch.
+- [x] Switching: `scripts\plugins.ps1 dev|install|status` (Nov 9) moves the installed binaries
+      aside or copies the local build in; models stay put. README says "one install per machine".
+- [ ] A tox/plugin version check that warns on a mismatch (an installed dev build still reports
+      the last `VERSION`).
+
+## Puppeteering a rigged character (MediaPipe Holistic, single person)
+
+Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
+
+- [x] **World landmarks out of the tox** (Nov 9). **World Landmark Columns** on the Pose and
+      Holistic Model pages; `<joint>_wx/_wy/_wz` columns and channels in metres, TD axes (y up,
+      +z toward the camera), hip origin, smoothed, unseen hands hold. Holistic's hands turned out
+      to be in body space already (hand wrist = body wrist), so no attaching step.
+- [x] **Bone rotations for Mixamo** (Nov 9, first pass). `python/mixamo_retarget.py` (numpy,
+      `tests/test_retarget.py`): per bone a primary direction plus a roll hint, measured the same
+      way on the rest skeleton; a weak hint (straight arm) falls back to the parent's turn plus
+      the shortest swing; spine and neck blend between hips, chest and head. ~1 ms per frame.
+- [x] **Drive the FBX COMP** (lab). `scripts/lab/build_puppet.py` builds `/project1/PuppetLab`:
+      clip or webcam -> Holistic -> solver Script CHOP -> every bone's rx/ry/rz bound to it ->
+      render. Checked on `build/pose.jpg` (warrior pose matches).
+- [ ] Tune live with a webcam: head yaw/pitch (looks under-turned), whether the forearm should
+      take only part of the hand's twist, foot roll.
+- [ ] Rotation smoothing (slerp) and joint limits (no backward elbows/knees); for now only the
+      tracker's position smoothing.
+- [ ] Hips translation (image position and depth); the character stays in place.
+- [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject
+      a frame whose hip line flips faster than a person can turn.
+- [ ] Package: a `MixamoPuppet` tox (Tracks DAT + FBX COMP in, rotations out, binds the bones)
+      generated like the wrappers.
+- [ ] Face: Holistic's blendshapes could drive a Mixamo face only if the character has matching
+      shape keys (ARKit names); out of scope until a character needs it.
 
 ## Tracking (area of interest)
 

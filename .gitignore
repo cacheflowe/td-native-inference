@@ -1,5 +1,6 @@
 # TouchDesigner
 Backup/
+TDImportCache/
 CrashAutoSave*
 *.dmp
 # TD's numbered saves (td-native-inference.12.toe); the plain .toe is tracked
@@ -28,6 +29,8 @@ models/**/*.engine
 models/**/*.litertlm
 models/**/*.xnnpack_cache
 models/**/*.onnx_data
+# Third-party characters (Mixamo etc.): licensed for use, not for redistribution
+assets/models/
 models/**/*.bin
 **/trt_cache/
 cache/

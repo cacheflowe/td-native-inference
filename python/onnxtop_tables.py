@@ -73,8 +73,9 @@ MEDIAPIPE_DEFAULTS = {
 	'Minboxheight': 0.01,
 }
 
-# Info DAT columns that aren't keypoints or extras (MediaPipeTOP adds world landmarks w{i}_* and
-# the face matrix m{r}{c}; anything else, e.g. blendshape names, becomes a tracks-table extra).
+# Info DAT columns that aren't keypoints or extras (MediaPipeTOP adds world landmarks w{i}_*, read
+# separately into det['world'], and the face matrix m{r}{c}; anything else, e.g. blendshape names,
+# becomes a tracks-table extra).
 _KNOWN_COLS = {'id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label', 'mask_fill'}
 _NOT_EXTRA = re.compile(r'^(kp\d+_[uvcz]|w\d+_[xyz]|m\d\d)$')
 
@@ -215,6 +216,7 @@ def read_detections(info_dat, mode):
 	has_fill = 'mask_fill' in col
 	mp = mode in MP_SKELETONS
 	has_z = mp and 'kp0_z' in col
+	world_count = MP_SKELETONS[mode].world_count if mp and 'w0_x' in col else 0
 	label_col = col.get('label', -1)
 	extra_cols = [(h, i) for i, h in enumerate(header) if h not in _KNOWN_COLS and not _NOT_EXTRA.match(h)] if mp else []
 	dets = []
@@ -233,6 +235,13 @@ def read_detections(info_dat, mode):
 					kp.append(float(row[col[f'kp{k}_z']].val))
 				kps.append(kp)
 			det['keypoints'] = kps
+			if world_count:
+				# MediaPipe's world axes are image-like (y down, z away from the camera); turn them
+				# to TD's (y up, +z toward the camera), a 180-degree turn about x.
+				det['world'] = []
+				for k in range(world_count):
+					base = col[f'w{k}_x']
+					det['world'].append([float(row[base].val), -float(row[base + 1].val), -float(row[base + 2].val)])
 			if mp:
 				if label_col >= 0 and row[label_col].val:
 					det['label'] = row[label_col].val

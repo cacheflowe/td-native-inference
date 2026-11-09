@@ -12,7 +12,9 @@ Input detections are dicts in TD space (0-1, origin bottom-left):
 	{'box': [x_left, y_bottom, x_right, y_top], 'score': float, 'keypoints': [[x, y, conf], ...]}
 optionally with [x, y, conf, z] keypoints, a 'label' (e.g. MediaPipe handedness / gesture, shown
 as "<id> <label>") and 'extras' ({column name: value}, e.g. face blendshapes; smoothed like the
-keypoints and written as extra table_output columns).
+keypoints and written as extra table_output columns), and 'world' ([[x, y, z], ...] in metres,
+TD axes: MediaPipe world landmarks for the skeleton's first world_count keypoints; smoothed like
+the keypoints and written as <name>_wx/_wy/_wz columns).
 
 The keypoint layout is a mediapipe_skeletons.Skeleton: COCO-17 by default (YOLO26-pose, MoveNet),
 or MP_POSE / MP_HANDS / MP_FACE for MediaPipeTOP.
@@ -290,6 +292,7 @@ class PoseTrackerPipeline:
 			state = self._kpt_state.get(t.track_id)
 			raw_kpts = t.payload.get('keypoints')
 			raw_extras = t.payload.get('extras') or {}
+			raw_world = t.payload.get('world')
 			if state is None:
 				# Brand-new track: seed smoothed state directly from its first detection.
 				state = {
@@ -297,8 +300,11 @@ class PoseTrackerPipeline:
 					'lost_frames': [0] * num_kp,
 					'box': list(box_raw),
 					'extras': dict(raw_extras),
+					'world': None,
 				}
 				self._kpt_state[t.track_id] = state
+				if raw_world:
+					self._smooth_world(state, raw_world, raw_kpts, smoothing)
 			elif t.lost_frames == 0 and raw_kpts is not None:
 				# Only advance keypoint smoothing on a frame where this track actually
 				# matched a real detection -- a frame with no fresh match (lost_frames > 0)
@@ -317,6 +323,8 @@ class PoseTrackerPipeline:
 				for name, value in raw_extras.items():
 					prev = state['extras'].get(name, value)
 					state['extras'][name] = prev * smoothing + value * (1.0 - smoothing)
+				if raw_world:
+					self._smooth_world(state, raw_world, raw_kpts, smoothing)
 				# Same lerp, same "only advance on a frame that actually matched a real
 				# detection" cadence as the keypoints above.
 				state['box'] = [
@@ -359,6 +367,7 @@ class PoseTrackerPipeline:
 				'keypoints': state['smoothed'],  # skeleton.count x [x, y, conf(, z)], smoothed, TD coords
 				'label': label,
 				'extras': state['extras'],
+				'world': state['world'],  # world_count x [x, y, z] metres, TD axes, or None
 				'keypoints_visible': [lost <= self.tracker.track_buffer for lost in state['lost_frames']],
 				'vx': float(t.mean[4]), 'vy': float(t.mean[5]),  # frame-to-frame box-center delta (see KeypointTrack.mean)
 				'lost_frames': t.lost_frames,
@@ -368,6 +377,19 @@ class PoseTrackerPipeline:
 		# Prune keypoint smoothing state for tracks the tracker has dropped entirely.
 		object_tracker.prune_stale(active_ids, self._kpt_state, self._presence_state, self._label_state)
 		return self.tracked_objects
+
+	def _smooth_world(self, state, raw_world, raw_kpts, smoothing):
+		"""Advance the world landmarks one matched frame. A joint whose keypoint is absent
+		(conf 0: holistic's unseen hand) keeps its last value instead of easing to the origin,
+		and one seen for the first time is taken as-is."""
+		world = state['world']
+		if world is None or len(world) != len(raw_world):
+			state['world'] = world = [None] * len(raw_world)
+		for k, p in enumerate(raw_world):
+			if self.skeleton.hide_missing and raw_kpts and raw_kpts[k][2] <= 0.0:
+				continue
+			prev = world[k]
+			world[k] = list(p) if prev is None else [prev[i] * smoothing + p[i] * (1.0 - smoothing) for i in range(3)]
 
 	def _stable_label(self, t, raw, hold_frames, min_score, smoothing):
 		"""Debounce a track's label: a new label must win `hold_frames` consecutive matched
@@ -411,6 +433,8 @@ class PoseTrackerPipeline:
 		suffixes = ('x', 'y', 'conf', 'z') if has_z else ('x', 'y', 'conf')
 		kpt_header = [f'{name}_{s}' for name in self.skeleton.names for s in suffixes]
 		extra_names = list(self.tracked_objects[0]['extras']) if self.tracked_objects else []
+		world_count = max((len(obj['world']) for obj in self.tracked_objects if obj.get('world')), default=0)
+		world_header = [f'{name}_w{s}' for name in self.skeleton.names[:world_count] for s in 'xyz']
 		# Persistence columns (only when enabled, so COCO pose tables keep their layout).
 		state_names = (['presence'] if self._presence_on else []) + \
 			(['gesture', 'gesture_score', 'gesture_frames', 'gesture_onset'] if self._labels_on else [])
@@ -421,6 +445,7 @@ class PoseTrackerPipeline:
 			*object_tracker.box_header(),
 			*state_names,
 			*kpt_header,
+			*world_header,
 			*extra_names,
 			*object_tracker.color_header(),
 		])
@@ -434,9 +459,19 @@ class PoseTrackerPipeline:
 				*object_tracker.box_row(obj),
 				*[f"{v:.4f}" if isinstance(v, float) else v for v in (obj.get(name, '') for name in state_names)],
 				*[f"{v:.4f}" for v in flat_kpts],
+				*self._world_cells(obj, world_count),
 				*[f"{obj['extras'].get(name, 0.0):.4f}" for name in extra_names],
 				*object_tracker.color_row(obj['track_id']),
 			])
+
+	@staticmethod
+	def _world_cells(obj, world_count):
+		world = obj.get('world') or []
+		cells = []
+		for k in range(world_count):
+			p = world[k] if k < len(world) and world[k] is not None else (0.0, 0.0, 0.0)
+			cells += [f'{v:.4f}' for v in p]
+		return cells
 
 	def write_joints_table(self, tbl):
 		"""table_joints: one row per visible keypoint across all tracked people."""

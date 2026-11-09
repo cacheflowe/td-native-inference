@@ -14,7 +14,8 @@
 		"Mindetection",
 		"Minpresence",
 		"Mintracking",
-		"Outputz"
+		"Outputz",
+		"Outputworld"
 	],
 	"tracking": [
 		"Confthreshold",

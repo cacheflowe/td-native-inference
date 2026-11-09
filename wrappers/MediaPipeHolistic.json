@@ -12,7 +12,8 @@
 		"Mindetection",
 		"Minpresence",
 		"Blendshapes",
-		"Outputz"
+		"Outputz",
+		"Outputworld"
 	],
 	"tracking": [
 		"Confthreshold",

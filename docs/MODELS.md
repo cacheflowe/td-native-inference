@@ -26,6 +26,18 @@ keypoint also gets a `<joint>_z` column, a `t<id>_<joint>_z` channel and a fille
 - MediaPipe's z is *relative* depth: 0 at the wrist (hands) or the hips (pose), negative toward the camera, in roughly the same units as x.
 - It's good for "which finger is in front" and for gesture depth. It isn't a distance from the camera.
 
+**3D world positions (MediaPipe Pose, Holistic):** with **World Landmark Columns** on (Model page,
+off by default), each body and hand joint also gets `<joint>_wx, <joint>_wy, <joint>_wz` columns
+and `t<id>_<joint>_wx/_wy/_wz` channels.
+- These are real 3D positions in **metres**, with the origin between the hips. Axes follow
+  TouchDesigner: x to the image's right, y up, +z toward the camera.
+- They're smoothed with **Output Smoothing**, like the keypoints. A Holistic hand that drops out
+  holds its last position.
+- In Holistic the hands share the body's space: each hand's wrist sits on the body's wrist. The
+  face mesh has no world positions.
+- Use them to drive a 3D skeleton or a rigged character. They're estimated from one camera, so
+  depth is the noisiest axis.
+
 ## Shared parameters
 
 - **Model** page: **Active**, the handful of settings that matter for that model, and **Reload**.
