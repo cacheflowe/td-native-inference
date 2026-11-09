@@ -10,6 +10,8 @@
   and `Yolo26Seg.tox` has a new TOP 4 that paints each tracked object in its track color.
 - MediaPipe Hands, Pose and Holistic output landmark depth by default (`<joint>_z` columns and
   channels, `z` in `joints`); **Landmark Z** is on their Model page, and on Face's (off there).
+- Every tox shows a card with its model name, engine and version in its network node, rendered
+  when the tox is built (no renderer runs inside the tox).
 
 ## v0.2.1 (2026-11-08)
 
