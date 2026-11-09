@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- YOLO26 Segmentation: masks fade out past their box (**Mask Box Margin**) instead of being cut at
+  it, which clipped hair and raised fingertips in blocky steps when a box was tight.
+- YOLO26 Segmentation: **Matte Encoding = Instances** keeps which detection owns each pixel (G) and
+  its class (B), with overlaps going to the most confident mask. **Matte NMS IoU** keeps a duplicate
+  detection of one person out of the matte (it split that person's pixels in two). Tracks get a `det_index` column,
+  and `Yolo26Seg.tox` has a new TOP 4 that paints each tracked object in its track color.
+- MediaPipe Hands, Pose and Holistic output landmark depth by default (`<joint>_z` columns and
+  channels, `z` in `joints`); **Landmark Z** is on their Model page, and on Face's (off there).
+
 ## v0.2.1 (2026-11-08)
 
 - `fetch_models.cmd`: double-click to download YOLO26 and the Kokoro voice. Right-clicking

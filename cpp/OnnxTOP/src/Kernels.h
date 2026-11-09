@@ -74,14 +74,17 @@ cudaError_t launchCropSheet(cudaSurfaceObject_t src, TexFormat fmt, int srcW, in
 	const CropBox* boxes, int numBoxes, int cols, int cell, cudaSurfaceObject_t out, int outW, int outH,
 	cudaStream_t stream);
 
-// One kept detection, for mask decode. Box in model-input pixels.
+// One kept detection, for mask decode. Box and margins in model-input pixels.
 struct SegDet
 {
 	float	x1, y1, x2, y2;
-	int		row;	// row index into the [N, stride] detection tensor
+	int		row;			// row index into the [N, stride] detection tensor
+	int		cls;
+	float	marginX, marginY;	// the mask fades out over this distance outside the box (0 = hard crop)
 };
 
-// masksOut[k][py][px] = sigmoid(coeffs_k . protos[:, py, px]), zero outside det k's box.
+// masksOut[k][py][px] = sigmoid(coeffs_k . protos[:, py, px]) inside det k's box, fading to zero
+// over its margin outside it (a hard crop cut off hair and fingertips when a box was tight).
 cudaError_t launchProtoMasks(const float* det, int detStride, int coefOffset,
 	const SegDet* dets, int numDets,
 	const float* protos, int numCoef, int protoH, int protoW,
@@ -93,8 +96,13 @@ cudaError_t launchMaskCounts(const float* masks, int numDets, int protoH, int pr
 
 // Writes the max over all decoded masks, mapped back into source-image space, to an
 // RGBA16Float output surface (outW x outH). numDets == 0 writes zeros.
-cudaError_t launchComposeMatte(const float* masks, int numDets, int protoH, int protoW,
-	const Letterbox& lb, cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream);
+// Grayscale: the matte in R, G, B and A. Instances: R and A the matte, G the winning detection's
+// index + 1 (the mask with the highest value at that pixel; 0 where the matte is <= idThreshold,
+// kept tiny so ids cover the soft fringe too),
+// B its class + 1. Half floats hold these integers exactly (up to 2048).
+cudaError_t launchComposeMatte(const float* masks, const SegDet* dets, int numDets, int protoH, int protoW,
+	const Letterbox& lb, bool instances, float idThreshold, cudaSurfaceObject_t out, int outW, int outH,
+	cudaStream_t stream);
 
 // Device-resident running value range of a tensor, for normalizing raw outputs without a
 // CPU round trip. Allocate with cudaMalloc; launchTensorRange() maintains it.

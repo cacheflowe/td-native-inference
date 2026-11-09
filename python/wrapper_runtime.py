@@ -33,6 +33,30 @@ def write_channels(script_op, comp):
 		script_op.appendChan(channel.name)[0] = channel[0]
 
 
+# Segmentation wrappers with Matte Encoding = Instances: the matte's G channel holds each pixel's
+# detection (Info DAT id + 1). The tracks table's det_index links a track to this frame's detection.
+
+def write_instance_colors(script_op, comp):
+	"""A lookup row for the instances GLSL TOP: sample i = the color of the track whose
+	detection is i - 1 (r, g, b, a = 1); sample 0 (background) and untracked detections are
+	transparent. Empty while Matte Encoding is Grayscale."""
+	script_op.clear()
+	tracks = comp.op('tracks')
+	colors = {}
+	if comp.par.Matteencoding.eval() == 'instances' and tracks.numRows > 1:
+		header = [cell.val for cell in tracks.row(0)]
+		if {'det_index', 'r', 'g', 'b'} <= set(header):
+			for row in range(1, tracks.numRows):
+				index = int(float(tracks[row, 'det_index'].val or -1))
+				if index >= 0:
+					colors[index + 1] = [float(tracks[row, name].val) for name in ('r', 'g', 'b')]
+	script_op.numSamples = max(colors, default=0) + 1
+	for channel, name in enumerate(('r', 'g', 'b', 'a')):
+		values = script_op.appendChan(name)
+		for sample, rgb in colors.items():
+			values[sample] = rgb[channel] if channel < 3 else 1.0
+
+
 # Sound classification wrappers. `scores` is a Lag CHOP of every class score (channel names are
 # the class labels made CHOP-safe: "Child speech, kid speaking" -> Child_speech_kid_speaking).
 

@@ -248,6 +248,8 @@ def read_detections(info_dat, mode):
 			det['class_name'] = box_tracker_pipeline.COCO_CLASSES.get(class_id, 'unknown')
 			if has_fill:
 				det['mask_area_ratio'] = float(row[col['mask_fill']].val)
+				# The Info DAT id: what an Instances matte's G channel holds (+ 1) for this detection.
+				det['det_index'] = int(float(row[col['id']].val)) if 'id' in col else r - 1
 		dets.append(det)
 	return dets
 

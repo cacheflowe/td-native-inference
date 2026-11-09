@@ -14,7 +14,8 @@
 		"Minpresence",
 		"Mintracking",
 		"Blendshapes",
-		"Matrix"
+		"Matrix",
+		"Outputz"
 	],
 	"tracking": [
 		"Confthreshold",

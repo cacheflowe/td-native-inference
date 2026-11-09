@@ -29,6 +29,9 @@ struct SegOptions
 	float	maskThreshold = 0.5f;
 	float	matteConf = 0.35f;
 	float	matteMinFill = 0.15f;
+	float	maskMargin = 0.1f;		// fade-out margin outside each box, as a fraction of its size (0 = hard crop)
+	float	matteNms = 0.5f;		// a mask overlapping a more confident one by more box IoU stays out of the matte (1 = off)
+	bool	instances = false;		// matte encoding: G = detection index + 1, B = class + 1
 };
 
 class YoloDecoder
@@ -79,6 +82,7 @@ private:
 	size_t					myDevMasksBytes = 0;
 	int*					myDevCounts = nullptr;		// kMaxDets
 	int*					myHostCounts = nullptr;		// pinned, kMaxDets
+	bool					myInMatte[kMaxDets] = {};	// per kept seg detection: its mask reaches the matte
 
 	std::vector<Detection>	myDetections;
 	int						myKeypoints = 0;

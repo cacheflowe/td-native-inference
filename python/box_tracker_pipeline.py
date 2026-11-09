@@ -222,6 +222,8 @@ class BoxTrackerPipeline:
 					self._mask_state[t.track_id] = new_mask
 				obj['mask'] = self._mask_state.get(t.track_id)
 				obj['mask_area_ratio'] = t.payload.get('mask_area_ratio', 0.0)
+				# This frame's detection for the track (its pixels in an Instances matte), -1 while coasting.
+				obj['det_index'] = t.payload.get('det_index', -1) if t.lost_frames == 0 else -1
 			self.tracked_objects.append(obj)
 
 		# Prune box/mask/presence state for tracks the tracker has dropped entirely.
@@ -230,9 +232,9 @@ class BoxTrackerPipeline:
 
 	def write_tracks_table(self, tbl):
 		"""table_output: label ("<id> <class name> <score>%") + class + box columns (+ seg's
-		mask_area_ratio, presence) + color."""
+		mask_area_ratio, presence, det_index) + color."""
 		tbl.clear()
-		extra = ['mask_area_ratio', 'presence'] if self.segmentation else []
+		extra = ['mask_area_ratio', 'presence', 'det_index'] if self.segmentation else []
 		tbl.appendRow([
 			*object_tracker.label_header(),
 			'class_id', 'class_name',
@@ -241,7 +243,8 @@ class BoxTrackerPipeline:
 			*object_tracker.color_header(),
 		])
 		for obj in self.tracked_objects:
-			extra_vals = [f"{obj['mask_area_ratio']:.4f}", f"{obj['presence']:.4f}"] if self.segmentation else []
+			extra_vals = ([f"{obj['mask_area_ratio']:.4f}", f"{obj['presence']:.4f}", obj.get('det_index', -1)]
+				if self.segmentation else [])
 			# Label names the class too ("161 person 94%"), so DebugBB shows what each box is.
 			label_text = f"{obj['track_id']} {obj['class_name']} {round(obj['score'] * 100)}%"
 			tbl.appendRow([

@@ -584,6 +584,9 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	segOpt.maskThreshold = (float)inputs->getParDouble("Maskthreshold");
 	segOpt.matteConf = (float)inputs->getParDouble("Matteconf");
 	segOpt.matteMinFill = (float)inputs->getParDouble("Matteminfill");
+	segOpt.maskMargin = (float)inputs->getParDouble("Maskmargin");
+	segOpt.matteNms = (float)inputs->getParDouble("Mattenms");
+	segOpt.instances = inputs->getParInt("Matteencoding") == 1;
 
 	inputs->enablePar("Fp16", provider != OrtProvider::CUDA);
 	inputs->enablePar("Cachefolder", provider != OrtProvider::CUDA);
@@ -596,7 +599,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Nmsthreshold", mode == ModeYuNet);
 	inputs->enablePar("Normscale", normKind == InputNormKind::Custom);
 	inputs->enablePar("Normoffset", normKind == InputNormKind::Custom);
-	for (const char* p : { "Maskthreshold", "Matteconf", "Matteminfill" })
+	for (const char* p : { "Maskthreshold", "Matteconf", "Matteminfill", "Maskmargin", "Mattenms", "Matteencoding" })
 		inputs->enablePar(p, mode == ModeYolo && myYolo.isSegmentation());
 	for (const char* p : { "Rawoutput", "Rawnormalize", "Rawmaptoinput" })
 		inputs->enablePar(p, mode == ModeRaw);
@@ -1336,9 +1339,23 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.clampMins[0] = np.clampMaxes[0] = true;
 		check(manager->appendFloat(np));
 	};
+	// Mask Box Margin: masks fade out past their box over this fraction of its size; 0 = hard crop.
 	segFloat("Maskthreshold", "Mask Threshold (Fill Ratio)", 0.5);
 	segFloat("Matteconf", "Matte Min Confidence", 0.35);
 	segFloat("Matteminfill", "Matte Min Mask Fill", 0.15);
+	segFloat("Maskmargin", "Mask Box Margin", 0.1);
+	segFloat("Mattenms", "Matte NMS IoU", 0.5);
+	{
+		const char* names[] = { "grayscale", "instances" };
+		const char* labels[] = { "Grayscale", "Instances (R/A matte, G detection, B class)" };
+		OP_StringParameter sp("Matteencoding");
+		sp.label = "Matte Encoding";
+		sp.page = "Detection";
+		sp.defaultValue = names[0];
+		sp.help = "Instances: G = the detection that owns each pixel (Info DAT id + 1, 0 = none; overlaps go to "
+			"the most confident mask), B = its class + 1. R and A stay the matte.";
+		check(manager->appendMenu(sp, 2, names, labels));
+	}
 
 	{
 		OP_StringParameter sp("Cachefolder");

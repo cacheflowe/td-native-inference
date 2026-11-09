@@ -5,6 +5,7 @@
 	"kind": "boxes",
 	"tracker": "segment",
 	"result": "inference",
+	"instances": true,
 	"preset": {
 		"Model": "models/onnx/yolo26/yolo26s-seg.onnx",
 		"Confthreshold": 0.214,
@@ -15,7 +16,10 @@
 		"Confthreshold",
 		"Maxdetections",
 		"Maskthreshold",
-		"Matteconf"
+		"Matteconf",
+		"Maskmargin",
+		"Mattenms",
+		"Matteencoding"
 	],
 	"tracking": [
 		"Confthreshold",

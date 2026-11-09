@@ -6,14 +6,16 @@
 	"tracker": "mp_hands",
 	"preset": {
 		"Task": "gesture",
-		"Maxinstances": 2
+		"Maxinstances": 2,
+		"Outputz": true
 	},
 	"model": [
 		"Task",
 		"Maxinstances",
 		"Mindetection",
 		"Minpresence",
-		"Mintracking"
+		"Mintracking",
+		"Outputz"
 	],
 	"menus": {
 		"Task": {

@@ -20,6 +20,12 @@ y_top, y_bottom, vx, vy, lost_frames, total_frames`, followed by model-specific 
 the origin at the **bottom left** (TouchDesigner's UV convention). A track id stays with the same
 person or object while it's visible and through short dropouts.
 
+**Depth (MediaPipe Hands, Pose, Holistic, Face):** with **Landmark Z** on (Model page), each
+keypoint also gets a `<joint>_z` column, a `t<id>_<joint>_z` channel and a filled `z` in `joints`.
+- It's on by default for Hands, Pose and Holistic. It's off for Face, where it would add 478 columns per face.
+- MediaPipe's z is *relative* depth: 0 at the wrist (hands) or the hips (pose), negative toward the camera, in roughly the same units as x.
+- It's good for "which finger is in front" and for gesture depth. It isn't a distance from the camera.
+
 ## Shared parameters
 
 - **Model** page: **Active**, the handful of settings that matter for that model, and **Reload**.
@@ -106,8 +112,31 @@ one class (-1 = all). GPU. Ultralytics YOLO26s, **AGPL-3.0**: not bundled, run
 
 ### YOLO26 Segmentation (`Yolo26Seg.tox`)
 Like Object Detection, plus a per-object mask. TOP 1 is the native segmentation matte (at the
-model's resolution), TOP 2 the input, TOP 3 the box overlay. `mask_area_ratio` and `presence`
-columns per track. GPU. Ultralytics YOLO26s-seg, **AGPL-3.0**: run `fetch_models.cmd`.
+model's resolution), TOP 2 the input, TOP 3 the box overlay. `mask_area_ratio`, `presence` and
+`det_index` columns per track. GPU. Ultralytics YOLO26s-seg, **AGPL-3.0**: run `fetch_models.cmd`.
+
+- **Mask Box Margin** (Model page) lets each mask fade out past its box instead of being cut at it. Tight boxes otherwise clip hair and raised fingertips in blocky steps. 0 restores the hard crop.
+- **Matte Encoding = Instances** keeps the identity of every masked pixel. TOP 1's channels become:
+  - **R and A:** the matte, as before.
+  - **G:** the detection that owns the pixel. That's the Info DAT `id` + 1, and 0 means nobody. Where people overlap, the pixel goes to the most confident mask.
+  - **B:** that detection's class + 1.
+- **Matte NMS IoU** (default 0.5) leaves a mask out of the matte when its box nearly duplicates a more confident detection's. The model sometimes boxes one person twice; the tracker already drops the copy, and this keeps the copy from claiming half that person's pixels in Instances mode. Keep it equal to the Tracking page's NMS setting.
+- **TOP 4, `instances`,** paints each tracked object's pixels in its track color, the same colors as the box overlay. It's transparent while the encoding is Grayscale.
+
+Detection ids change order from frame to frame; the stable id is the track's. A track's `det_index` is the detection it matched this frame, or -1 while it's coasting. To isolate one track, look up its `det_index` in the tracks table and keep the pixels whose G equals `det_index + 1`. For example, in a GLSL TOP on TOP 1, with a uniform `uOwner` set to that number:
+
+```glsl
+out vec4 fragColor;
+uniform float uOwner;	// the track's det_index + 1 (0 = nothing)
+void main()
+{
+	vec4 m = texture(sTD2DInputs[0], vUV.st);
+	float keep = (uOwner > 0.0 && abs(m.g - uOwner) < 0.5) ? m.a : 0.0;
+	fragColor = TDOutputSwizzle(vec4(keep));
+}
+```
+
+Set the GLSL TOP's Input Smoothness to Nearest, so ids aren't blended between neighboring pixels.
 
 ### YOLO26 Pose (`Yolo26Pose.tox`)
 Many people at once, 17 COCO body keypoints each. GPU, and much cheaper per person than MediaPipe

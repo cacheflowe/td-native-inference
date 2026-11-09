@@ -186,15 +186,25 @@ namespace
 		SegDet d = dets[k];
 		float mx = (px + 0.5f) * modelW / pw;
 		float my = (py + 0.5f) * modelH / ph;
+		// 1 inside the box, easing to 0 across the margin outside it.
+		auto fade = [](float outside, float margin) {
+			if (outside <= 0.f)
+				return 1.f;
+			if (margin <= 0.f)
+				return 0.f;
+			float t = fminf(outside / margin, 1.f);
+			return 1.f - t * t * (3.f - 2.f * t);
+		};
+		float w = fade(fmaxf(d.x1 - mx, mx - d.x2), d.marginX) * fade(fmaxf(d.y1 - my, my - d.y2), d.marginY);
 		float v = 0.f;
-		if (mx >= d.x1 && mx <= d.x2 && my >= d.y1 && my <= d.y2)
+		if (w > 0.f)
 		{
 			const float* coef = det + (size_t)d.row * stride + coefOffset;
 			float acc = 0.f;
 			size_t plane = (size_t)ph * pw;
 			for (int c = 0; c < numCoef; c++)
 				acc += coef[c] * protos[c * plane + p];
-			v = 1.f / (1.f + __expf(-acc));
+			v = w / (1.f + __expf(-acc));
 		}
 		out[(size_t)k * ph * pw + p] = v;
 	}
@@ -239,8 +249,8 @@ namespace
 		writeHalf4(out, x, y, c);
 	}
 
-	__global__ void kComposeMatte(const float* masks, int numDets, int ph, int pw, Letterbox lb,
-		cudaSurfaceObject_t out, int outW, int outH)
+	__global__ void kComposeMatte(const float* masks, const SegDet* dets, int numDets, int ph, int pw, Letterbox lb,
+		bool instances, float idThreshold, cudaSurfaceObject_t out, int outW, int outH)
 	{
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;	// texture row (bottom-up)
@@ -256,9 +266,24 @@ namespace
 		float fy = my * ph / lb.dstH;
 
 		float m = 0.f;
+		int best = -1;
 		for (int k = 0; k < numDets; k++)
-			m = fmaxf(m, bilerpPlane(masks + (size_t)k * ph * pw, pw, ph, fx, fy));
-		writeHalf4(out, x, y, make_float4(m, m, m, m));
+		{
+			float v = bilerpPlane(masks + (size_t)k * ph * pw, pw, ph, fx, fy);
+			if (v > m)
+			{
+				m = v;
+				best = k;
+			}
+		}
+		if (!instances)
+		{
+			writeHalf4(out, x, y, make_float4(m, m, m, m));
+			return;
+		}
+		// Where people overlap, the pixel belongs to the mask that's most confident there.
+		bool owned = best >= 0 && m > idThreshold;
+		writeHalf4(out, x, y, make_float4(m, owned ? (float)(best + 1) : 0.f, owned ? (float)(dets[best].cls + 1) : 0.f, m));
 	}
 
 	template <typename T>
@@ -515,11 +540,13 @@ cudaError_t launchMaskCounts(const float* masks, int numDets, int protoH, int pr
 	return cudaGetLastError();
 }
 
-cudaError_t launchComposeMatte(const float* masks, int numDets, int protoH, int protoW,
-	const Letterbox& lb, cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream)
+cudaError_t launchComposeMatte(const float* masks, const SegDet* dets, int numDets, int protoH, int protoW,
+	const Letterbox& lb, bool instances, float idThreshold, cudaSurfaceObject_t out, int outW, int outH,
+	cudaStream_t stream)
 {
 	dim3 block(16, 16);
-	kComposeMatte<<<grid2D(outW, outH, block), block, 0, stream>>>(masks, numDets, protoH, protoW, lb, out, outW, outH);
+	kComposeMatte<<<grid2D(outW, outH, block), block, 0, stream>>>(masks, dets, numDets, protoH, protoW, lb,
+		instances, idThreshold, out, outW, outH);
 	return cudaGetLastError();
 }
 

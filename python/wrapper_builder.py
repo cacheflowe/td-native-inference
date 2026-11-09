@@ -15,6 +15,7 @@ The spec decides what differs:
 	kind             landmarks | boxes | image | classifier (second stage on a nested detector)
 	tracker          onnxtop_tables tracker mode (omit for image models)
 	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
+	instances        seg only: TOP 4 colors each tracked object's pixels (Matte Encoding = Instances)
 	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
 	detector, classes  classifier only: the nested detector spec and the score column settings
 	input            'audio' builds an audio wrapper instead (_build_audio): audio CHOP in, the
@@ -65,8 +66,11 @@ LAYOUT_KIND = {
 	# The nested detector feeds the crops (above) and the keypoint visualizer (below).
 	'classifier': {'detector': (1, -20), 'crop_boxes': (2, 320), 'scores': (3, 160)},
 }
-LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (7, 20)}
-DOCKED = ('channels_callbacks', 'scores_callbacks', 'tracker/script_tracks_callbacks',
+LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (7, 20),
+	# Instances: a band under the CHOP outputs. instance_matte above instance_lookup (input order).
+	'instance_matte': (5, -680), 'instance_colors': (4, -820), 'instance_lookup': (5, -820),
+	'instances': (6, -750), 'out_instances': (7, -750)}
+DOCKED = ('channels_callbacks', 'scores_callbacks', 'instance_colors_callbacks', 'instances_pixel', 'tracker/script_tracks_callbacks',
 	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
 
 # Audio wrappers, same banding: the caption chain on top, the DAT outputs, then the CHOP outputs.
@@ -309,8 +313,53 @@ def _build_visuals(comp, spec):
 		boxes_out = comp.create('outTOP', 'out_boxes')
 		boxes_out.par.connectorder = 3
 		_connect(boxes_out, overlay)
+		if spec.get('instances'):
+			_build_instances(comp)
 	else:
 		_connect(preview, transparent, overlay)
+
+
+INSTANCES_GLSL = '''// Instances: each pixel's owner (the matte's G = detection index + 1) in its track's color.
+// Input 0: the instance-encoded matte; input 1: one pixel per detection index + 1 (instance_colors).
+out vec4 fragColor;
+void main()
+{
+	vec4 matte = texture(sTD2DInputs[0], vUV.st);
+	int owner = int(matte.g + 0.5);
+	vec4 color = vec4(0.0);
+	if (owner > 0 && owner < textureSize(sTD2DInputs[1], 0).x)
+		color = texelFetch(sTD2DInputs[1], ivec2(owner, 0), 0);
+	float alpha = matte.a * color.a;
+	fragColor = TDOutputSwizzle(vec4(color.rgb * alpha, alpha));
+}
+'''
+
+
+def _build_instances(comp):
+	"""TOP 4 `instances`: each tracked object's pixels in its track color (Matte Encoding =
+	Instances). The tracks table's det_index maps this frame's detections to tracks; that lookup
+	is a one-row texture, so Python only handles one value per object, never pixels."""
+	colors = comp.create('scriptCHOP', 'instance_colors')
+	comp.op('instance_colors_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_instance_colors(scriptOp, parent())\n")
+	_per_frame(colors)
+	lookup = comp.create('choptoTOP', 'instance_lookup')
+	lookup.par.chop = 'instance_colors'
+	lookup.par.dataformat = 'rgba'
+	lookup.par.format = 'rgba16float'
+	matte = comp.create('selectTOP', 'instance_matte')
+	matte.par.top = 'inference'
+	instances = comp.create('glslTOP', 'instances')
+	for name in ('instances_compute', 'instances_info'):
+		if comp.op(name) is not None:
+			comp.op(name).destroy()
+	comp.op('instances_pixel').text = INSTANCES_GLSL
+	instances.par.inputfiltertype = 'nearest'	# ids must not be blended between neighbours
+	instances.par.format = 'rgba8fixed'
+	_connect(instances, matte, lookup)
+	output = comp.create('outTOP', 'out_instances')
+	output.par.connectorder = 4
+	_connect(output, instances)
 
 
 def _build_pages(comp, spec, plugin, tracker):
@@ -375,7 +424,7 @@ def _layout(comp, spec):
 			node.nodeX, node.nodeY = column * COLUMN, y
 	for path in docked:
 		callbacks = comp.op(path)
-		host = comp.op(path.removesuffix('_callbacks'))
+		host = comp.op(path.removesuffix('_callbacks').removesuffix('_pixel'))	# GLSL TOPs: <name>_pixel
 		if callbacks is not None and host is not None:
 			callbacks.nodeX, callbacks.nodeY = host.nodeX, host.nodeY - 110
 			callbacks.dock = host

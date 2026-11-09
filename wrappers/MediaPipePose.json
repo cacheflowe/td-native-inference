@@ -6,13 +6,15 @@
 	"tracker": "mp_pose",
 	"preset": {
 		"Task": "pose",
-		"Maxinstances": 2
+		"Maxinstances": 2,
+		"Outputz": true
 	},
 	"model": [
 		"Maxinstances",
 		"Mindetection",
 		"Minpresence",
-		"Mintracking"
+		"Mintracking",
+		"Outputz"
 	],
 	"tracking": [
 		"Confthreshold",

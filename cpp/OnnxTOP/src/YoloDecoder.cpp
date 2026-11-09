@@ -4,6 +4,18 @@
 #include <cmath>
 #include <string>
 
+namespace
+{
+	float iou(const float* a, const float* b)	// x1, y1, x2, y2
+	{
+		float ix = std::max(0.f, std::min(a[2], b[2]) - std::max(a[0], b[0]));
+		float iy = std::max(0.f, std::min(a[3], b[3]) - std::max(a[1], b[1]));
+		float inter = ix * iy;
+		float uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
+		return uni > 0.f ? inter / uni : 0.f;
+	}
+}
+
 YoloDecoder::~YoloDecoder()
 {
 	if (myHostDet)
@@ -141,7 +153,14 @@ bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float co
 		myDetections.push_back(std::move(d));
 
 		if (mySeg)
-			myHostSegDets[k] = { x1, y1, x2, y2, kept[k].row };
+		{
+			// Margin: a fraction of the box, but at least two prototype cells so the fade isn't a step.
+			auto margin = [&](float size, float cell) {
+				return segOpt.maskMargin > 0.f ? std::max(segOpt.maskMargin * size, 2.f * cell) : 0.f;
+			};
+			myHostSegDets[k] = { x1, y1, x2, y2, kept[k].row, (int)row[5],
+				margin(x2 - x1, (float)modelW / pw), margin(y2 - y1, (float)modelH / ph) };
+		}
 	}
 
 	if (!mySeg)
@@ -185,11 +204,24 @@ bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float co
 			Detection& d = myDetections[myDetections.size() - numDets + k];
 			d.maskFill = (float)myHostCounts[k] / (float)std::max(area, 1);
 			// Reported either way; only gated masks are left out of the matte.
-			if (d.conf < segOpt.matteConf || d.maskFill <= segOpt.matteMinFill)
+			bool inMatte = d.conf >= segOpt.matteConf && d.maskFill > segOpt.matteMinFill;
+			// Duplicates (the model sometimes boxes one person twice) would split that person's pixels
+			// between two masks in Instances mode, and the tracker's NMS keeps only the stronger one:
+			// leave the weaker out, class-agnostic like the tracker's. kept is sorted by confidence.
+			for (int j = 0; inMatte && j < k; j++)
+			{
+				const SegDet& o = myHostSegDets[j];
+				if (myInMatte[j] && iou(&sd.x1, &o.x1) > segOpt.matteNms)
+					inMatte = false;
+			}
+			myInMatte[k] = inMatte;
+			if (!inMatte)
 				cudaMemsetAsync(myDevMasks + k * plane, 0, plane * sizeof(float), stream);
 		}
 	}
-	cudaError_t ce = launchComposeMatte(myDevMasks, numDets, ph, pw, lb, outSurf, outW, outH, stream);
+	// Ids reach into the soft fringe (any visible matte), so recoloring by id keeps the feathered edge.
+	cudaError_t ce = launchComposeMatte(myDevMasks, myDevSegDets, numDets, ph, pw, lb, segOpt.instances,
+		0.004f, outSurf, outW, outH, stream);
 	if (ce != cudaSuccess)
 	{
 		err = std::string("Mask kernel failed: ") + cudaGetErrorString(ce);
@@ -267,18 +299,6 @@ bool YoloDecoder::decodeMoveNet(const OnnxEngine& engine, const Letterbox& lb, f
 		myDetections.push_back(std::move(d));
 	}
 	return true;
-}
-
-namespace
-{
-	float iou(const float* a, const float* b)	// x1, y1, x2, y2
-	{
-		float ix = std::max(0.f, std::min(a[2], b[2]) - std::max(a[0], b[0]));
-		float iy = std::max(0.f, std::min(a[3], b[3]) - std::max(a[1], b[1]));
-		float inter = ix * iy;
-		float uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
-		return uni > 0.f ? inter / uni : 0.f;
-	}
 }
 
 bool YoloDecoder::decodeYuNet(const OnnxEngine& engine, const Letterbox& lb, float confThresh, float nmsThresh,

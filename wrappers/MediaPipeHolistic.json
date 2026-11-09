@@ -5,12 +5,14 @@
 	"kind": "landmarks",
 	"tracker": "mp_holistic",
 	"preset": {
-		"Task": "holistic"
+		"Task": "holistic",
+		"Outputz": true
 	},
 	"model": [
 		"Mindetection",
 		"Minpresence",
-		"Blendshapes"
+		"Blendshapes",
+		"Outputz"
 	],
 	"tracking": [
 		"Confthreshold",
