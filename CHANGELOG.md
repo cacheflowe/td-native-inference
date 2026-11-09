@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.2 (2026-11-09)
+
 - YOLO26 Segmentation: masks fade out past their box (**Mask Box Margin**) instead of being cut at
   it, which clipped hair and raised fingertips in blocky steps when a box was tight.
 - YOLO26 Segmentation: **Matte Encoding = Instances** keeps which detection owns each pixel (G) and
