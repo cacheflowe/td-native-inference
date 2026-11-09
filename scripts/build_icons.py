@@ -49,9 +49,15 @@ BROWSERS = [
 ]
 
 
-def card_svg(logo_svg, title, rows, version):
+def fit(size, text, width):
+	"""Font size for `text` to fit `width` (Segoe UI averages about 0.55 em per character)."""
+	return min(size, width / max(1, len(text) * 0.55))
+
+
+def card_svg(logo_svg, headline, rows):
 	"""The card, laid out from the bottom up: the (label, value) rows sit a fixed padding above the
-	bottom edge, then a divider and the product + version line; the logo fills what's left on top."""
+	bottom edge, then a divider and the headline (the model: what tells nodes apart at node size);
+	the logo fills what's left on top."""
 	s, w, c, esc = HEIGHT, WIDTH, COLORS, html.escape
 	row_h, row_step, bottom_pad = s * 0.105, s * 0.125, s * 0.075
 	last_row = s - bottom_pad - row_h / 2	# center of the bottom row
@@ -70,7 +76,7 @@ def card_svg(logo_svg, title, rows, version):
 	body = []
 	for i, (label, value, color) in enumerate(rows):
 		y = first_row + i * row_step
-		short = value if len(value) <= 24 else value[:23] + '\u2026'
+		value_size = fit(s * 0.052, value, w * 0.60)
 		body.append(
 			f'<rect x="{w * 0.07:.0f}" y="{y - s * 0.0525:.1f}" width="{w * 0.86:.0f}" height="{s * 0.105:.0f}" '
 			f'rx="{s * 0.025:.1f}" fill="{c["surface"]}" stroke="{c["surface_border"]}" stroke-width="{s / 256:.1f}"/>'
@@ -78,26 +84,26 @@ def card_svg(logo_svg, title, rows, version):
 			f'rx="{s * 0.006:.1f}" fill="{c["accent"]}"/>'
 			f'<text x="{w * 0.12:.0f}" y="{y + s * 0.016:.1f}" font-family="{FONT}" '
 			f'font-size="{s * 0.047:.1f}" fill="{c["muted"]}">{esc(label)}</text>'
-			f'<text x="{w * 0.33:.0f}" y="{y + s * 0.016:.1f}" font-family="{FONT}" '
-			f'font-size="{s * 0.052:.1f}" font-weight="600" fill="{c[color]}">{esc(short)}</text>')
+			f'<text x="{w * 0.31:.0f}" y="{y + s * 0.016:.1f}" font-family="{FONT}" '
+			f'font-size="{value_size:.1f}" font-weight="600" fill="{c[color]}">{esc(value)}</text>')
 	return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w * 2}" height="{s * 2}" viewBox="0 0 {w} {s}">'
 		f'<rect width="{w}" height="{s}" fill="{c["background"]}"/>{logo}'
-		f'<text x="{w / 2:.0f}" y="{title_y:.1f}" text-anchor="middle" font-family="{FONT}" font-size="{s * 0.066:.1f}" '
-		f'font-weight="650" fill="{c["text"]}">{PRODUCT}<tspan fill="{c["accent"]}" font-size="{s * 0.05:.0f}" '
-		f'font-weight="500" dx="{s * 0.022:.0f}">v{esc(version)}</tspan></text>'
+		f'<text x="{w / 2:.0f}" y="{title_y:.1f}" text-anchor="middle" font-family="{FONT}" '
+		f'font-size="{fit(s * 0.085, headline, w * 0.88):.1f}" font-weight="650" fill="{c["text"]}">{esc(headline)}</text>'
 		f'<line x1="{w * 0.07:.0f}" y1="{divider:.1f}" x2="{w * 0.93:.0f}" y2="{divider:.1f}" '
 		f'stroke="{c["surface_border"]}" stroke-width="{s / 256:.1f}"/>{"".join(body)}</svg>')
 
 
 def cards(names=None):
-	"""{name: (title, rows)} for every spec (and the demos), or just `names`."""
+	"""{name: (headline, rows)} for every spec (and the demos), or just `names`. The headline is
+	what tells the nodes apart at node size, so it's the model; the package is a row."""
 	result = {}
 	for path in sorted((ROOT / 'wrappers').glob('*.json')):
 		spec = json.loads(path.read_text(encoding='utf-8'))
 		engine = ENGINES.get(spec['plugin'], spec['plugin'])
-		result[spec['name']] = [('Model:', spec.get('label', spec['name']), 'text'), ('Engine:', engine, 'accent')]
+		result[spec['name']] = (spec.get('label', spec['name']), [('Engine:', engine, 'accent')])
 	for name, (title, what) in DEMOS.items():
-		result[name] = [('Demo:', title, 'text'), ('Models:', what, 'accent')]
+		result[name] = (title, [('Models:', what, 'accent')])
 	return {k: v for k, v in result.items() if not names or k in names}
 
 
@@ -118,9 +124,10 @@ def main(names):
 	version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
 	logo = (OUT / 'logo.svg').read_text(encoding='utf-8')
 	OUT.mkdir(parents=True, exist_ok=True)
-	for name, rows in cards(names).items():
+	for name, (headline, rows) in cards(names).items():
 		png = OUT / f'{name}.png'
-		render(card_svg(logo, name, rows, version), png, browser)
+		rows = [*rows, ('Package:', f'{PRODUCT} v{version}', 'text')]
+		render(card_svg(logo, headline, rows), png, browser)
 		print(f'[build_icons] {png.relative_to(ROOT).as_posix()}')
 
 
