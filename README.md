@@ -127,6 +127,21 @@ supports (CUDA before 12.4 needs MSVC v142): run `cpp\OnnxTOP\build.cmd`,
 `cpp\MediaPipeTOP\build.cmd` and `cpp\MediaPipeCHOP\build.cmd`. Models for a source checkout go in
 `models/` (see [models/README.md](models/README.md)).
 
+The build lands in `plugins/`, which TouchDesigner scans as the dev project's own Plugins folder. If a
+release is also installed in `Documents\Derivative\Plugins\`, the dev project loads two copies of
+each operator. `scripts\plugins.ps1` switches between them (close TouchDesigner first):
+
+```
+powershell -ExecutionPolicy Bypass -File scripts\plugins.ps1 dev       # move the installed binaries aside; use the project's plugins\ build
+powershell -ExecutionPolicy Bypass -File scripts\plugins.ps1 install   # copy the local build into Documents\Derivative\Plugins\td-native-inference\
+powershell -ExecutionPolicy Bypass -File scripts\plugins.ps1 status    # show which binaries are installed, set aside and built locally
+```
+
+Only the compiled files move. The installed `models\` folder stays where it is; `fetch_models.ps1`
+manages it. `dev` puts the installed binaries in `Documents\Derivative\td-native-inference.disabled\`.
+After `install`, TouchDesigner asks you to allow the new DLLs on its next launch. Run `dev` again
+before reopening the dev project.
+
 ## License
 
 Apache-2.0 (see [LICENSE](LICENSE)). Third-party software and models keep their own licenses,

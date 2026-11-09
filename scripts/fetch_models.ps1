@@ -15,11 +15,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
 
-# Installed (next to OnnxTOP.dll in Documents/Derivative/Plugins/...) or in the source checkout.
-if (Test-Path (Join-Path $PSScriptRoot 'OnnxTOP.dll')) {
-	$models = Join-Path $PSScriptRoot 'models'
+# In the source checkout (scripts\, next to cpp\) or installed (Documents/Derivative/Plugins/...).
+# Not keyed on OnnxTOP.dll: scripts\plugins.ps1 dev moves the installed binaries out.
+$checkout = Split-Path $PSScriptRoot -Parent
+if (Test-Path (Join-Path $checkout 'cpp\OnnxTOP')) {
+	$models = Join-Path $checkout 'models'
 } else {
-	$models = Join-Path (Split-Path $PSScriptRoot -Parent) 'models'
+	$models = Join-Path $PSScriptRoot 'models'
 }
 
 $yolo = @(

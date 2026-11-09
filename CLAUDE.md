@@ -25,7 +25,10 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   machine; override `VCVARS`, `CUDA_ROOT`, `CMAKE_NINJA_ROOT`). The build copies into `plugins/`
   and moves a locked DLL aside as `.old-<time>`. Custom OP nodes (the wrappers) only pick up a new
   DLL after a TD restart; a CPlusPlus TOP pointed at the DLL can toggle **Unload Plugin** instead.
-  Update the plugin's README when parameters or outputs change.
+  Update the plugin's README when parameters or outputs change. With a release installed in
+  `Documents/Derivative/Plugins/`, TD loads two copies of each OP: `scripts\plugins.ps1 dev` moves
+  the installed binaries aside, `install` copies the local build there, `status` shows both (TD
+  closed; the install's `models/` stays put).
 - **Model wrappers (`tox/<Model>.tox`) are generated; never hand-edit one.** Change its spec in
   `wrappers/` (or `python/wrapper_builder.py` for all of them), then POST
   `scripts/build_wrappers.py` to the bridge's `/run`. It rebuilds into `/project1/WrapperLab`
