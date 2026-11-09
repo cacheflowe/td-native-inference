@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.3 (2026-11-09)
+
 - MediaPipe models (Hands, Gestures, Face, Pose, Holistic, Face Detector, Segmentation) recover
   from a MediaPipe graph error within about a second. Before, the node stayed dead (0 detections)
   until TouchDesigner restarted; seen with the gesture recognizer's "Packet isn't the sole owner of
