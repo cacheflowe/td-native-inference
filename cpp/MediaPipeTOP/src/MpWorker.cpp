@@ -230,11 +230,13 @@ void MpWorker::run()
 		// A MediaPipe graph error is permanent: every later frame fails too. The usual trigger
 		// is a resolution change (the holistic/pose SegmentationSmoothingCalculator compares
 		// against the previous mask), so rebuild the task on a size change, and after an error
-		// (at most once a second, in case the error repeats).
+		// (at most once a second, in case the error repeats). Throttle from the last rebuild, not
+		// the last failure: a broken graph fails every frame, which would postpone the retry forever.
 		bool sizeChanged = myTaskW >= 0 && (w != myTaskW || h != myTaskH);
-		bool retryError = myTaskError && Clock::now() - myErrorTime > std::chrono::seconds(1);
+		bool retryError = myTaskError && Clock::now() - myRebuildTime > std::chrono::seconds(1);
 		if (sizeChanged || retryError)
 		{
+			myRebuildTime = Clock::now();
 			destroy();
 			std::string cerr;
 			if (!create(cerr))
@@ -243,7 +245,6 @@ void MpWorker::run()
 				myResult.error = cerr;
 				myResult.seq++;
 				myTaskError = true;
-				myErrorTime = Clock::now();
 				continue;
 			}
 		}
@@ -256,8 +257,6 @@ void MpWorker::run()
 		result.maskW = result.maskH = 0;
 		result.error.clear();
 		myTaskError = !detect(frame.data(), w, h, ts, result) && !result.error.empty();
-		if (myTaskError)
-			myErrorTime = Clock::now();
 		result.inferMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 		result.frameW = w;
 		result.frameH = h;

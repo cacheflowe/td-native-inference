@@ -135,5 +135,5 @@ private:
 	// Worker-thread only: frame size the task last ran on, and graph-error recovery.
 	int						myTaskW = -1, myTaskH = -1;
 	bool					myTaskError = false;
-	std::chrono::steady_clock::time_point	myErrorTime;
+	std::chrono::steady_clock::time_point	myRebuildTime;
 };
