@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.4 (2026-11-10)
+
 - MediaPipe Holistic (and any tracker whose missing parts come in at 0, 0): with **Output
   Smoothing** up, a hand or the face mesh no longer flies in from the corner when it's found again.
   An unseen part holds its last position, hidden; when it's back it starts at its new reading and
