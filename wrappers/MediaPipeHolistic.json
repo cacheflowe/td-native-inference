@@ -13,7 +13,9 @@
 		"Minpresence",
 		"Blendshapes",
 		"Outputz",
-		"Outputworld"
+		"Outputworld",
+		"Waitforresult",
+		"Maxwait"
 	],
 	"tracking": [
 		"Confthreshold",

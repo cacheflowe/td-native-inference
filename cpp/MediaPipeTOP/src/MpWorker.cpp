@@ -157,6 +157,7 @@ MpWorker::~MpWorker()
 		myStop = true;
 	}
 	myWake.notify_all();
+	myDone.notify_all();
 	if (myThread.joinable())
 		myThread.join();
 }
@@ -167,7 +168,7 @@ std::string MpWorker::loadError()
 	return myLoadError;
 }
 
-void MpWorker::submit(std::vector<uint8_t>& rgb, int w, int h)
+void MpWorker::submit(std::vector<uint8_t>& rgb, int w, int h, int64_t frameId)
 {
 	{
 		std::lock_guard<std::mutex> lock(myMutex);
@@ -178,6 +179,7 @@ void MpWorker::submit(std::vector<uint8_t>& rgb, int w, int h)
 		myPendingFrame.swap(rgb);	// caller gets the old buffer back to reuse
 		myPendingW = w;
 		myPendingH = h;
+		myPendingId = frameId;
 		myHasPending = true;
 	}
 	myWake.notify_one();
@@ -190,6 +192,13 @@ bool MpWorker::latest(MpFrameResult& out)
 		return false;
 	out = myResult;
 	return true;
+}
+
+bool MpWorker::waitFor(int64_t frameId, double timeoutMs)
+{
+	std::unique_lock<std::mutex> lock(myMutex);
+	return myDone.wait_for(lock, std::chrono::duration<double, std::milli>(timeoutMs),
+		[&] { return myStop || myResult.inputFrame >= frameId; }) && !myStop;
 }
 
 void MpWorker::run()
@@ -209,6 +218,7 @@ void MpWorker::run()
 	for (;;)
 	{
 		int w, h;
+		int64_t frameId;
 		{
 			std::unique_lock<std::mutex> lock(myMutex);
 			myWake.wait(lock, [this] { return myStop || myHasPending; });
@@ -217,6 +227,7 @@ void MpWorker::run()
 			frame.swap(myPendingFrame);
 			w = myPendingW;
 			h = myPendingH;
+			frameId = myPendingId;
 			myHasPending = false;
 		}
 
@@ -260,12 +271,14 @@ void MpWorker::run()
 		result.inferMs = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 		result.frameW = w;
 		result.frameH = h;
+		result.inputFrame = frameId;
 		{
 			std::lock_guard<std::mutex> lock(myMutex);
 			result.seq = myResult.seq + 1;
 			myResult = result;
 		}
 		myCompleted++;
+		myDone.notify_all();
 	}
 	destroy();
 }

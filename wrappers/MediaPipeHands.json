@@ -16,7 +16,9 @@
 		"Minpresence",
 		"Mintracking",
 		"Outputz",
-		"Outputworld"
+		"Outputworld",
+		"Waitforresult",
+		"Maxwait"
 	],
 	"menus": {
 		"Task": {

@@ -10,7 +10,9 @@
 	},
 	"model": [
 		"Maxinstances",
-		"Mindetection"
+		"Mindetection",
+		"Waitforresult",
+		"Maxwait"
 	],
 	"tracking": [
 		"Confthreshold",

@@ -9,6 +9,15 @@
   lost frames also starts at its new detection instead of gliding from where it was held.
 - MediaPipe Hands: **Output World** on its Model page (world landmark columns, as on Pose and
   Holistic).
+- MediaPipe models no longer stall TouchDesigner's cook waiting for the GPU: the frame's copy to
+  the CPU is asynchronous and reaches MediaPipe a cook later. Results are about two frames behind
+  the input; the new `result_delay` info channel says exactly how many (a Cache TOP on the input
+  with Output Index `-result_delay` shows the matching frame).
+- MediaPipe models: **Wait for Result** and **Max Wait (ms)** on the Model page wait in the cook
+  for each frame's result, so fast models (Face Detector, Hands) give landmarks that match the
+  image exactly. Off by default.
+- MediaPipe models build their Info DAT faster (the header is cached), and the trackers skip
+  re-applying a result they've already applied while a newer one is on its way.
 
 ## v0.2.3 (2026-11-09)
 

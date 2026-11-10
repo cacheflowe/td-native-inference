@@ -9,8 +9,8 @@ ROI loop that skips the detector while tracking, smoothing, 52 face blendshapes,
 matrix, metric world landmarks, handedness, gestures and the pose segmentation mask.
 
 ```
-input TOP (cudaArray) -> CUDA resize to Detect Width, RGB8 -> pinned host copy
-  -> worker thread: MpXxxDetectForVideo (CPU / XNNPACK) -> Info DAT / Info CHOP
+input TOP (cudaArray) -> CUDA resize to Detect Width, RGB8 -> async pinned host copy
+  -> (next cook) worker thread: MpXxxDetectForVideo (CPU / XNNPACK) -> Info DAT / Info CHOP
 output TOP: the frame MediaPipe sees, or the pose segmentation mask
 ```
 
@@ -51,6 +51,8 @@ matching tag: the struct layouts must agree.
 | Segment Class | Class index for One Class. The Info DAT lists the classes in order. |
 | Landmark Z Columns | Adds `kp{i}_z`: MediaPipe's relative depth, in roughly the same units as u. |
 | World Landmark Columns | Hands / pose / holistic: adds `w{i}_x/y/z` in meters, MediaPipe's axes (y down, z away from the camera). Origin at the hand center (Hands) or the hips (Pose, Holistic). Holistic gets them for its 75 body and hand landmarks only (its hands share the body's space; the face mesh has none). `onnxtop_tables` turns them to TD axes (y up, +z toward the camera) as `<joint>_wx/_wy/_wz`. |
+| Wait for Result | Waits in the cook (up to Max Wait) for this frame's result, so the landmarks match the image (`result_delay` 0). Worth it for fast models (Face Detector, Hands); a slow one (Holistic) costs TD frame rate. Off by default: the cook never waits. |
+| Max Wait (ms) | Longest a cook waits with Wait for Result on; past it the result lands on a later cook. Default 20. |
 
 ## Outputs
 
@@ -84,8 +86,11 @@ id, class, conf, u1, v1, u2, v2, label, kp{i}_u, kp{i}_v, kp{i}_c ..., [kp{i}_z 
   confidence, i.e. the fraction of the frame covered) and no keypoints. The mask is the TOP image.
 
 **Info CHOP**: `loaded`, `loading`, `num_detections`, `infer_ms` (the worker's MediaPipe time),
-`execute_ms` (TD-side cook), `frame_w`, `frame_h`, `results` (results received so far), and
-`dropped_frames` (frames replaced before the worker got to them).
+`execute_ms` (TD-side cook), `frame_w`, `frame_h`, `results` (results received so far),
+`dropped_frames` (frames replaced before the worker got to them), and `result_delay`: how many
+input frames old the current result is (counted in the input TOP's cooks). To show the frame the
+landmarks belong to, cache the input with a Cache TOP (Cache Size above the largest delay) and
+set its Output Index to `-result_delay`.
 
 **TOP image**: the RGB frame MediaPipe sees, at Detect Width; or, for the segmenter or with Pose
 Segmentation Mask on, the mask (Mono 32-bit float).
@@ -141,9 +146,13 @@ timestamps. VIDEO mode is what turns on MediaPipe's tracking between frames.
 - **Frames are only sent when the input actually cooked.** The plugin checks the input's
   `totalCooks`, so a still image is processed once.
 - **One frame waits at a time.** A newer frame replaces a waiting one.
-- **TD never waits on inference.** Results show up on a later cook, usually one frame behind.
-- **The node keeps cooking while a result is pending**, so the result lands even when the input is
-  static.
+- **TD never waits on inference or on the GPU** (unless **Wait for Result** is on: then the cook
+  reads the frame back right away and waits up to Max Wait for its result).
+- **Without waiting,** the frame's copy back to the CPU is queued with a CUDA event and handed to
+  the worker on a later cook once it has landed (no `cudaStreamSynchronize` in the cook), so
+  results show up about two frames behind the input; `result_delay` says exactly how many.
+- **The node keeps cooking while a frame or a result is pending**, so it lands even when the
+  input is static.
 
 - **A change in frame size rebuilds the task**, and so does a graph error (at most once a
   second). MediaPipe graph errors are permanent. Holistic and pose-with-mask hit one as soon as the

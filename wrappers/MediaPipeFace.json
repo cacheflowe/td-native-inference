@@ -15,7 +15,9 @@
 		"Mintracking",
 		"Blendshapes",
 		"Matrix",
-		"Outputz"
+		"Outputz",
+		"Waitforresult",
+		"Maxwait"
 	],
 	"tracking": [
 		"Confthreshold",

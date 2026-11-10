@@ -71,6 +71,7 @@ constexpr int kLmStride = 5;
 struct MpFrameResult
 {
 	uint64_t					seq = 0;		// increments per processed frame
+	int64_t						inputFrame = -1;	// the submitted frame's tag (the input TOP's cook count)
 	int							frameW = 0, frameH = 0;
 	double						inferMs = 0.0;
 	std::vector<MpInstance>		instances;
@@ -93,11 +94,15 @@ public:
 	std::string			loadError();
 
 	// Takes an RGB (3 bytes/px, top-down) frame. Replaces a frame still waiting to start.
-	void				submit(std::vector<uint8_t>& rgb, int w, int h);
+	// frameId comes back as the result's inputFrame.
+	void				submit(std::vector<uint8_t>& rgb, int w, int h, int64_t frameId = -1);
 	// True while a submitted frame hasn't produced a result yet.
 	bool				pending() const { return mySubmitted.load() != myCompleted.load(); }
 	// Copies the newest result into out if it's newer than out.seq. Returns true if it copied.
 	bool				latest(MpFrameResult& out);
+	// Blocks until the result for frame frameId (or a later one) is ready, up to timeoutMs.
+	// Returns true if it is.
+	bool				waitFor(int64_t frameId, double timeoutMs);
 	uint64_t			droppedFrames() const { return myDropped.load(); }
 
 	// Segment mode: which mask to produce (applies from the next frame; no task reload).
@@ -120,12 +125,14 @@ private:
 	std::thread				myThread;
 	std::mutex				myMutex;
 	std::condition_variable	myWake;
+	std::condition_variable	myDone;				// signalled with each result (waitFor)
 	bool					myStop = false;
 	std::atomic<State>		myState{ State::Loading };
 	std::string				myLoadError;
 
 	std::vector<uint8_t>	myPendingFrame;		// guarded by myMutex
 	int						myPendingW = 0, myPendingH = 0;
+	int64_t					myPendingId = -1;
 	bool					myHasPending = false;
 	std::atomic<uint64_t>	mySubmitted{ 0 }, myCompleted{ 0 }, myDropped{ 0 };
 	std::atomic<int>		mySegOutput{ 0 }, mySegClass{ 0 };

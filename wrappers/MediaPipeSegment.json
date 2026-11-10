@@ -9,6 +9,8 @@
 	"model": [
 		"Segmentmodel",
 		"Segoutput",
-		"Segclass"
+		"Segclass",
+		"Waitforresult",
+		"Maxwait"
 	]
 }

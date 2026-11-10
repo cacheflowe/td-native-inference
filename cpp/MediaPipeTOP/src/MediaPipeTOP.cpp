@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -110,6 +111,7 @@ MediaPipeTOP::MediaPipeTOP(const OP_NodeInfo*, TOP_Context* context) :
 	myContext(context)
 {
 	cudaStreamCreateWithFlags(&myStream, cudaStreamNonBlocking);
+	cudaEventCreateWithFlags(&myReadEvent, cudaEventDisableTiming);
 }
 
 MediaPipeTOP::~MediaPipeTOP()
@@ -117,6 +119,8 @@ MediaPipeTOP::~MediaPipeTOP()
 	myWorker.reset();	// joins the worker (finishes the frame in flight, closes the task)
 	if (myStream)
 		cudaStreamSynchronize(myStream);
+	if (myReadEvent)
+		cudaEventDestroy(myReadEvent);
 	if (myDevRgb)
 		cudaFree(myDevRgb);
 	if (myHostRgb)
@@ -130,9 +134,10 @@ MediaPipeTOP::~MediaPipeTOP()
 void MediaPipeTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
 {
 	ginfo->cookEveryFrameIfAsked = true;
-	// Keep cooking while a result is still on its way, so it lands even when the input is static.
+	// Keep cooking while a frame or a result is still on its way, so it lands even when the input
+	// is static.
 	ginfo->cookEveryFrame = myWorker && myActive &&
-		(myWorker->state() == MpWorker::State::Loading || myWorker->pending());
+		(myWorker->state() == MpWorker::State::Loading || myWorker->pending() || myReadInFlight);
 }
 
 bool MediaPipeTOP::ensureBuffers(int w, int h)
@@ -140,6 +145,11 @@ bool MediaPipeTOP::ensureBuffers(int w, int h)
 	size_t bytes = (size_t)w * h * 3;
 	if (bytes <= myRgbBytes)
 		return true;
+	if (myReadInFlight)	// a readback still targets the old host buffer
+	{
+		cudaEventSynchronize(myReadEvent);
+		myReadInFlight = false;
+	}
 	if (myDevRgb)
 		cudaFree(myDevRgb);
 	if (myHostRgb)
@@ -181,6 +191,8 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	int detectWidth = inputs->getParInt("Detectwidth");
 	myOutputZ = !isSeg && !isFaceDet && inputs->getParInt("Outputz") != 0;
 	myOutputWorld = hasWorld(kind) && inputs->getParInt("Outputworld") != 0;
+	const bool waitResult = inputs->getParInt("Waitforresult") != 0;
+	const double maxWaitMs = std::max(0.0, inputs->getParDouble("Maxwait"));
 	MpSegOutput segOutput = (MpSegOutput)std::clamp(inputs->getParInt("Segoutput"), 0, 2);
 	int segClass = std::max(0, inputs->getParInt("Segclass"));
 
@@ -195,6 +207,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Segmentation", kind == MpTaskKind::Pose || isHolistic);
 	inputs->enablePar("Outputz", !isSeg && !isFaceDet);
 	inputs->enablePar("Outputworld", hasWorld(kind));
+	inputs->enablePar("Maxwait", waitResult);
 	inputs->enablePar("Segoutput", isSeg);
 	inputs->enablePar("Segclass", isSeg && segOutput == MpSegOutput::Class);
 
@@ -248,6 +261,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		return;
 	}
 	const int srcW = (int)top->textureDesc.width, srcH = (int)top->textureDesc.height;
+	myInputFrame = top->totalCooks;
 	int dw = detectWidth > 0 ? std::min(detectWidth, srcW) : srcW;
 	int dh = std::max(1, (int)std::lround((double)srcH * dw / srcW));
 	myFrameW = dw;
@@ -280,6 +294,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	acquire.stream = myStream;
 	const OP_CUDAArrayInfo* inArray = top->getCUDAArray(acquire, nullptr);
 
+	int64_t waitFrame = -1;	// Wait for Result: the frame submitted this cook
 	if (!myContext->beginCUDAOperations(nullptr))
 		return;
 	{
@@ -309,15 +324,53 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				haveFrame = true;
 		}
 
-		if (haveFrame && submit)
+		if (waitResult)
 		{
-			size_t bytes = (size_t)dw * dh * 3;
-			cudaMemcpyAsync(myHostRgb, myDevRgb, bytes, cudaMemcpyDeviceToHost, myStream);
-			if (cudaStreamSynchronize(myStream) == cudaSuccess)
+			// This frame goes to MediaPipe now (the copy back waits for the GPU), and the cook waits
+			// for its result below.
+			if (myReadInFlight)	// left over from the asynchronous mode: drop it
 			{
+				cudaEventSynchronize(myReadEvent);
+				myReadInFlight = false;
+			}
+			if (haveFrame && submit)
+			{
+				size_t bytes = (size_t)dw * dh * 3;
+				cudaMemcpyAsync(myHostRgb, myDevRgb, bytes, cudaMemcpyDeviceToHost, myStream);
+				if (cudaStreamSynchronize(myStream) == cudaSuccess)
+				{
+					mySubmitBuf.resize(bytes);
+					memcpy(mySubmitBuf.data(), myHostRgb, bytes);
+					myWorker->submit(mySubmitBuf, dw, dh, top->totalCooks);
+					myLastInputCooks = top->totalCooks;
+					waitFrame = top->totalCooks;
+				}
+			}
+		}
+		// The frame read back on an earlier cook goes to MediaPipe once its copy has landed.
+		else if (myReadInFlight && cudaEventQuery(myReadEvent) == cudaSuccess)
+		{
+			myReadInFlight = false;
+			if (ready)
+			{
+				size_t bytes = (size_t)myReadW * myReadH * 3;
 				mySubmitBuf.resize(bytes);
 				memcpy(mySubmitBuf.data(), myHostRgb, bytes);
-				myWorker->submit(mySubmitBuf, dw, dh);
+				myWorker->submit(mySubmitBuf, myReadW, myReadH, myReadFrame);
+			}
+		}
+		// Queue this frame's readback (at most one in flight: MediaPipe takes one frame at a
+		// time anyway, so a newer frame while one is pending would be dropped by the worker).
+		if (!waitResult && haveFrame && submit && !myReadInFlight)
+		{
+			size_t bytes = (size_t)dw * dh * 3;
+			if (cudaMemcpyAsync(myHostRgb, myDevRgb, bytes, cudaMemcpyDeviceToHost, myStream) == cudaSuccess &&
+				cudaEventRecord(myReadEvent, myStream) == cudaSuccess)
+			{
+				myReadInFlight = true;
+				myReadW = dw;
+				myReadH = dh;
+				myReadFrame = top->totalCooks;
 				myLastInputCooks = top->totalCooks;
 			}
 		}
@@ -347,6 +400,10 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		}
 	}	// surfaces destroyed before TD unmaps the arrays
 	myContext->endCUDAOperations(nullptr);
+	// Outside the CUDA block, so TD's context isn't held while waiting. A fast model's result lands
+	// within Max Wait and matches this frame (result_delay 0); a slow one still arrives later.
+	if (waitFrame >= 0 && myWorker->waitFor(waitFrame, maxWaitMs))
+		myWorker->latest(myResult);
 	myExecuteMs = msSince(tExec);
 }
 
@@ -354,7 +411,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 
 int32_t MediaPipeTOP::getNumInfoCHOPChans(void*)
 {
-	return 9;
+	return 10;
 }
 
 void MediaPipeTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -371,6 +428,10 @@ void MediaPipeTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 6: chan->name->setString("frame_h");			chan->value = (float)myFrameH; break;
 		case 7: chan->name->setString("results");			chan->value = (float)myResult.seq; break;
 		case 8: chan->name->setString("dropped_frames");	chan->value = myWorker ? (float)myWorker->droppedFrames() : 0.f; break;
+		// Input frames since the one the current result was computed from: a Cache TOP on the input
+		// with Output Index -result_delay shows the frame that matches the landmarks.
+		case 9: chan->name->setString("result_delay");		chan->value = myResult.inputFrame >= 0 && myInputFrame >= myResult.inputFrame ?
+			(float)(myInputFrame - myResult.inputFrame) : 0.f; break;
 	}
 }
 
@@ -417,6 +478,42 @@ bool MediaPipeTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 	return true;
 }
 
+void MediaPipeTOP::headerRow(const Columns& c)
+{
+	char key[160];
+	snprintf(key, sizeof(key), "%d/%d/%d/%d/%d/%d/%d/%zu/%s", (int)myTask, c.total, c.landmarks, c.z, c.world,
+		c.worldCount, c.matrix, myResult.scoreNames.size(),
+		myResult.scoreNames.empty() ? "" : myResult.scoreNames.front().c_str());
+	if (myHeaderKey == key && (int)myHeader.size() == c.total)
+		return;
+	myHeaderKey = key;
+	myHeader.assign((size_t)c.total, std::string());
+	const char* base[] = { "id", "class", "conf", "u1", "v1", "u2", "v2", "label" };
+	const char* uvc[] = { "u", "v", "c" };
+	const char* xyz[] = { "x", "y", "z" };
+	char buf[64];
+	for (int col = 0; col < c.total; col++)
+	{
+		buf[0] = 0;
+		if (col < kBaseCols)
+			snprintf(buf, sizeof(buf), "%s", base[col]);
+		else if (col < kBaseCols + c.landmarks * 3)
+			snprintf(buf, sizeof(buf), "kp%d_%s", (col - c.kp) / 3, uvc[(col - c.kp) % 3]);
+		else if (c.z >= 0 && col >= c.z && col < c.z + c.landmarks)
+			snprintf(buf, sizeof(buf), "kp%d_z", col - c.z);
+		else if (c.world >= 0 && col >= c.world && col < c.world + c.worldCount * 3)
+			snprintf(buf, sizeof(buf), "w%d_%s", (col - c.world) / 3, xyz[(col - c.world) % 3]);
+		else if (c.scores >= 0 && col >= c.scores && col < c.scores + (int)myResult.scoreNames.size())
+		{
+			myHeader[(size_t)col] = myResult.scoreNames[(size_t)(col - c.scores)];
+			continue;
+		}
+		else if (c.matrix >= 0 && col >= c.matrix && col < c.matrix + 16)
+			snprintf(buf, sizeof(buf), "m%d%d", (col - c.matrix) / 4, (col - c.matrix) % 4);
+		myHeader[(size_t)col] = buf;
+	}
+}
+
 void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntries* entries, void*)
 {
 	// Columns: id, class, conf, u1, v1, u2, v2, label, kp{i}_u/v/c, [kp{i}_z], [w{i}_x/y/z],
@@ -426,38 +523,9 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 	char buf[64];
 	if (index == 0)
 	{
-		const char* base[] = { "id", "class", "conf", "u1", "v1", "u2", "v2", "label" };
+		headerRow(c);
 		for (int col = 0; col < nEntries; col++)
-		{
-			if (col < kBaseCols)
-				entries->values[col]->setString(base[col]);
-			else if (col < kBaseCols + c.landmarks * 3)
-			{
-				const char* suffix[] = { "u", "v", "c" };
-				snprintf(buf, sizeof(buf), "kp%d_%s", (col - c.kp) / 3, suffix[(col - c.kp) % 3]);
-				entries->values[col]->setString(buf);
-			}
-			else if (c.z >= 0 && col >= c.z && col < c.z + c.landmarks)
-			{
-				snprintf(buf, sizeof(buf), "kp%d_z", col - c.z);
-				entries->values[col]->setString(buf);
-			}
-			else if (c.world >= 0 && col >= c.world && col < c.world + c.worldCount * 3)
-			{
-				const char* suffix[] = { "x", "y", "z" };
-				snprintf(buf, sizeof(buf), "w%d_%s", (col - c.world) / 3, suffix[(col - c.world) % 3]);
-				entries->values[col]->setString(buf);
-			}
-			else if (c.scores >= 0 && col >= c.scores && col < c.scores + (int)myResult.scoreNames.size())
-				entries->values[col]->setString(myResult.scoreNames[col - c.scores].c_str());
-			else if (c.matrix >= 0 && col >= c.matrix && col < c.matrix + 16)
-			{
-				snprintf(buf, sizeof(buf), "m%d%d", (col - c.matrix) / 4, (col - c.matrix) % 4);
-				entries->values[col]->setString(buf);
-			}
-			else
-				entries->values[col]->setString("");
-		}
+			entries->values[col]->setString(col < (int)myHeader.size() ? myHeader[(size_t)col].c_str() : "");
 		return;
 	}
 	// TD asks for rows based on an earlier getInfoDATSize(); never trust the index blindly.
@@ -549,7 +617,12 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 		if (isInt)
 			snprintf(buf, sizeof(buf), "%d", (int)v);
 		else
-			snprintf(buf, sizeof(buf), "%.4f", v);
+		{
+			// to_chars: several times cheaper than snprintf, and this runs for every cell
+			// (~2500 per holistic row) on TD's main thread.
+			auto res = std::to_chars(buf, buf + sizeof(buf) - 1, v, std::chars_format::fixed, 4);
+			*res.ptr = 0;
+		}
 		entries->values[col]->setString(buf);
 	}
 }
@@ -593,7 +666,7 @@ void MediaPipeTOP::setupParameters(OP_ParameterManager* manager, void*)
 		sp.page = page;
 		sp.defaultValue = kTaskNames[0];
 		sp.help = "Which official MediaPipe task runs. Each loads its own .task bundle (fetch_mediapipe.ps1 "
-			"puts them in models/mediapipe). Runs on the CPU on a worker thread; results arrive a frame late.";
+			"puts them in models/mediapipe). Runs on the CPU on a worker thread; results arrive about two frames late.";
 		check(manager->appendMenu(sp, kNumTasks, kTaskNames, kTaskLabels));
 	}
 	const char* defaults[] = { "models/mediapipe/face_landmarker.task", "models/mediapipe/hand_landmarker.task",
@@ -722,6 +795,27 @@ void MediaPipeTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.page = page;
 		np.help = "Hands / pose / holistic: adds w{i}_x/y/z, metric 3D landmarks (meters, origin at the hand / hip center).";
 		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Waitforresult");
+		np.label = "Wait for Result";
+		np.page = page;
+		np.help = "Waits in the cook (up to Max Wait) for this frame's result, so the landmarks match the image "
+			"(info channel result_delay 0). Worth it for fast models (Face Detector, Hands); a slow one "
+			"(Holistic) costs TD frame rate. Off: the cook never waits, and results arrive a couple of frames "
+			"late (result_delay says how many).";
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Maxwait");
+		np.label = "Max Wait (ms)";
+		np.page = page;
+		np.defaultValues[0] = 20.0;
+		np.minValues[0] = np.minSliders[0] = 0.0;
+		np.maxSliders[0] = 100.0;
+		np.clampMins[0] = true;
+		np.help = "Longest a cook waits for its result; past it the result lands on a later cook.";
+		check(manager->appendFloat(np));
 	}
 }
 
