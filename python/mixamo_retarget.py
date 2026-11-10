@@ -166,16 +166,40 @@ def turn(rest_primary, rest_hint, primary, hint, base=None):
 	return slerp(plain, frame @ rest_frame.T, weight)
 
 
+def _hinge(rest_primary, primary, rest_axis, limits, base=None):
+	"""World turn for a jointed bone (a finger): the target direction, seen from the parent's
+	turned frame, split into a bend about `rest_axis` (toward cross(axis, bone)) and a sideways
+	spread, each clamped to limits['bend'] / limits['spread'] (degrees); no roll of its own, so it
+	follows its parent's twist."""
+	base = np.eye(3) if base is None else base
+	r = _unit(rest_primary)
+	b = _unit(_cross(rest_axis, r))
+	if b is None:
+		return swing(base @ rest_primary, primary) @ base
+	a = _cross(r, b)
+	d = base.T @ _unit(primary)
+	bend = math.atan2(float(np.dot(d, b)), float(np.dot(d, r)))
+	spread = math.asin(max(-1.0, min(1.0, float(np.dot(d, a)))))
+	lo, hi = limits.get('bend', (-180, 180))
+	bend = min(max(bend, math.radians(lo)), math.radians(hi))
+	lo, hi = limits.get('spread', (0, 0))
+	spread = min(max(spread, math.radians(lo)), math.radians(hi))
+	direction = math.cos(spread) * (r * math.cos(bend) + b * math.sin(bend)) + a * math.sin(spread)
+	return base @ swing(r, direction)
+
+
 # ---------------------------------------------------------------- rig
 
 class Rig:
-	"""A Mixamo rest pose: per bone its rest local rotation and offset, and by forward
-	kinematics its rest world rotation and position (relative to the FBX COMP)."""
+	"""A rest pose: per bone its rest local rotation and offset, and by forward kinematics its
+	rest world rotation and position (relative to the FBX COMP). Mixamo bones are named with a
+	prefix ('mixamorig_Hips'), found from the Hips root; other rigs use their own bone names.
+	A bone's optional 's' (uniform scale, e.g. a Blender Armature's 100) scales its children."""
 
 	def __init__(self, bones):
 		self.bones = bones
-		hips = next(name for name in bones if name.endswith('Hips') and not bones[name]['parent'])
-		self.prefix = hips[:-len('Hips')]	# 'mixamorig_' (TD turns 'mixamorig:' into this)
+		hips = next((name for name in bones if name.endswith('Hips') and not bones[name]['parent']), None)
+		self.prefix = hips[:-len('Hips')] if hips else ''	# 'mixamorig_' (TD turns 'mixamorig:' into this)
 		self.order = []
 		children = {}
 		for name, bone in bones.items():
@@ -186,16 +210,20 @@ class Rig:
 			self.order.append(name)
 			pending += children.get(name, [])
 		self.rest_local = {n: euler_xyz(*bones[n]['r']) for n in self.order}
-		self.world_rot, self.world_pos = {}, {}
+		self.world_rot, self.world_pos, self.world_scale = {}, {}, {}
 		for n in self.order:
 			parent = bones[n]['parent']
 			t = np.asarray(bones[n]['t'], dtype=float)
+			s = bones[n].get('s', 1.0)
+			s = float(s[0]) if isinstance(s, (list, tuple)) else float(s)	# [sx, sy, sz(, scale)]: uniform
 			if parent is None:
 				self.world_rot[n] = self.rest_local[n]
 				self.world_pos[n] = t
+				self.world_scale[n] = s
 			else:
 				self.world_rot[n] = self.world_rot[parent] @ self.rest_local[n]
-				self.world_pos[n] = self.world_pos[parent] + self.world_rot[parent] @ t
+				self.world_pos[n] = self.world_pos[parent] + self.world_scale[parent] * (self.world_rot[parent] @ t)
+				self.world_scale[n] = self.world_scale[parent] * s
 
 	def name(self, short):
 		"""'LeftArm' -> 'mixamorig_LeftArm', or None if the rig has no such bone."""
@@ -349,12 +377,14 @@ def _parent_turn(rig, bone, turns):
 	return None
 
 
-def solve(rig, landmarks, mirror=False):
+def solve(rig, landmarks, mirror=False, positions=None, targets=None, blends=None):
 	"""{bone: (rx, ry, rz)} local Euler degrees for every bone in the rig: driven bones turned
-	toward the landmarks, the rest (and bones whose landmarks are missing) at their rest pose."""
+	toward the landmarks, the rest (and bones whose landmarks are missing) at their rest pose.
+	A `positions` dict is filled with each bone's posed position (relative to the FBX COMP).
+	`targets` / `blends` default to the Mixamo body's (TARGETS, _BLENDS); see hand_retarget."""
 	points = _Points(_mirror(landmarks) if mirror else landmarks)
 	turns = {}
-	for short, primary, hint, rest_primary, rest_hint in TARGETS:
+	for short, primary, hint, rest_primary, rest_hint, *limits in (TARGETS if targets is None else targets):
 		bone = rig.name(short)
 		if bone is None:
 			continue
@@ -362,8 +392,11 @@ def solve(rig, landmarks, mirror=False):
 		rp, rh = _rest_vector(rig, rest_primary), _rest_vector(rig, rest_hint)
 		if p is None or rp is None or _unit(p) is None:
 			continue
+		if limits:
+			turns[short] = _hinge(rp, p, _rest_vector(rig, limits[0]['axis']), limits[0], _parent_turn(rig, bone, turns))
+			continue
 		turns[short] = turn(rp, rh, p, h, _parent_turn(rig, bone, turns))
-	for short, a, b, f in _BLENDS:
+	for short, a, b, f in (_BLENDS if blends is None else blends):
 		if rig.name(short) and a in turns and b in turns:
 			turns[short] = slerp(turns[a], turns[b], f)
 
@@ -379,4 +412,45 @@ def solve(rig, landmarks, mirror=False):
 			local = rig.rest_local[bone]
 			world[bone] = parent_world @ local
 		out[bone] = to_euler_xyz(local)
+		if positions is not None:
+			t = np.asarray(rig.bones[bone]['t'], dtype=float)
+			positions[bone] = positions[parent] + rig.world_scale[parent] * (parent_world @ t) if parent else t
 	return out
+
+
+# ---------------------------------------------------------------- placement
+# Image keypoints and the bones that sit on them, for laying the posed character over the image.
+PLACE_JOINTS = [(f'{mp}_{joint}', f'{side}{bone}') for side, mp in (('Left', 'left'), ('Right', 'right'))
+	for joint, bone in (('shoulder', 'Arm'), ('elbow', 'ForeArm'), ('wrist', 'Hand'),
+		('hip', 'UpLeg'), ('knee', 'Leg'), ('ankle', 'Foot'))]
+
+
+def place(rig, positions, image_points, aspect, fov=40.0, joints=None, flip_x=False):
+	"""Root translation (FBX COMP tx, ty, tz) that lays the posed character over the image, as
+	seen by a camera at the origin looking down -z with a horizontal `fov` (degrees) and the
+	image's width / height `aspect`. `positions` from solve(); `image_points` {keypoint name:
+	(u, v, weight)}, 0-1 with v up (TD). Least squares over the `joints` ((keypoint, bone) pairs,
+	default PLACE_JOINTS) seen with weight > 0: perspective sets the depth, so a smaller person in
+	the image puts the character further away. flip_x: the FBX COMP is mirrored (sx = -1).
+	None with fewer than three joints."""
+	tan_h = math.tan(math.radians(fov) / 2)
+	tan_v = tan_h / aspect
+	rows, rhs = [], []
+	for name, short in (PLACE_JOINTS if joints is None else joints):
+		point = image_points.get(name)
+		bone = rig.name(short)
+		if point is None or bone is None or bone not in positions or point[2] <= 0.0:
+			continue
+		q, w = positions[bone], math.sqrt(point[2])
+		if flip_x:
+			q = (-q[0], q[1], q[2])
+		# x_ndc * tan * -(qz + tz) = qx + tx, linear in t; the same for y.
+		for axis, ndc, tan in ((0, 2 * point[0] - 1, tan_h), (1, 2 * point[1] - 1, tan_v)):
+			row = [0.0, 0.0, -ndc * tan]
+			row[axis] = -1.0
+			rows.append([c * w for c in row])
+			rhs.append((q[axis] + ndc * tan * q[2]) * w)
+	if len(rows) < 6:
+		return None
+	t, *_ = np.linalg.lstsq(np.array(rows), np.array(rhs), rcond=None)
+	return t if t[2] < 0 else None	# behind the camera: no usable fit

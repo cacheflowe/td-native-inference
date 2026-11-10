@@ -196,6 +196,38 @@ class RetargetTests(unittest.TestCase):
 			self.assertRotationsClose(world[left], rig.world_rot[left], 3, label)
 			self.assertFalse(np.allclose(world[right], rig.world_rot[right], atol=1e-2), label)
 
+	def test_posed_positions_follow_the_pose(self):
+		for label, rig in self.rigs():
+			lm = landmarks_from(rig)
+			positions = {}
+			mr.solve(rig, lm, positions=positions)
+			for bone in rig.order:	# rest landmarks: the rest skeleton
+				np.testing.assert_allclose(positions[bone], rig.world_pos[bone], atol=1e-3, err_msg=f'{label} {bone}')
+			arm = [k for k in lm if k.startswith(('left_elbow', 'left_wrist', 'left_index', 'left_pinky', 'left_hand_'))]
+			lm = turned(lm, mr.euler_xyz(0, 0, 80), arm, np.asarray(lm['left_shoulder']))
+			mr.solve(rig, lm, positions=positions)
+			hand, elbow = positions[rig.name('LeftHand')], positions[rig.name('LeftForeArm')]
+			self.assertGreater(hand[1] - elbow[1], 10, label)	# the raised forearm points up
+
+	def test_place_recovers_the_root_translation(self):
+		aspect, fov = 16 / 9, 50.0
+		tan_h = math.tan(math.radians(fov) / 2)
+		for label, rig in self.rigs():
+			positions = {}
+			mr.solve(rig, landmarks_from(rig), positions=positions)
+			root = np.array([40.0, -120.0, -600.0])
+			points = {}
+			for name, short in mr.PLACE_JOINTS:
+				p = positions[rig.name(short)] + root
+				u = 0.5 + 0.5 * p[0] / (-p[2] * tan_h)
+				v = 0.5 + 0.5 * p[1] / (-p[2] * tan_h / aspect)
+				points[name] = (u, v, 1.0)
+			np.testing.assert_allclose(mr.place(rig, positions, points, aspect, fov), root, atol=1e-6, err_msg=label)
+			# An unseen joint is left out; too few joints give no fit.
+			points['left_wrist'] = (0.0, 0.0, 0.0)
+			np.testing.assert_allclose(mr.place(rig, positions, points, aspect, fov), root, atol=1e-6, err_msg=label)
+			self.assertIsNone(mr.place(rig, positions, {'left_hip': (0.5, 0.5, 1.0)}, aspect, fov))
+
 	@unittest.skipUnless(YBOT.is_file(), 'no build/ybot_rest.json')
 	def test_ybot_rest_matches_td(self):
 		data = json.loads(YBOT.read_text())
