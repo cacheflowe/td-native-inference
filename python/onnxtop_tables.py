@@ -336,26 +336,31 @@ def _frame_size(comp):
 	return ((ratio.eval() or 1.0) * 1000.0, 1000.0) if ratio is not None else (1000.0, 1000.0)
 
 
-# Tracker COMP path -> (mode, model result number) its tables were last written for.
+# (table path, tracker COMP path) -> (mode, model result number) the table was last written for.
 _written = {}
 
 
 def _result_number(comp):
-	"""The model's result counter (a MediaPipeTOP's `results` info channel, via the wrapper's
-	inference_stats Info CHOP), or None when there isn't one (OnnxTOP: one result per cook)."""
+	"""The model's result counter, or None when the current result is already for the newest
+	input frame, so there's nothing newer coming to wait for. Read from a MediaPipeTOP's
+	`results` and `result_delay` info channels (the wrapper's inference_stats Info CHOP)."""
 	for holder in (comp, comp.parent()):
 		stats = holder.op('inference_stats') if holder is not None else None
 		if stats is not None and stats.isCHOP:
-			chan = stats.chan('results')
-			if chan is not None:
-				return chan.eval()
+			results, delay = stats.chan('results'), stats.chan('result_delay')
+			if results is None or delay is None or delay.eval() <= 0:
+				return None
+			return results.eval()
 	return None
 
 
 def _fresh(out, comp, key):
-	"""False when `out` was already written for this result: a MediaPipeTOP cooks again on
-	frames TouchDesigner drops (once per timeline frame) with the same result, which would advance
-	the tracker (and its smoothing) twice and cost the Python again exactly when time is short."""
+	"""False when `out` was already written for this result while a newer one is on its way: the
+	MediaPipeTOP's result lags its input by a frame or more, so without this the tracker would
+	re-apply the same result on every cook in between (advancing smoothing twice and costing the
+	Python again exactly when time is short). A result that's already for the newest frame (a
+	still image, Wait for Result) runs every cook as before: a still image's single result must
+	still confirm its tracks over several cooks."""
 	if key[1] is None or out.numRows == 0:
 		return True
 	slot = (out.path, comp.path)

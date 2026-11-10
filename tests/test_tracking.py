@@ -66,6 +66,65 @@ class ScaleRelativeMatchingTests(unittest.TestCase):
 		self.assertEqual(scene(1.0), scene(3.0))
 
 
+class Chan:
+	def __init__(self, v):
+		self.v = v
+
+	def eval(self):
+		return self.v
+
+
+class Stats:
+	"""A MediaPipeTOP wrapper's inference_stats Info CHOP: results and result_delay."""
+	isCHOP = True
+
+	def __init__(self, results, delay):
+		self.chans_ = {'results': Chan(results), 'result_delay': Chan(delay)}
+
+	def chan(self, name):
+		return self.chans_.get(name)
+
+
+class Comp:
+	def __init__(self, stats, path='/fake/tracker'):
+		self.stats, self.path = stats, path
+
+	def op(self, name):
+		return self.stats if name == 'inference_stats' else None
+
+	def parent(self):
+		return None
+
+
+class Table:
+	numRows = 2
+	path = '/fake/out'
+
+
+class SkipRepeatedResultTests(unittest.TestCase):
+	def setUp(self):
+		onnxtop_tables._written.clear()
+
+	def fresh(self, results, delay):
+		comp = Comp(Stats(results, delay))
+		return onnxtop_tables._fresh(Table(), comp, ('mp_holistic', onnxtop_tables._result_number(comp)))
+
+	def test_repeat_skipped_while_a_newer_result_is_coming(self):
+		self.assertTrue(self.fresh(5, 2))
+		self.assertFalse(self.fresh(5, 2))
+		self.assertTrue(self.fresh(6, 2))
+
+	def test_still_image_runs_every_cook(self):
+		# The result is for the newest input frame: the tracker needs repeats to confirm tracks.
+		self.assertTrue(self.fresh(5, 0))
+		self.assertTrue(self.fresh(5, 0))
+
+	def test_no_stats_runs_every_cook(self):
+		comp = Comp(None)
+		for _ in range(2):
+			self.assertTrue(onnxtop_tables._fresh(Table(), comp, ('detect', onnxtop_tables._result_number(comp))))
+
+
 if __name__ == '__main__':
 	unittest.main()
 

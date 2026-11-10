@@ -182,21 +182,50 @@ def read(tracks, hand=None):
 	line = tracks.text.splitlines()[_pick_row(tracks, layout, rows)]
 	row = line.split('\t')
 	strip = len(prefix)
+	# A body takes every world landmark, Holistic's hands too (they pose the fingers); only the
+	# pose ones have a prefix to drop. A hand takes its own side's.
+	body = hand is None
+
+	def short(name):
+		if name.startswith(prefix):
+			return name[strip:]
+		return name if body else None
+
 	world, image = {}, {}
 	for name, i in layout['world'].items():
-		if not name.startswith(prefix):
+		key = short(name)
+		if key is None:
 			continue
 		conf = layout['conf'][name]
 		if conf is None or float(row[conf]) > 0.0:
-			world[name[strip:]] = [float(row[i]), float(row[i + 1]), float(row[i + 2])]
+			world[key] = [float(row[i]), float(row[i + 1]), float(row[i + 2])]
 	for name, (x, y, conf) in layout['image'].items():
-		if name.startswith(prefix) and name in layout['world']:
+		key = short(name)
+		if key is not None and name in layout['world']:
 			c = float(row[conf]) if conf is not None else 1.0
-			image[name[strip:]] = (float(row[x]), float(row[y]), c)
+			image[key] = (float(row[x]), float(row[y]), c)
 	return world, image, side, line
 
 
 # ---------------------------------------------------------------- cook
+
+_FINGERS = ('Thumb', 'Index', 'Middle', 'Ring', 'Pinky')
+
+
+def _hold_fingers(rig, world, rotations, last, mirror):
+	"""A body's fingers while Holistic doesn't see that hand: their last pose instead of the rest
+	pose (finger rotations are relative to the hand, so they still follow the wrist)."""
+	if not last:
+		return
+	for side, mp in (('Left', 'left'), ('Right', 'right')):
+		if mirror:	# solve() swaps sides for a mirrored image
+			mp = 'right' if mp == 'left' else 'left'
+		if f'{mp}_hand_wrist' in world:
+			continue
+		prefix = rig.prefix + side + 'Hand'
+		for bone in rotations:
+			if bone.startswith(prefix) and bone[len(prefix):].startswith(_FINGERS) and bone in last:
+				rotations[bone] = last[bone]
 
 def cook(scriptOp):
 	r, hand = rig(scriptOp)
@@ -225,6 +254,8 @@ def cook(scriptOp):
 	if world:
 		kw = {'targets': hand.targets, 'blends': []} if hand else {}
 		rotations = mixamo_retarget.solve(r, world, mirror=mirror, positions=positions, **kw)
+		if not hand:
+			_hold_fingers(r, world, rotations, _last.get(scriptOp.path), mirror)
 		_last[scriptOp.path] = rotations
 	else:	# nobody tracked: hold the last pose (rest before the first)
 		rotations = _last.get(scriptOp.path) or {name: r.bones[name]['r'] for name in r.order}
