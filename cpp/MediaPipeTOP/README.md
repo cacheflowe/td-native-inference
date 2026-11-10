@@ -50,7 +50,7 @@ matching tag: the struct layouts must agree.
 | Segment Output | Segmenter: **Foreground** = the only mask (selfie models) or 1 − background (multi-class models); **One Class** = Segment Class's confidence; **Category Index** = per-pixel class index as a float. The selfie model's category map is 0 = person, 255 = background. |
 | Segment Class | Class index for One Class. The Info DAT lists the classes in order. |
 | Landmark Z Columns | Adds `kp{i}_z`: MediaPipe's relative depth, in roughly the same units as u. |
-| World Landmark Columns | Hands / pose / holistic: adds `w{i}_x/y/z` in meters, MediaPipe's axes (y down, z away from the camera). Origin at the hand center (Hands) or the hips (Pose, Holistic; Holistic's hands share the body's space, its face has none). `onnxtop_tables` turns them to TD axes (y up, +z toward the camera) as `<joint>_wx/_wy/_wz`. |
+| World Landmark Columns | Hands / pose / holistic: adds `w{i}_x/y/z` in meters, MediaPipe's axes (y down, z away from the camera). Origin at the hand center (Hands) or the hips (Pose, Holistic). Holistic gets them for its 75 body and hand landmarks only (its hands share the body's space; the face mesh has none). `onnxtop_tables` turns them to TD axes (y up, +z toward the camera) as `<joint>_wx/_wy/_wz`. |
 
 ## Outputs
 

@@ -48,6 +48,7 @@ private:
 		int		kp = 0;				// first kp{i}_u column
 		int		z = -1;				// first kp{i}_z column
 		int		world = -1;			// first w{i}_x column
+		int		worldCount = 0;		// landmarks with world columns (holistic: body + hands)
 		int		scores = -1;		// first blendshape column
 		int		matrix = -1;		// first m00 column
 		int		total = 0;

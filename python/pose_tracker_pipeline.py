@@ -98,6 +98,14 @@ MIN_BOX_HEIGHT = 0.02
 # keypoint case originally -- re-verify it still suits box motion too.
 OUTPUT_SMOOTHING = 0.23
 
+# Skeletons whose parts can go missing (hide_missing: holistic's hands and face): a part that
+# comes back is seeded from its first reading, then smoothed but kept hidden for this many
+# matched frames, so it shows up already settled rather than snapping or gliding in.
+PART_CONFIRM_FRAMES = 3
+# A track matched again after at least this many lost frames snaps to its fresh detection instead
+# of gliding there from where it was held (or coasted) while lost.
+REACQUIRE_SNAP_FRAMES = 2
+
 
 # ==================== CUSTOM PARAMETERS ====================
 # (name, label, default, min, max, clampMax, help) -- one table so the Python script and the
@@ -216,6 +224,16 @@ def filter_detections(detections, conf_threshold, min_box_width, min_box_height)
 	]
 
 
+def _write_rows(tbl, rows):
+	"""Replace a table's rows in one call (hundreds of appendRow calls cost more)."""
+	tbl.clear()
+	if hasattr(tbl, 'appendRows'):
+		tbl.appendRows(rows)
+	else:
+		for row in rows:
+			tbl.appendRow(row)
+
+
 class PoseTrackerPipeline:
 	"""Owns the tracker plus per-track smoothing state. One instance per video stream.
 
@@ -301,24 +319,48 @@ class PoseTrackerPipeline:
 					'box': list(box_raw),
 					'extras': dict(raw_extras),
 					'world': None,
+					# Matched frames each part has been seen in a row (PART_CONFIRM_FRAMES).
+					'seen': [PART_CONFIRM_FRAMES if not raw_kpts or kp[2] > 0.0 else 0 for kp in raw_kpts or range(num_kp)],
 				}
 				self._kpt_state[t.track_id] = state
 				if raw_world:
 					self._smooth_world(state, raw_world, raw_kpts, smoothing)
 			elif t.lost_frames == 0 and raw_kpts is not None:
+				gap = state.get('gap', 0)
+				if gap >= REACQUIRE_SNAP_FRAMES:
+					# Back after a gap: start from the fresh detection, like a new track.
+					state['box'] = list(box_raw)
+					state['extras'] = dict(raw_extras)
+					state['snap'] = True	# _smooth_world takes this frame's world as-is
+					for k, kp in enumerate(raw_kpts):
+						if not (self.skeleton.hide_missing and kp[2] <= 0.0):
+							state['smoothed'][k] = list(kp)
 				# Only advance keypoint smoothing on a frame where this track actually
 				# matched a real detection -- a frame with no fresh match (lost_frames > 0)
 				# has no new keypoint data at all, so just let the hold counters age below.
 				# No per-keypoint confidence gate: this model's per-keypoint confidence
 				# values run far too low to be a meaningful signal on their own, so if the
 				# box cleared Confthreshold, its keypoints are used as-is.
+				hide = self.skeleton.hide_missing
 				for k, kp in enumerate(raw_kpts):
 					prev = state['smoothed'][k]
-					# x, y (and z when present) are smoothed; conf is taken as-is.
-					state['smoothed'][k] = [
-						prev[i] * smoothing + kp[i] * (1.0 - smoothing) if i != 2 and i < len(prev) else kp[i]
-						for i in range(len(kp))
-					]
+					seen = state['seen']
+					if hide and kp[2] <= 0.0:
+						# Absent part (holistic's unseen hand/face sits at 0, 0): keep the
+						# last position, hidden, instead of easing towards the corner.
+						prev[2] = kp[2]
+						seen[k] = 0
+						continue
+					seen[k] += 1
+					if hide and seen[k] == 1:
+						# Back after being absent: start here (hidden until confirmed), don't fly in.
+						state['smoothed'][k] = list(kp)
+					else:
+						# x, y (and z when present) are smoothed; conf is taken as-is.
+						state['smoothed'][k] = [
+							prev[i] * smoothing + kp[i] * (1.0 - smoothing) if i != 2 and i < len(prev) else kp[i]
+							for i in range(len(kp))
+						]
 					state['lost_frames'][k] = 0
 				for name, value in raw_extras.items():
 					prev = state['extras'].get(name, value)
@@ -331,6 +373,7 @@ class PoseTrackerPipeline:
 					state['box'][i] * smoothing + box_raw[i] * (1.0 - smoothing)
 					for i in range(4)
 				]
+			state['gap'] = t.lost_frames
 			if t.lost_frames > 0:
 				for k in range(num_kp):
 					state['lost_frames'][k] += 1
@@ -364,7 +407,7 @@ class PoseTrackerPipeline:
 				'x_right': box[2],
 				'y_top': box[3],     # top edge of bbox (TD coords)
 				'y_bottom': box[1],  # bottom edge of bbox (TD coords)
-				'keypoints': state['smoothed'],  # skeleton.count x [x, y, conf(, z)], smoothed, TD coords
+				'keypoints': self._confirmed(state),  # skeleton.count x [x, y, conf(, z)], smoothed, TD coords
 				'label': label,
 				'extras': state['extras'],
 				'world': state['world'],  # world_count x [x, y, z] metres, TD axes, or None
@@ -378,18 +421,27 @@ class PoseTrackerPipeline:
 		object_tracker.prune_stale(active_ids, self._kpt_state, self._presence_state, self._label_state)
 		return self.tracked_objects
 
+	def _confirmed(self, state):
+		"""The smoothed keypoints, with a part that's back but not yet confirmed hidden (conf 0)."""
+		kpts = state['smoothed']
+		if not self.skeleton.hide_missing:
+			return kpts
+		return [kp if n >= PART_CONFIRM_FRAMES else [kp[0], kp[1], 0.0, *kp[3:]] for kp, n in zip(kpts, state['seen'])]
+
 	def _smooth_world(self, state, raw_world, raw_kpts, smoothing):
 		"""Advance the world landmarks one matched frame. A joint whose keypoint is absent
 		(conf 0: holistic's unseen hand) keeps its last value instead of easing to the origin,
 		and one seen for the first time is taken as-is."""
 		world = state['world']
+		snap = state.pop('snap', False)
 		if world is None or len(world) != len(raw_world):
 			state['world'] = world = [None] * len(raw_world)
 		for k, p in enumerate(raw_world):
 			if self.skeleton.hide_missing and raw_kpts and raw_kpts[k][2] <= 0.0:
 				continue
 			prev = world[k]
-			world[k] = list(p) if prev is None else [prev[i] * smoothing + p[i] * (1.0 - smoothing) for i in range(3)]
+			back = snap or (self.skeleton.hide_missing and 'seen' in state and state['seen'][k] == 1)
+			world[k] = list(p) if prev is None or back else [prev[i] * smoothing + p[i] * (1.0 - smoothing) for i in range(3)]
 
 	def _stable_label(self, t, raw, hold_frames, min_score, smoothing):
 		"""Debounce a track's label: a new label must win `hold_frames` consecutive matched
@@ -431,24 +483,27 @@ class PoseTrackerPipeline:
 		have it), extras (e.g. blendshapes), track color."""
 		has_z = any(len(obj['keypoints'][0]) > 3 for obj in self.tracked_objects if obj['keypoints'])
 		suffixes = ('x', 'y', 'conf', 'z') if has_z else ('x', 'y', 'conf')
-		kpt_header = [f'{name}_{s}' for name in self.skeleton.names for s in suffixes]
 		extra_names = list(self.tracked_objects[0]['extras']) if self.tracked_objects else []
 		world_count = max((len(obj['world']) for obj in self.tracked_objects if obj.get('world')), default=0)
-		world_header = [f'{name}_w{s}' for name in self.skeleton.names[:world_count] for s in 'xyz']
 		# Persistence columns (only when enabled, so COCO pose tables keep their layout).
 		state_names = (['presence'] if self._presence_on else []) + \
 			(['gesture', 'gesture_score', 'gesture_frames', 'gesture_onset'] if self._labels_on else [])
 
+		# The header (thousands of names for Holistic) only changes with its inputs.
+		key = (has_z, world_count, tuple(extra_names), tuple(state_names))
+		if getattr(self, '_header_key', None) != key:
+			self._header_key = key
+			self._header = [
+				*object_tracker.label_header(),
+				*object_tracker.box_header(),
+				*state_names,
+				*[f'{name}_{s}' for name in self.skeleton.names for s in suffixes],
+				*[f'{name}_w{s}' for name in self.skeleton.names[:world_count] for s in 'xyz'],
+				*extra_names,
+				*object_tracker.color_header(),
+			]
 		tbl.clear()
-		tbl.appendRow([
-			*object_tracker.label_header(),
-			*object_tracker.box_header(),
-			*state_names,
-			*kpt_header,
-			*world_header,
-			*extra_names,
-			*object_tracker.color_header(),
-		])
+		tbl.appendRow(self._header)
 		n = len(suffixes)
 		for obj in self.tracked_objects:
 			flat_kpts = [(kp[i] if i < len(kp) else 0.0) for kp in obj['keypoints'] for i in range(n)]
@@ -475,18 +530,17 @@ class PoseTrackerPipeline:
 
 	def write_joints_table(self, tbl):
 		"""table_joints: one row per visible keypoint across all tracked people."""
-		tbl.clear()
-		tbl.appendRow(object_tracker.joints_header())
+		rows = [object_tracker.joints_header()]
 		for obj in self.tracked_objects:
 			track_id = obj['track_id']
 			for name, kp, vis in zip(self.skeleton.names, obj['keypoints'], obj['keypoints_visible']):
 				if vis and not (self.skeleton.hide_missing and kp[2] <= 0.0):
-					tbl.appendRow(object_tracker.joints_row(track_id, name, kp[0], kp[1], kp[3] if len(kp) > 3 else 0.0, kp[2]))
+					rows.append(object_tracker.joints_row(track_id, name, kp[0], kp[1], kp[3] if len(kp) > 3 else 0.0, kp[2]))
+		_write_rows(tbl, rows)
 
 	def write_bones_table(self, tbl):
 		"""table_bones: one row per bone whose two keypoints are both visible."""
-		tbl.clear()
-		tbl.appendRow(object_tracker.bones_header())
+		rows = [object_tracker.bones_header()]
 		for obj in self.tracked_objects:
 			track_id = obj['track_id']
 			kpts = obj['keypoints']
@@ -498,6 +552,7 @@ class PoseTrackerPipeline:
 					bx, by, bconf = kpts[b][:3]
 					dx = bx - ax
 					dy = by - ay
-					tbl.appendRow(object_tracker.bones_row(
+					rows.append(object_tracker.bones_row(
 						track_id, (ax + bx) / 2.0, (ay + by) / 2.0,
 						math.degrees(math.atan2(dy, dx)), math.hypot(dx, dy), min(aconf, bconf)))
+		_write_rows(tbl, rows)

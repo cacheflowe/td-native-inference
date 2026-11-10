@@ -202,9 +202,44 @@ def setup_parameters(comp):
 	reset(comp)
 
 
+# Info DAT path -> (signature, (column index by name, header)). MediaPipe Holistic's header has
+# thousands of columns; rebuilding it every frame (several times) made thousands of cell objects.
+_header_cache = {}
+
+
 def _columns(info_dat):
-	header = [c.val for c in info_dat.row(0)]
-	return {name: i for i, name in enumerate(header)}, header
+	"""(column index by name, header) for an Info DAT, rebuilt only when its header changes."""
+	n = info_dat.numCols
+	# Column count plus a few cells: a task, Landmark Z / World / Blendshapes or model change
+	# changes the count or these names.
+	signature = (n, info_dat[0, n - 1].val if n else '', info_dat[0, n // 2].val if n else '') if info_dat.numRows else (0,)
+	cached = _header_cache.get(info_dat.path)
+	if cached is None or cached[0] != signature:
+		header = [c.val for c in info_dat.row(0)] if info_dat.numRows else []
+		cached = _header_cache[info_dat.path] = (signature, ({name: i for i, name in enumerate(header)}, header))
+	return cached[1]
+
+
+# Info DAT path -> (header, layout): what read_detections needs from a header, worked out once.
+_layout_cache = {}
+
+
+def _layout(info_dat):
+	"""Column positions derived from the header (cached with it): keypoints (u, and z when
+	present), world landmarks and the extra (blendshape) columns."""
+	col, header = _columns(info_dat)
+	cached = _layout_cache.get(info_dat.path)
+	if cached is None or cached[0] is not header:
+		num_kp = sum(1 for h in header if h.startswith('kp') and h.endswith('_u'))
+		layout = {
+			'num_kp': num_kp,
+			'kp': [col[f'kp{k}_u'] for k in range(num_kp)],
+			'kp_z': [col[f'kp{k}_z'] for k in range(num_kp)] if 'kp0_z' in col else None,
+			'world': [col[f'w{k}_x'] for k in range(num_kp) if f'w{k}_x' in col],
+			'extra': [(h, i) for i, h in enumerate(header) if h not in _KNOWN_COLS and not _NOT_EXTRA.match(h)],
+		}
+		cached = _layout_cache[info_dat.path] = (header, layout)
+	return cached[1]
 
 
 def read_detections(info_dat, mode):
@@ -212,53 +247,55 @@ def read_detections(info_dat, mode):
 	if info_dat is None or info_dat.numRows < 2:
 		return []
 	col, header = _columns(info_dat)
-	num_kp = sum(1 for h in header if h.startswith('kp') and h.endswith('_u'))
+	layout = _layout(info_dat)
+	num_kp = layout['num_kp']
 	has_fill = 'mask_fill' in col
 	mp = mode in MP_SKELETONS
-	has_z = mp and 'kp0_z' in col
-	world_count = MP_SKELETONS[mode].world_count if mp and 'w0_x' in col else 0
+	kp_z = layout['kp_z'] if mp else None
+	world_cols = layout['world'][:MP_SKELETONS[mode].world_count] if mp else []
 	label_col = col.get('label', -1)
-	extra_cols = [(h, i) for i, h in enumerate(header) if h not in _KNOWN_COLS and not _NOT_EXTRA.match(h)] if mp else []
+	extra_cols = layout['extra'] if mp else []
+	box_cols = [col[c] for c in ('u1', 'v1', 'u2', 'v2')]
+	conf_col = col['conf']
+	# Each row's text split once: info_dat.row() makes a Cell object per column (~2500 for
+	# Holistic), and only the values are needed.
+	lines = info_dat.text.splitlines()
 	dets = []
-	for r in range(1, info_dat.numRows):
-		row = info_dat.row(r)
+	for r in range(1, min(len(lines), info_dat.numRows)):
+		row = lines[r].split('\t')
 		det = {
-			'box': [float(row[col[c]].val) for c in ('u1', 'v1', 'u2', 'v2')],
-			'score': float(row[col['conf']].val),
+			'box': [float(row[i]) for i in box_cols],
+			'score': float(row[conf_col]),
 		}
 		if mode in POSE_MODES:
 			kps = []
-			for k in range(num_kp):
-				base = col[f'kp{k}_u']
-				kp = [float(row[base].val), float(row[base + 1].val), float(row[base + 2].val)]
-				if has_z:
-					kp.append(float(row[col[f'kp{k}_z']].val))
+			for k, base in enumerate(layout['kp']):
+				kp = [float(row[base]), float(row[base + 1]), float(row[base + 2])]
+				if kp_z is not None:
+					kp.append(float(row[kp_z[k]]))
 				kps.append(kp)
 			det['keypoints'] = kps
-			if world_count:
+			if world_cols:
 				# MediaPipe's world axes are image-like (y down, z away from the camera); turn them
 				# to TD's (y up, +z toward the camera), a 180-degree turn about x.
-				det['world'] = []
-				for k in range(world_count):
-					base = col[f'w{k}_x']
-					det['world'].append([float(row[base].val), -float(row[base + 1].val), -float(row[base + 2].val)])
+				det['world'] = [[float(row[b]), -float(row[b + 1]), -float(row[b + 2])] for b in world_cols]
 			if mp:
-				if label_col >= 0 and row[label_col].val:
-					det['label'] = row[label_col].val
-				extras = {name: float(row[i].val) for name, i in extra_cols}
+				if label_col >= 0 and row[label_col]:
+					det['label'] = row[label_col]
+				extras = {name: float(row[i]) for name, i in extra_cols}
 				if mode == 'mp_hands':
-					extras['handedness'] = float(row[col['class']].val)	# 0 = Left, 1 = Right
+					extras['handedness'] = float(row[col['class']])	# 0 = Left, 1 = Right
 				det['extras'] = extras
 		elif mode == 'face':
-			det['keypoints'] = [[float(row[col[f'kp{k}_u']].val), float(row[col[f'kp{k}_v']].val)] for k in range(num_kp)]
+			det['keypoints'] = [[float(row[col[f'kp{k}_u']]), float(row[col[f'kp{k}_v']])] for k in range(num_kp)]
 		else:
-			class_id = int(row[col['class']].val)
+			class_id = int(float(row[col['class']]))
 			det['class_id'] = class_id
 			det['class_name'] = box_tracker_pipeline.COCO_CLASSES.get(class_id, 'unknown')
 			if has_fill:
-				det['mask_area_ratio'] = float(row[col['mask_fill']].val)
+				det['mask_area_ratio'] = float(row[col['mask_fill']])
 				# The Info DAT id: what an Instances matte's G channel holds (+ 1) for this detection.
-				det['det_index'] = int(float(row[col['id']].val)) if 'id' in col else r - 1
+				det['det_index'] = int(float(row[col['id']])) if 'id' in col else r - 1
 		dets.append(det)
 	return dets
 
@@ -268,7 +305,7 @@ def _mode_error(info_dat, mode):
 	if info_dat is None or info_dat.numRows < 1:
 		return None
 	col, header = _columns(info_dat)
-	num_kp = sum(1 for h in header if h.startswith('kp') and h.endswith('_u'))
+	num_kp = _layout(info_dat)['num_kp']
 	if mode in MP_SKELETONS and num_kp != expected_keypoints(mode):
 		return (f"Tracker Mode {mode} needs a MediaPipeTOP Info DAT with {expected_keypoints(mode)} keypoints, got {num_kp} "
 			f"-- set the MediaPipeTOP's Task to {MP_TASKS[mode]}")
@@ -299,14 +336,45 @@ def _frame_size(comp):
 	return ((ratio.eval() or 1.0) * 1000.0, 1000.0) if ratio is not None else (1000.0, 1000.0)
 
 
+# Tracker COMP path -> (mode, model result number) its tables were last written for.
+_written = {}
+
+
+def _result_number(comp):
+	"""The model's result counter (a MediaPipeTOP's `results` info channel, via the wrapper's
+	inference_stats Info CHOP), or None when there isn't one (OnnxTOP: one result per cook)."""
+	for holder in (comp, comp.parent()):
+		stats = holder.op('inference_stats') if holder is not None else None
+		if stats is not None and stats.isCHOP:
+			chan = stats.chan('results')
+			if chan is not None:
+				return chan.eval()
+	return None
+
+
+def _fresh(out, comp, key):
+	"""False when `out` was already written for this result: a MediaPipeTOP cooks again on
+	frames TouchDesigner drops (once per timeline frame) with the same result, which would advance
+	the tracker (and its smoothing) twice and cost the Python again exactly when time is short."""
+	if key[1] is None or out.numRows == 0:
+		return True
+	slot = (out.path, comp.path)
+	if _written.get(slot) == key:
+		return False
+	_written[slot] = key
+	return True
+
+
 def write_tracks(out, comp, info_dat):
-	"""Advance the tracker one frame from the Info DAT and write table_output."""
+	"""Advance the tracker one model result from the Info DAT and write table_output."""
 	mode = get_mode(comp)
 	err = _mode_error(info_dat, mode)
 	if err:
 		out.clear()
 		out.appendRow(['error'])
 		out.appendRow([err])
+		return
+	if not _fresh(out, comp, (mode, _result_number(comp))):
 		return
 	pipeline = get_pipeline(comp)
 	dets = read_detections(info_dat, mode)
@@ -441,6 +509,8 @@ def write_scores(out, comp, tracks_dat, scores_dat):
 
 
 def write_joints(out, comp):
+	if not _fresh(out, comp, (get_mode(comp), _result_number(comp))):
+		return
 	pipeline = get_pipeline(comp)
 	if hasattr(pipeline, 'write_joints_table'):
 		pipeline.write_joints_table(out)
@@ -450,6 +520,8 @@ def write_joints(out, comp):
 
 
 def write_bones(out, comp):
+	if not _fresh(out, comp, (get_mode(comp), _result_number(comp))):
+		return
 	pipeline = get_pipeline(comp)
 	if isinstance(pipeline, pose_tracker_pipeline.PoseTrackerPipeline):
 		pipeline.write_bones_table(out)

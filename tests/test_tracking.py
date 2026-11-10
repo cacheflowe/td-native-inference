@@ -126,6 +126,49 @@ class WorldLandmarkTests(unittest.TestCase):
 		self.assertEqual(objs[0]['world'][hand], [1.0, 1.0, 2.0])
 		self.assertNotEqual(objs[0]['world'][0][0], 1.0)	# the body kept updating
 
+	def test_track_back_after_a_gap_snaps(self):
+		def shifted(dx):
+			det = holistic(0.0)
+			for kp in det['keypoints']:
+				kp[0] += dx
+			return det
+
+		for gap, expect_snap in ((3, True), (1, False)):
+			pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=HOLISTIC)
+			run(pipeline, [shifted(0.0)] * 3, smoothing=0.9)
+			for _ in range(gap):
+				pipeline.update([], conf_threshold=0.1, smoothing=0.9, min_hits=1)
+			objs = run(pipeline, [shifted(0.02)], smoothing=0.9)
+			x = objs[0]['keypoints'][0][0]
+			if expect_snap:
+				self.assertAlmostEqual(x, 0.52)
+			else:
+				self.assertAlmostEqual(x, 0.5 * 0.9 + 0.52 * 0.1)
+
+	def test_unseen_hand_does_not_fly_in_on_screen(self):
+		pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=HOLISTIC)
+		hand = LEFT_HAND.start
+		absent = holistic(0.0, left_hand=False)
+		for kp in absent['keypoints'][LEFT_HAND.start:LEFT_HAND.stop]:
+			kp[0] = kp[1] = 0.0	# what the plugin writes for a missing part
+		# Seen, lost for a while (held, hidden), then back: no easing through the corner.
+		objs = run(pipeline, [holistic(0.0)] + [absent] * 5, smoothing=0.9)
+		self.assertEqual(objs[0]['keypoints'][hand][:3], [0.5, 0.5, 0.0])
+		# Back: hidden, but already at its new reading, until confirmed.
+		for _ in range(pose_tracker_pipeline.PART_CONFIRM_FRAMES - 1):
+			objs = run(pipeline, [holistic(0.0)], smoothing=0.9)
+			self.assertEqual(objs[0]['keypoints'][hand][:3], [0.5, 0.5, 0.0])
+		objs = run(pipeline, [holistic(0.0)], smoothing=0.9)
+		self.assertEqual(objs[0]['keypoints'][hand][:3], [0.5, 0.5, 1.0])
+		# A track that starts without the hand takes its first sighting as-is.
+		pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=HOLISTIC)
+		objs = run(pipeline, [absent] + [holistic(0.0)] * pose_tracker_pipeline.PART_CONFIRM_FRAMES, smoothing=0.9)
+		self.assertEqual(objs[0]['keypoints'][hand][:3], [0.5, 0.5, 1.0])
+		# The rest of the body shows from the track's first frame.
+		pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=HOLISTIC)
+		objs = run(pipeline, [absent], smoothing=0.9)
+		self.assertEqual(objs[0]['keypoints'][0][2], 1.0)
+
 	def test_no_world_columns_without_world_data(self):
 		pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=HOLISTIC)
 		det = holistic(0.0)
@@ -138,18 +181,25 @@ import onnxtop_tables  # noqa: E402
 
 
 class FakeDat:
-	"""Just enough of a Table DAT for read_detections: numRows and row(i) of cells with .val."""
+	"""Just enough of a Table DAT for read_detections: numRows, row(i) of cells with .val, and
+	text (tab-separated rows, as TD gives it)."""
 
 	class Cell:
 		def __init__(self, val):
 			self.val = str(val)
 
-	def __init__(self, rows):
+	def __init__(self, rows, path='/fake/info'):
 		self.rows = [[self.Cell(v) for v in row] for row in rows]
 		self.numRows = len(self.rows)
+		self.numCols = len(self.rows[0]) if self.rows else 0
+		self.path = path
+		self.text = '\r\n'.join('\t'.join(c.val for c in row) for row in self.rows)
 
 	def row(self, i):
 		return self.rows[i]
+
+	def __getitem__(self, rc):
+		return self.rows[rc[0]][rc[1]]
 
 
 class ReadWorldTests(unittest.TestCase):
@@ -166,3 +216,10 @@ class ReadWorldTests(unittest.TestCase):
 		# x kept; MediaPipe's y-down / z-away flipped to TD's y-up / z-toward-camera.
 		self.assertEqual(det['world'][2], [0.2, -0.2, -0.3])
 		self.assertNotIn('w0_x', det['extras'])
+
+	def test_header_cache_follows_a_changed_header(self):
+		a = FakeDat([['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label']], path='/fake/cache')
+		self.assertEqual(onnxtop_tables._columns(a)[1][-1], 'label')
+		b = FakeDat([['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label', 'kp0_u', 'kp0_v', 'kp0_c']], path='/fake/cache')
+		col, header = onnxtop_tables._columns(b)
+		self.assertEqual(col['kp0_c'], 10)

@@ -387,8 +387,10 @@ MediaPipeTOP::Columns MediaPipeTOP::columns() const
 	}
 	if (myOutputWorld)
 	{
+		// Holistic's face mesh has no world landmarks: only the body and hands get columns.
+		c.worldCount = myTask == MpTaskKind::Holistic ? kHolisticFace : c.landmarks;
 		c.world = at;
-		at += c.landmarks * 3;
+		at += c.worldCount * 3;
 	}
 	if ((myTask == MpTaskKind::Face || myTask == MpTaskKind::Holistic) && !myResult.scoreNames.empty())
 	{
@@ -440,7 +442,7 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 				snprintf(buf, sizeof(buf), "kp%d_z", col - c.z);
 				entries->values[col]->setString(buf);
 			}
-			else if (c.world >= 0 && col >= c.world && col < c.world + c.landmarks * 3)
+			else if (c.world >= 0 && col >= c.world && col < c.world + c.worldCount * 3)
 			{
 				const char* suffix[] = { "x", "y", "z" };
 				snprintf(buf, sizeof(buf), "w%d_%s", (col - c.world) / 3, suffix[(col - c.world) % 3]);
@@ -529,7 +531,7 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 		}
 		else if (c.z >= 0 && col >= c.z && col < c.z + c.landmarks)
 			v = col - c.z < n ? lm(col - c.z, 2) : 0.f;
-		else if (c.world >= 0 && col >= c.world && col < c.world + c.landmarks * 3)
+		else if (c.world >= 0 && col >= c.world && col < c.world + c.worldCount * 3)
 		{
 			size_t i = (size_t)(col - c.world);
 			v = i < inst.world.size() ? inst.world[i] : 0.f;

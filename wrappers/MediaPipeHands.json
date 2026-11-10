@@ -15,7 +15,8 @@
 		"Mindetection",
 		"Minpresence",
 		"Mintracking",
-		"Outputz"
+		"Outputz",
+		"Outputworld"
 	],
 	"menus": {
 		"Task": {

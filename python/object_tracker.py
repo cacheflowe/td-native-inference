@@ -823,8 +823,10 @@ def par_help(key, subject='object', subject_plural=None, what='box position/size
 # since none of them have any model-specific logic.
 
 import colorsys
+import functools
 
 
+@functools.lru_cache(maxsize=1024)	# per joint per frame (hundreds of rows for Holistic)
 def track_color(track_id):
 	"""Deterministic, maximally-distinct RGB (0-1) color per track_id, via the golden-
 	ratio hue trick (successive ids land far apart around the hue wheel instead of
