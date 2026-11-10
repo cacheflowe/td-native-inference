@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- MediaPipe Holistic (and any tracker whose missing parts come in at 0, 0): with **Output
+  Smoothing** up, a hand or the face mesh no longer flies in from the corner when it's found again.
+  An unseen part holds its last position, hidden; when it's back it starts at its new reading and
+  stays hidden for 3 frames while smoothing settles. A whole track picked back up after 2 or more
+  lost frames also starts at its new detection instead of gliding from where it was held.
+- MediaPipe Hands: **Output World** on its Model page (world landmark columns, as on Pose and
+  Holistic).
+
 ## v0.2.3 (2026-11-09)
 
 - MediaPipe models (Hands, Gestures, Face, Pose, Holistic, Face Detector, Segmentation) recover

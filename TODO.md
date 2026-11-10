@@ -58,12 +58,27 @@ Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
       the shortest swing; spine and neck blend between hips, chest and head. ~1 ms per frame.
 - [x] **Drive the FBX COMP** (lab). `scripts/lab/build_puppet.py` builds `/project1/PuppetLab`:
       clip or webcam -> Holistic -> solver Script CHOP -> every bone's rx/ry/rz bound to it ->
-      render. Checked on `build/pose.jpg` (warrior pose matches).
+      render. Checked on `build/pose.jpg` (warrior pose matches). Since Nov 10 the solver lives in
+      `python/puppet_solver.py`, and the lab has controls on its Puppet page and two paths (body,
+      hand) in labelled network boxes.
+- [x] **Over Image placement** (Nov 10). `mixamo_retarget.place()`: the root translation that
+      lays the posed model's joints over the 2D keypoints, by least squares, for a camera at the
+      origin with an assumed horizontal FOV (Image FOV). Smoothed (Placement Smoothing).
+- [x] **Rigged hand** (Nov 10). `python/hand_retarget.py` maps MediaPipe hand landmarks onto a
+      Blender-style hand rig (handRig_02.fbx: `pulse`, `hand`, `<finger>_base/_01.._03`), with
+      its own close-up clip and MediaPipe Hands tracker in the lab. Either hand drives the one-hand
+      model (the other side mirrored, sx = -1). Tests: `tests/test_hand_retarget.py` (needs
+      `build/hand_rest.json`, dumped from the lab's hand FBX COMP).
+- [ ] Hand: on a mirrored (selfie) webcam image the left/right labels name the mirrored hand; the
+      model then mirrors the right way for the image, but Tracked Hand Right/Left picks the other
+      hand. A Mirror toggle could swap them.
+- [ ] Over Image: the FOV is a guess per video; could be estimated from the person's known
+      proportions over a few frames.
 - [ ] Tune live with a webcam: head yaw/pitch (looks under-turned), whether the forearm should
       take only part of the hand's twist, foot roll.
 - [ ] Rotation smoothing (slerp) and joint limits (no backward elbows/knees); for now only the
       tracker's position smoothing.
-- [ ] Hips translation (image position and depth); the character stays in place.
+- [x] Hips translation: Over Image placement (above) moves the character with the person.
 - [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject
       a frame whose hip line flips faster than a person can turn.
 - [ ] Package: a `MixamoPuppet` tox (Tracks DAT + FBX COMP in, rotations out, binds the bones)
