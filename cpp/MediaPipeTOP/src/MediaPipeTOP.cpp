@@ -133,11 +133,12 @@ MediaPipeTOP::~MediaPipeTOP()
 
 void MediaPipeTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
 {
+	// Cooks every frame while its output is used, which also lands a frame or result still on its
+	// way when the input is static. cookEveryFrame would add a cook of its own each frame, before
+	// the input's: with a moving input the node (and its Info DAT, tracker...) then cooked twice in
+	// about half the frames. Only while loading, to get through the load even if nothing pulls.
 	ginfo->cookEveryFrameIfAsked = true;
-	// Keep cooking while a frame or a result is still on its way, so it lands even when the input
-	// is static.
-	ginfo->cookEveryFrame = myWorker && myActive &&
-		(myWorker->state() == MpWorker::State::Loading || myWorker->pending() || myReadInFlight);
+	ginfo->cookEveryFrame = myWorker && myActive && myWorker->state() == MpWorker::State::Loading;
 }
 
 bool MediaPipeTOP::ensureBuffers(int w, int h)

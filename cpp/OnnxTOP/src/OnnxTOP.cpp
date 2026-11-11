@@ -307,9 +307,10 @@ OnnxTOP::~OnnxTOP()
 
 void OnnxTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
 {
+	// Cooks every frame while its output is used, which also delivers a queued run (Wait for
+	// Result off). No cookEveryFrame: it adds a cook of its own before the input's, so the node
+	// would cook twice in frames where the input changes (see MediaPipeTOP).
 	ginfo->cookEveryFrameIfAsked = true;
-	// Wait for Result off: one more cook delivers a queued run's results, even for a still input.
-	ginfo->cookEveryFrame = myPending.active;
 }
 
 void OnnxTOP::manageLoading(const EngineConfig& desired)
@@ -767,7 +768,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	auto queueRun = [&](bool sync) -> bool
 	{
 		cudaEventRecord(myRunStart, myStream);
-		if (!engine->run(err, sync))
+		auto tRun = Clock::now();
+		const bool ran = engine->run(err, sync);
+		myRunMs = msSince(tRun);
+		if (!ran)
 		{
 			myError = err;
 			return false;
@@ -1028,7 +1032,7 @@ bool OnnxTOP::runCrops(OnnxEngine& engine, int n, bool softmax, std::string& err
 
 int32_t OnnxTOP::getNumInfoCHOPChans(void*)
 {
-	return 10;
+	return 11;
 }
 
 void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -1046,6 +1050,7 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 7: chan->name->setString("model_h");			chan->value = (float)myModelH; break;
 		case 8: chan->name->setString("trt_building");		chan->value = myUpgrading ? 1.f : 0.f; break;
 		// Input frames since the one the current results are from (0 with Wait for Result on).
+		case 10: chan->name->setString("run_ms");			chan->value = (float)myRunMs; break;
 		case 9: chan->name->setString("result_delay");		chan->value = myResultFrame >= 0 && myInputFrame >= myResultFrame ?
 			(float)(myInputFrame - myResultFrame) : 0.f; break;
 	}

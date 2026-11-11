@@ -32,12 +32,16 @@ struct EngineConfig
 	// Batch size for a dynamic batch dim (crop-and-classify); 0 = 1. Only a size > 1 changes
 	// the TensorRT cache key.
 	int				batch = 0;
+	// Capture the run as a CUDA graph and replay it (TensorRT / CUDA EP options). Bench only
+	// (onnxtop_tool --graph): ORT then waits for the replay, so the launch costs the whole
+	// inference (docs/learnings/td-cook-performance.md).
+	bool			cudaGraph = false;
 
 	bool operator==(const EngineConfig& o) const
 	{
 		return modelPath == o.modelPath && provider == o.provider && fp16 == o.fp16 &&
 			cacheDir == o.cacheDir && deviceId == o.deviceId && stream == o.stream &&
-			inputW == o.inputW && inputH == o.inputH && batch == o.batch;
+			inputW == o.inputW && inputH == o.inputH && batch == o.batch && cudaGraph == o.cudaGraph;
 	}
 	bool operator!=(const EngineConfig& o) const { return !(*this == o); }
 };

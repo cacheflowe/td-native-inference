@@ -24,7 +24,9 @@ REPORT = Path(project.folder) / 'build' / 'wrapper-lab.json'
 
 
 ONLY = []	# limit to these wrapper names (empty = all)
-THUMBNAILS = True	# save docs/images/models/<Name>.jpg once a wrapper detects (README / MODELS.md)
+# Save docs/images/models/<Name>.jpg once a wrapper detects (README / MODELS.md). Off for routine
+# runs (it rewrites the committed images); turn on when preparing a release.
+THUMBNAILS = False
 THUMB_HEIGHT = 320
 THUMB_DIR = Path(project.folder) / 'docs' / 'images' / 'models'
 

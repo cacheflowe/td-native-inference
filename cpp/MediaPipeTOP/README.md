@@ -151,8 +151,9 @@ timestamps. VIDEO mode is what turns on MediaPipe's tracking between frames.
 - **Without waiting,** the frame's copy back to the CPU is queued with a CUDA event and handed to
   the worker on a later cook once it has landed (no `cudaStreamSynchronize` in the cook), so
   results show up about two frames behind the input; `result_delay` says exactly how many.
-- **The node keeps cooking while a frame or a result is pending**, so it lands even when the
-  input is static.
+- **The node cooks every frame while its output is used** (`cookEveryFrameIfAsked`), so a pending
+  frame or result lands even when the input is static. It doesn't force a cook of its own
+  (`cookEveryFrame`, only while loading): that cooked it twice in frames where the input changed.
 
 - **A change in frame size rebuilds the task**, and so does a graph error (at most once a
   second). MediaPipe graph errors are permanent. Holistic and pose-with-mask hit one as soon as the

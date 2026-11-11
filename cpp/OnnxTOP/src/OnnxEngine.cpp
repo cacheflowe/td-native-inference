@@ -196,6 +196,12 @@ Ort::SessionOptions OnnxEngine::makeOptions(OrtProvider provider, std::string& d
 			cache.c_str(),
 		};
 		Ort::ThrowOnError(api.UpdateTensorRTProviderOptions(trt, keys, vals, std::size(keys)));
+		if (myConfig.cudaGraph)
+		{
+			const char* gkeys[] = { "trt_cuda_graph_enable" };
+			const char* gvals[] = { "1" };
+			Ort::ThrowOnError(api.UpdateTensorRTProviderOptions(trt, gkeys, gvals, 1));
+		}
 		if (myConfig.stream)
 			Ort::ThrowOnError(api.UpdateTensorRTProviderOptionsWithValue(trt, "user_compute_stream", myConfig.stream));
 		so.AppendExecutionProvider_TensorRT_V2(*trt);
@@ -209,8 +215,8 @@ Ort::SessionOptions OnnxEngine::makeOptions(OrtProvider provider, std::string& d
 	Ort::ThrowOnError(api.CreateCUDAProviderOptions(&cuda));
 	std::unique_ptr<OrtCUDAProviderOptionsV2, decltype(api.ReleaseCUDAProviderOptions)>
 		cudaGuard(cuda, api.ReleaseCUDAProviderOptions);
-	const char* ckeys[] = { "device_id", "cudnn_conv_algo_search" };
-	const char* cvals[] = { dev.c_str(), "HEURISTIC" };
+	const char* ckeys[] = { "device_id", "cudnn_conv_algo_search", "enable_cuda_graph" };
+	const char* cvals[] = { dev.c_str(), "HEURISTIC", myConfig.cudaGraph && provider == OrtProvider::CUDA ? "1" : "0" };
 	Ort::ThrowOnError(api.UpdateCUDAProviderOptions(cuda, ckeys, cvals, std::size(ckeys)));
 	if (myConfig.stream)
 		Ort::ThrowOnError(api.UpdateCUDAProviderOptionsWithValue(cuda, "user_compute_stream", myConfig.stream));

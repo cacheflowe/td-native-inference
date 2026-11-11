@@ -118,6 +118,7 @@ private:
 	std::string					myModelHint;	// where a missing model was looked for
 	int							myModelW = 0, myModelH = 0;
 	double						myInferMs = 0.0;
+	double						myRunMs = 0.0;		// CPU time spent in OnnxEngine::run (the launch)
 	double						myExecuteMs = 0.0;
 	int64_t						myExecuteCount = 0;
 

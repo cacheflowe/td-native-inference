@@ -157,8 +157,9 @@ with TensorRT FP16 (engine build ~3 min) and about 25 ms on CUDA.
   `mask_fill` (share of the box the mask covers at Mask Threshold, computed like the Python seg
   script's `mask_area_ratio`). Pose models add `kp{i}_u, kp{i}_v, kp{i}_c`.
 - **Info CHOP:** `loaded, loading, tensorrt, num_detections, infer_ms, execute_ms, model_w, model_h,
-  trt_building, result_delay`. `infer_ms` is the inference's GPU time (CUDA events); `result_delay`
-  is how many input frames old the current detections are (0 with Wait for Result on).
+  trt_building, result_delay, run_ms`. `infer_ms` is the inference's GPU time (CUDA events);
+  `result_delay` is how many input frames old the current detections are (0 with Wait for Result
+  on); `run_ms` is the CPU time ONNX Runtime takes to launch the run (paid in the cook either way).
 - **Info popup** (middle-click): ORT version and path, the active provider, I/O shapes, and recent
   ORT log lines.
 

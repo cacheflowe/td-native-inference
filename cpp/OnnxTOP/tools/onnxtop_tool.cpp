@@ -141,7 +141,7 @@ int main(int argc, char** argv)
 	std::vector<std::string> pos;
 	std::string imagePath, outPrefix;
 	int imgW = 0, imgH = 0, dynW = 0, dynH = 0;
-	bool rawMode = false, moveNet = false, yuNet = false, bgr = false;
+	bool rawMode = false, moveNet = false, yuNet = false, bgr = false, graph = false;
 	std::vector<CropBox> crops;	// --crop x1 y1 x2 y2 (source px, top-down), repeatable
 	int batch = 0;
 	InputNormKind normKind = InputNormKind::Unit;
@@ -186,13 +186,15 @@ int main(int argc, char** argv)
 			batch = atoi(argv[++i]);
 		else if (a == "--bgr")
 			bgr = true;
+		else if (a == "--graph")
+			graph = true;
 		else
 			pos.push_back(a);
 	}
 	if (pos.size() < 2)
 	{
 		printf("usage: onnxtop_tool <TD bin dir> <model.onnx> [tensorrt|cuda] [iterations] [fp32] "
-			"[--size <w> <h>] [--norm unit|imagenet|signed|byte] [--bgr] [--raw | --movenet | --yunet] [--image <raw rgba> <w> <h> --out <prefix>]\n");
+			"[--size <w> <h>] [--norm unit|imagenet|signed|byte] [--bgr] [--graph] [--raw | --movenet | --yunet] [--image <raw rgba> <w> <h> --out <prefix>]\n");
 		return 1;
 	}
 	std::wstring wbin(pos[0].begin(), pos[0].end());
@@ -204,6 +206,7 @@ int main(int argc, char** argv)
 	cfg.inputW = dynW;
 	cfg.inputH = dynH;
 	cfg.batch = batch;
+	cfg.cudaGraph = graph;
 
 	// TD's bin dir must win DLL resolution (nvinfer, cudnn, cublas) over anything on PATH.
 	SetDllDirectoryW(wbin.c_str());
@@ -233,18 +236,22 @@ int main(int argc, char** argv)
 	for (const auto& t : engine.outputs())
 		printf("  out %-12s %s %s\n", t.name.c_str(), shapeString(t.shape).c_str(), ortTypeName(t.type));
 
-	std::vector<double> times;
+	// Launch: the CPU time until run() returns without syncing (what TD's cook pays with Wait for
+	// Result off); inference: until the GPU is done.
+	std::vector<double> times, launches;
 	for (int i = 0; i < iters; i++)
 	{
 		auto a = Clock::now();
-		if (!engine.run(err))
+		if (!engine.run(err, false))
 		{
 			printf("Run failed: %s\n", err.c_str());
 			return 1;
 		}
+		launches.push_back(msSince(a));
 		cudaStreamSynchronize(stream);
 		times.push_back(msSince(a));
 	}
+	printStats("Launch (CPU, no sync):", launches);
 	printStats("Inference only:", times);
 
 	if (!imagePath.empty())
