@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- MediaPipe Sound Classifier (and Speech to Text): their output channels run at the timeline rate
+  instead of the audio's 16 kHz. The wrapper's score smoothing (a Lag CHOP over all 521 classes)
+  had been producing ~270 samples per class every frame, about 20 ms of TouchDesigner's frame.
+
 ## v0.2.4 (2026-11-10)
 
 - MediaPipe Holistic (and any tracker whose missing parts come in at 0, 0): with **Output

@@ -112,6 +112,11 @@ bool MediaPipeCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs
 	}
 	info->numSamples = 1;
 	info->startIndex = 0;
+	// One sample of scores per cook, at the timeline rate. Left unset, TD takes the audio input's
+	// rate (16 kHz): a time-sliced CHOP downstream (the wrapper's Lag) then fills each frame with
+	// ~270 samples per class channel, 521 YAMNet classes, about 20 ms a cook.
+	if (const OP_TimeInfo* time = inputs->getTimeInfo())
+		info->sampleRate = (float)time->rate;
 	return true;
 }
 
