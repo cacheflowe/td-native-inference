@@ -16,7 +16,8 @@
 	"model": [
 		"Confthreshold",
 		"Maxdetections",
-		"Dynamicsize"
+		"Dynamicsize",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Confthreshold",

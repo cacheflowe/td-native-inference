@@ -14,7 +14,8 @@
 		"Model",
 		"Confthreshold",
 		"Classfilter",
-		"Maxdetections"
+		"Maxdetections",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Confthreshold",

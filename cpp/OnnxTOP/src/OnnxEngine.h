@@ -67,8 +67,10 @@ public:
 	bool load(const EngineConfig& cfg, std::string& err);
 
 	// Runs inference on cfg.stream. Inputs must already be written to inputs()[i].device.
-	// Returns once results are complete on the stream (ORT synchronizes bound outputs).
-	bool run(std::string& err);
+	// sync: returns once results are complete (ORT synchronizes the stream). Otherwise it returns
+	// once the work is queued: anything later on cfg.stream sees the outputs, and the caller syncs
+	// (e.g. with an event) before reading them on the CPU.
+	bool run(std::string& err, bool sync = true);
 
 	const std::vector<TensorSlot>&	inputs() const { return myInputs; }
 	const std::vector<TensorSlot>&	outputs() const { return myOutputs; }
@@ -90,6 +92,8 @@ private:
 	std::vector<TensorSlot>			myInputs;
 	std::vector<TensorSlot>			myOutputs;
 	Ort::RunOptions					myRunOptions;
+	Ort::RunOptions					myQueueRunOptions;	// disable_synchronize_execution_providers
+	bool							myQueueOptionsSet = false;
 };
 
 // TensorRT cache folder for cfg (cfg.cacheDir, or <model dir>/trt_cache).

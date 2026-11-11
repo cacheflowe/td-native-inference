@@ -389,7 +389,7 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 	return true;
 }
 
-bool OnnxEngine::run(std::string& err)
+bool OnnxEngine::run(std::string& err, bool sync)
 {
 	if (!mySession)
 	{
@@ -398,7 +398,13 @@ bool OnnxEngine::run(std::string& err)
 	}
 	try
 	{
-		mySession->Run(myRunOptions, *myBinding);
+		if (!sync && !myQueueOptionsSet)
+		{
+			// ORT otherwise ends Run() with cudaStreamSynchronize on our stream.
+			myQueueRunOptions.AddConfigEntry("disable_synchronize_execution_providers", "1");
+			myQueueOptionsSet = true;
+		}
+		mySession->Run(sync ? myRunOptions : myQueueRunOptions, *myBinding);
 
 		// Refresh output pointers/shapes (no-op for preallocated static outputs, required
 		// for dynamic ones since ORT may hand back a different buffer each run).

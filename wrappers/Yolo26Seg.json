@@ -19,7 +19,8 @@
 		"Matteconf",
 		"Maskmargin",
 		"Mattenms",
-		"Matteencoding"
+		"Matteencoding",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Confthreshold",

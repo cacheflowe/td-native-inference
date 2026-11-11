@@ -120,4 +120,31 @@ private:
 	double						myInferMs = 0.0;
 	double						myExecuteMs = 0.0;
 	int64_t						myExecuteCount = 0;
+
+	// Wait for Result off: this cook queues the inference without waiting for it, and the next
+	// cook decodes its outputs (the decoders read the engine's output buffers, untouched until the
+	// next run is queued after them on myStream). myRunStart/myRunDone time it on the GPU.
+	struct PendingRun
+	{
+		bool						active = false;
+		const OnnxEngine*			engine = nullptr;	// dropped if the engine was swapped meanwhile
+		int							mode = 0;
+		Letterbox					lb = {};
+		int							crops = 0;			// Classify Crops: crops in the batch
+		std::vector<std::string>	cropIds;
+		int64_t						frame = -1;			// the input's totalCooks
+	};
+	PendingRun					myPending;
+	cudaEvent_t					myRunStart = nullptr, myRunDone = nullptr;
+	bool						myRunRecorded = false;	// the events hold a run
+	bool						myWaitResult = true;
+	int64_t						myLaunchedFrame = -1;	// the input's totalCooks at the last run
+	void						readInferMs();			// infer_ms from the events, once they're done
+	int64_t						myInputFrame = -1;		// the input's totalCooks this cook
+	int64_t						myResultFrame = -1;		// ... and that of the frame the results are from
+
+	// Info DAT header row, rebuilt only when its layout changes.
+	std::vector<std::string>	myHeader;
+	std::string					myHeaderKey;
+	void						headerRow(int cols);
 };

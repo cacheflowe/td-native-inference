@@ -13,7 +13,8 @@
 	"model": [
 		"Model",
 		"Confthreshold",
-		"Maxdetections"
+		"Maxdetections",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Confthreshold",

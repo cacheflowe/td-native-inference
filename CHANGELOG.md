@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- ONNX models (YOLO, MoveNet, YuNet, HSEmotion): **Wait for Result** on the Model page. On (the
+  default, as before): detections match the image exactly. Off: TouchDesigner's cook no longer
+  waits for the inference; results arrive a frame later (`result_delay` info channel). Depth
+  Anything no longer waits for its inference at all, with the same, same-frame result. `infer_ms`
+  now reports the GPU inference time.
+- ONNX models build their Info DAT faster (header cached, cheaper number formatting).
+- Boxes and faces (YOLO, YuNet, HSEmotion) no longer glide in from where a track was held when it's
+  found again after 2 or more lost frames; they start at the new detection, like the skeletons.
+
 - MediaPipe Sound Classifier (and Speech to Text): their output channels run at the timeline rate
   instead of the audio's 16 kHz. The wrapper's score smoothing (a Lag CHOP over all 521 classes)
   had been producing ~270 samples per class every frame, about 20 ms of TouchDesigner's frame.

@@ -13,7 +13,8 @@
 	},
 	"model": [
 		"Classifyinterval",
-		"Cropscale"
+		"Cropscale",
+		"Waitforresult"
 	],
 	"classes": {
 		"prefix": "emotion",

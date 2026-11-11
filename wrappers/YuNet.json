@@ -18,7 +18,8 @@
 		"Confthreshold",
 		"Nmsthreshold",
 		"Maxdetections",
-		"Dynamicsize"
+		"Dynamicsize",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Confthreshold",

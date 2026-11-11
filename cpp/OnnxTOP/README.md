@@ -69,6 +69,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | TensorRT FP16 | Part of the engine cache key |
 | ONNX | Reload Model | Retries after a failure, or reloads in place |
 | ONNX | Active | Off = skip inference, clear the output |
+| ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
 | ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, or **Raw Output Tensor**. A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
 | ONNX | Letterbox | Keep aspect with gray padding, like Ultralytics. Off = stretch |
 | ONNX | Input Normalize | **0 to 1** (YOLO), **ImageNet mean/std** (Depth Anything, most ViTs), **−1 to 1**, **0 to 255** (MoveNet, YuNet), **Custom** (tensor = rgb01 · Custom Scale + Custom Offset, per channel) |
@@ -156,7 +157,8 @@ with TensorRT FP16 (engine build ~3 min) and about 25 ms on CUDA.
   `mask_fill` (share of the box the mask covers at Mask Threshold, computed like the Python seg
   script's `mask_area_ratio`). Pose models add `kp{i}_u, kp{i}_v, kp{i}_c`.
 - **Info CHOP:** `loaded, loading, tensorrt, num_detections, infer_ms, execute_ms, model_w, model_h,
-  trt_building`.
+  trt_building, result_delay`. `infer_ms` is the inference's GPU time (CUDA events); `result_delay`
+  is how many input frames old the current detections are (0 with Wait for Result on).
 - **Info popup** (middle-click): ORT version and path, the active provider, I/O shapes, and recent
   ORT log lines.
 

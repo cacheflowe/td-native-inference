@@ -1,6 +1,7 @@
 #include "OnnxTOP.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -21,6 +22,14 @@ namespace
 	double msSince(Clock::time_point t0)
 	{
 		return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+	}
+
+	// Info DAT cells: to_chars is several times cheaper than snprintf, and this runs for every cell.
+	void formatValue(char* buf, size_t size, float v, bool integer)
+	{
+		auto res = integer ? std::to_chars(buf, buf + size - 1, (int)v)
+			: std::to_chars(buf, buf + size - 1, v, std::chars_format::fixed, 4);
+		*res.ptr = 0;
 	}
 
 	TexFormat mapFormat(OP_PixelFormat f)
@@ -267,6 +276,8 @@ OnnxTOP::OnnxTOP(const OP_NodeInfo*, TOP_Context* context) :
 	myContext(context)
 {
 	cudaStreamCreateWithFlags(&myStream, cudaStreamNonBlocking);
+	cudaEventCreate(&myRunStart);
+	cudaEventCreate(&myRunDone);
 }
 
 OnnxTOP::~OnnxTOP()
@@ -278,6 +289,10 @@ OnnxTOP::~OnnxTOP()
 		myLoader.join();
 	if (myStream)
 		cudaStreamSynchronize(myStream);
+	if (myRunStart)
+		cudaEventDestroy(myRunStart);
+	if (myRunDone)
+		cudaEventDestroy(myRunDone);
 	myEngine.reset();
 	myNextEngine.reset();
 	if (myRawRange)
@@ -293,6 +308,8 @@ OnnxTOP::~OnnxTOP()
 void OnnxTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
 {
 	ginfo->cookEveryFrameIfAsked = true;
+	// Wait for Result off: one more cook delivers a queued run's results, even for a still input.
+	ginfo->cookEveryFrame = myPending.active;
 }
 
 void OnnxTOP::manageLoading(const EngineConfig& desired)
@@ -587,6 +604,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	segOpt.maskMargin = (float)inputs->getParDouble("Maskmargin");
 	segOpt.matteNms = (float)inputs->getParDouble("Mattenms");
 	segOpt.instances = inputs->getParInt("Matteencoding") == 1;
+	myWaitResult = inputs->getParInt("Waitforresult") != 0;
 
 	inputs->enablePar("Fp16", provider != OrtProvider::CUDA);
 	inputs->enablePar("Cachefolder", provider != OrtProvider::CUDA);
@@ -604,6 +622,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	for (const char* p : { "Rawoutput", "Rawnormalize", "Rawmaptoinput" })
 		inputs->enablePar(p, mode == ModeRaw);
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
+	inputs->enablePar("Waitforresult", mode != ModeRaw);
 
 	EngineConfig desired;
 	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
@@ -649,6 +668,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	}
 
 	const int srcW = (int)top->textureDesc.width, srcH = (int)top->textureDesc.height;
+	myInputFrame = top->totalCooks;
 	if (mode == ModeCrops && !parseCropDat(cropDat, srcW, srcH, cropScale, cropSquare, kMaxBatch, myCropBoxes, myCropIds, err))
 		myWarning = err;
 
@@ -736,30 +756,94 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	int outH = (int)outInfo.textureDesc.height;
 
 	bool wrote = false;
+	// Wait for Result off: decode the run queued last cook, then queue this frame's without waiting.
+	// Only for a new input frame: a still input (or a parameter change on one) runs synchronously,
+	// so the node never keeps itself cooking. Raw output never reads back, so it always just queues.
+	const bool async = !myWaitResult && mode != ModeRaw;
+	const bool newInput = top->totalCooks != myLaunchedFrame;
+	if (myPending.active && (!async || myPending.engine != engine || myPending.mode != mode))
+		myPending.active = false;	// switched to waiting, or engine / mode changed: not wanted
+	readInferMs();
+	auto queueRun = [&](bool sync) -> bool
+	{
+		cudaEventRecord(myRunStart, myStream);
+		if (!engine->run(err, sync))
+		{
+			myError = err;
+			return false;
+		}
+		cudaEventRecord(myRunDone, myStream);
+		myRunRecorded = true;
+		myLaunchedFrame = top->totalCooks;
+		return true;
+	};
+	auto finishPending = [&]()
+	{
+		cudaEventSynchronize(myRunDone);	// normally long done: it ran on the GPU between cooks
+		readInferMs();
+		myResultFrame = myPending.frame;
+		myPending.active = false;
+	};
+
 	if (engine && inSurf && mode == ModeCrops)
 	{
 		if (!myDevCropBoxes)
 			cudaMalloc(&myDevCropBoxes, kMaxBatch * sizeof(CropBox));
 		const int B = (int)in->shape[0];
 		const int n = std::min((int)myCropBoxes.size(), B);
-		auto tInfer = Clock::now();
 		if (n > 0)
 			cudaMemcpyAsync(myDevCropBoxes, myCropBoxes.data(), n * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
 		// Classify Interval: only every Nth frame crops + runs the model; the frames in between
 		// keep the last results (like onnx_hsemotion.py's Emotioninterval).
 		const bool due = !myCropMode || (myCropCounter++ % cropInterval) == 0;
-		if (due)
-			myCrops.clear();
-		if (due && n > 0)
+		bool decoded = false;
+		if (async && myPending.active)
 		{
-			cudaError_t ce = launchCropPreprocess(inSurf, fmt, srcW, srcH, myDevCropBoxes, n, B, inputNorm, inLayout,
-				in->device, myModelW, myModelH, myStream);
-			if (ce != cudaSuccess)
-				myError = std::string("Crop kernel failed: ") + cudaGetErrorString(ce);
-			else if (!engine->run(err) || !runCrops(*engine, n, cropSoftmax, err))
+			finishPending();
+			myCrops.clear();
+			std::swap(myCropIds, myPending.cropIds);	// the ids the queued crops were made from
+			if (!runCrops(*engine, myPending.crops, cropSoftmax, err))
 				myError = err;
+			std::swap(myCropIds, myPending.cropIds);
+			decoded = true;
 		}
-		myInferMs = msSince(tInfer);
+		if (due && !(async && decoded && !newInput))
+		{
+			const bool queue = async && newInput;
+			if (!queue)
+				myCrops.clear();
+			if (n > 0)
+			{
+				cudaError_t ce = launchCropPreprocess(inSurf, fmt, srcW, srcH, myDevCropBoxes, n, B, inputNorm, inLayout,
+					in->device, myModelW, myModelH, myStream);
+				if (ce != cudaSuccess)
+					myError = std::string("Crop kernel failed: ") + cudaGetErrorString(ce);
+				else if (queueRun(!queue))
+				{
+					if (queue)
+					{
+						myPending.active = true;
+						myPending.engine = engine;
+						myPending.mode = mode;
+						myPending.crops = n;
+						myPending.cropIds.assign(myCropIds.begin(), myCropIds.begin() + n);
+						myPending.frame = top->totalCooks;
+					}
+					else
+					{
+						if (!runCrops(*engine, n, cropSoftmax, err))
+							myError = err;
+						readInferMs();
+						myResultFrame = top->totalCooks;
+					}
+				}
+			}
+			else
+			{
+				myCrops.clear();
+				myResultFrame = top->totalCooks;
+			}
+		}
 		if (myError.empty())
 		{
 			int cols = (int)std::ceil(std::sqrt((double)B));
@@ -774,40 +858,55 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	{
 		Letterbox lb = computeLetterbox((int)top->textureDesc.width, (int)top->textureDesc.height,
 			myModelW, myModelH, letterbox);
-
-		auto tInfer = Clock::now();
-		cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, kLetterboxPad, myStream);
-		if (ce != cudaSuccess)
-			myError = std::string("Preprocess kernel failed: ") + cudaGetErrorString(ce);
-		else if (!engine->run(err))
-			myError = err;
-		myInferMs = msSince(tInfer);
-
-		if (myError.empty())
+		// Detections (and the seg matte) from the engine's current outputs, for the frame lb maps.
+		auto decode = [&](const Letterbox& from) -> bool
 		{
+			bool ok = true;
 			if (mode == ModeYolo)
-			{
-				if (!myYolo.decode(*engine, lb, confThresh, classFilter, maxDets, segOpt, outSurf, outW, outH, myStream, err))
-					myError = err;
-				wrote = true;	// decode() always writes (or clears) the output
-				myYoloMode = true;
-			}
+				ok = myYolo.decode(*engine, from, confThresh, classFilter, maxDets, segOpt, outSurf, outW, outH, myStream, err);
 			else if (mode == ModeMoveNet)
-			{
-				if (!myYolo.decodeMoveNet(*engine, lb, confThresh, maxDets, outSurf, outW, outH, myStream, err))
-					myError = err;
-				wrote = true;
-				myYoloMode = true;
-			}
+				ok = myYolo.decodeMoveNet(*engine, from, confThresh, maxDets, outSurf, outW, outH, myStream, err);
 			else if (mode == ModeYuNet)
-			{
-				if (!myYolo.decodeYuNet(*engine, lb, confThresh, nmsThresh, maxDets, outSurf, outW, outH, myStream, err))
-					myError = err;
-				wrote = true;
-				myYoloMode = true;
-			}
+				ok = myYolo.decodeYuNet(*engine, from, confThresh, nmsThresh, maxDets, outSurf, outW, outH, myStream, err);
 			else
-				wrote = runRaw(*engine, rawOpt, lb, outSurf, outW, outH);
+				return runRaw(*engine, rawOpt, from, outSurf, outW, outH);
+			if (!ok)
+				myError = err;
+			myYoloMode = true;
+			return true;	// the decoders always write (or clear) the output
+		};
+
+		bool decoded = false;
+		if (async && myPending.active)
+		{
+			finishPending();
+			wrote = decode(myPending.lb);
+			decoded = true;
+		}
+		if (!(async && decoded && !newInput))
+		{
+			const bool queue = async && newInput;
+			cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, kLetterboxPad, myStream);
+			if (ce != cudaSuccess)
+				myError = std::string("Preprocess kernel failed: ") + cudaGetErrorString(ce);
+			else if (queueRun(!queue && mode != ModeRaw))
+			{
+				if (queue)
+				{
+					myPending.active = true;
+					myPending.engine = engine;
+					myPending.mode = mode;
+					myPending.lb = lb;
+					myPending.frame = top->totalCooks;
+				}
+				else
+				{
+					wrote = decode(lb);
+					if (mode != ModeRaw)
+						readInferMs();
+					myResultFrame = top->totalCooks;
+				}
+			}
 		}
 	}
 	if (mode == ModeRaw || mode == ModeCrops || !wrote)
@@ -828,6 +927,18 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 
 	myContext->endCUDAOperations(nullptr);
 	myExecuteMs = msSince(tExec);
+}
+
+void OnnxTOP::readInferMs()
+{
+	// Before the first recorded run the events are empty, and querying them reports an error that
+	// cudaGetLastError() would hand to the next kernel launch's check.
+	if (!myRunRecorded)
+		return;
+	float ms = 0.f;
+	if (cudaEventQuery(myRunDone) == cudaSuccess && cudaEventElapsedTime(&ms, myRunStart, myRunDone) == cudaSuccess)
+		myInferMs = ms;
+	cudaGetLastError();	// not-ready / timing errors here aren't the frame's errors
 }
 
 bool OnnxTOP::runRaw(OnnxEngine& engine, const RawOptions& opt, const Letterbox& lb,
@@ -917,7 +1028,7 @@ bool OnnxTOP::runCrops(OnnxEngine& engine, int n, bool softmax, std::string& err
 
 int32_t OnnxTOP::getNumInfoCHOPChans(void*)
 {
-	return 9;
+	return 10;
 }
 
 void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -934,6 +1045,9 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 6: chan->name->setString("model_w");			chan->value = (float)myModelW; break;
 		case 7: chan->name->setString("model_h");			chan->value = (float)myModelH; break;
 		case 8: chan->name->setString("trt_building");		chan->value = myUpgrading ? 1.f : 0.f; break;
+		// Input frames since the one the current results are from (0 with Wait for Result on).
+		case 9: chan->name->setString("result_delay");		chan->value = myResultFrame >= 0 && myInputFrame >= myResultFrame ?
+			(float)(myInputFrame - myResultFrame) : 0.f; break;
 	}
 }
 
@@ -992,7 +1106,7 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 			else
 			{
 				float v = c == 2 ? r.conf : (c - 3 < (int)r.probs.size() ? r.probs[c - 3] : 0.f);
-				snprintf(buf, sizeof(buf), "%.4f", v);
+				formatValue(buf, sizeof(buf), v, false);
 				entries->values[c]->setString(buf);
 			}
 		}
@@ -1001,15 +1115,9 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 	const int base = infoBaseCols();
 	if (index == 0)
 	{
-		const char* header[] = { "id", "class", "conf", "u1", "v1", "u2", "v2", "mask_fill" };
-		for (int c = 0; c < base && c < nEntries; c++)
-			entries->values[c]->setString(header[c]);
-		for (int c = base; c < nEntries; c++)
-		{
-			const char* suffix[] = { "u", "v", "c" };
-			snprintf(buf, sizeof(buf), "kp%d_%s", (c - base) / 3, suffix[(c - base) % 3]);
-			entries->values[c]->setString(buf);
-		}
+		headerRow(nEntries);
+		for (int c = 0; c < nEntries; c++)
+			entries->values[c]->setString(myHeader[(size_t)c].c_str());
 		return;
 	}
 	// TD asks for rows based on an earlier getInfoDATSize(); never trust the index blindly.
@@ -1024,11 +1132,31 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 	for (int c = 0; c < nEntries; c++)
 	{
 		float v = c < base ? vals[c] : (c - base < (int)d.keypoints.size() ? d.keypoints[c - base] : 0.f);
-		if (c < 2)
-			snprintf(buf, sizeof(buf), "%d", (int)v);
-		else
-			snprintf(buf, sizeof(buf), "%.4f", v);
+		formatValue(buf, sizeof(buf), v, c < 2);
 		entries->values[c]->setString(buf);
+	}
+}
+
+void OnnxTOP::headerRow(int cols)
+{
+	const int base = infoBaseCols();
+	const std::string key = std::to_string(base) + "/" + std::to_string(cols);
+	if (key == myHeaderKey)
+		return;
+	myHeaderKey = key;
+	myHeader.assign((size_t)std::max(cols, 0), std::string());
+	const char* header[] = { "id", "class", "conf", "u1", "v1", "u2", "v2", "mask_fill" };
+	const char* suffix[] = { "u", "v", "c" };
+	char buf[64];
+	for (int c = 0; c < cols; c++)
+	{
+		if (c < base)
+			myHeader[(size_t)c] = header[c];
+		else
+		{
+			snprintf(buf, sizeof(buf), "kp%d_%s", (c - base) / 3, suffix[(c - base) % 3]);
+			myHeader[(size_t)c] = buf;
+		}
 	}
 }
 
@@ -1106,6 +1234,16 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.label = "Active";
 		np.page = "ONNX";
 		np.defaultValues[0] = 1.0;
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Waitforresult");
+		np.label = "Wait for Result";
+		np.page = "ONNX";
+		np.defaultValues[0] = 1.0;
+		np.help = "On: the cook waits for this frame's inference, so detections match the image exactly. Off: "
+			"the cook queues the inference and returns; results arrive a cook later (info channel result_delay), "
+			"freeing TouchDesigner's main thread for the inference time. Raw output never waits either way.";
 		check(manager->appendToggle(np));
 	}
 	{
