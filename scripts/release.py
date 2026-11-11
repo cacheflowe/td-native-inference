@@ -27,7 +27,7 @@ BINARY_FILES = {
 VERSIONED_PLUGINS = {'plugins/OnnxTOP.dll', 'plugins/MediaPipeTOP.dll', 'plugins/MediaPipeCHOP.dll'}
 MODEL_SUFFIXES = ('.onnx', '.task', '.tflite', '.litertlm')
 # Licenses that don't allow bundling in this Apache-2.0 package (fetch_models.ps1 gets them).
-BLOCKED_MODELS = ('yolo',)
+BLOCKED_MODELS = ('yolo', 'rvm')
 
 
 def fail(message):

@@ -8,6 +8,7 @@
 		"docs/MODELS.md",
 		"tox/DepthAnything.tox",
 		"tox/MODNet.tox",
+		"tox/RVM.tox",
 		"tox/HSEmotion.tox",
 		"tox/MediaPipeFace.tox",
 		"tox/MediaPipeFaceDetector.tox",

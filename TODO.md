@@ -53,12 +53,15 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
     re-run `plugins\onnxtop_tool.exe "C:\Program Files\Derivative\TouchDesigner\bin"
     models\onnx\birefnet\birefnet_lite.onnx tensorrt 60` and check its input/output names and
     whether TensorRT accepts the graph. Likely a stills / quality option rather than real time.
-- [ ] RVM (Robust Video Matting, PeterL1n/RobustVideoMatting, GPL-3.0: fetch only, never bundle).
-      Fast (mobilenetv3: authors report HD 104 fps on a GTX 1080 Ti) and temporally stable, but its
-      ONNX export has recurrent state: inputs `src`, `r1i`..`r4i`, `downsample_ratio`, outputs
-      `fgr`, `pha`, `r1o`..`r4o`. OnnxTOP accepts exactly one image input today, so this needs a
-      new mode: feed each `r*o` back into `r*i` next run (device-to-device copy, zeros at start),
-      `downsample_ratio` a scalar input (e.g. 0.25 for HD).
+- [x] **RVM (Nov 11).** `OnnxEngine` pairs `<x>i`/`<x>o` as recurrent state (zero start, output rebound
+      as the next input, no readback), a lone `[1]` float input is the new **Scalar Input**
+      (`downsample_ratio`), plus a **Reset State** pulse. `wrappers/RVM.json` (CUDA provider: the state
+      changes shape after frame 1, which TensorRT would rebuild for; Raw index 1 = `pha`),
+      `fetch_models.ps1` entry behind a GPL prompt (never bundled). Bench: 3.5 ms p50 at 1024x576. On
+      the fast les-twins clip it flickers about 2.4x less than MODNet (pixels flipping and flipping
+      back: 1.2% vs 2.7%; second difference 0.104 vs 0.171); equal on the calm dancer clip. Edges are
+      softer than MODNet's (downsample 0.25). Open: try fp16 / TensorRT with a fixed-size state
+      export, `rvm_resnet50`, and use `fgr` (foreground colour) as a second output.
 - [ ] Puppets: a generated `MixamoPuppet` tox (see the puppet section for the plan).
 - [ ] A short user manual: what each tox does, how to wire it, its main parameters and outputs,
       and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).

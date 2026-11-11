@@ -1,0 +1,21 @@
+{
+	"name": "RVM",
+	"label": "Robust Video Matting",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/rvm/rvm_mobilenetv3_fp32.onnx",
+		"Provider": "cuda",
+		"Mode": "raw",
+		"Inputnorm": "unit",
+		"Rawoutput": 1,
+		"Rawnormalize": "none",
+		"Dynamicsize1": 1024,
+		"Dynamicsize2": 576
+	},
+	"model": [
+		"Dynamicsize",
+		"Scalarinput",
+		"Resetstate"
+	]
+}

@@ -172,6 +172,14 @@ Alpha matte of the person in frame (white = person), hair detail included. TOP 1
 the input's resolution; use it as a mask over the input. **Dynamic Size** sets the inference
 resolution (multiple of 32; 512 x 288 for 16:9 is about 2 ms with TensorRT). GPU. MODNet, Apache-2.0.
 
+### Robust Video Matting (`RVM.tox`)
+Alpha matte of the person in frame, built to stay steady from frame to frame: the model carries
+state from one frame to the next, so it holds up under motion blur and movement better than a
+per-frame matte such as MODNet. TOP 1 is the matte at the input's resolution. **Dynamic Size** sets
+the inference resolution (multiple of 32); **Scalar Input** is RVM's downsample ratio (0.25 for HD,
+0.5 for SD); **Reset State** forgets the previous frames, e.g. after a cut. GPU (CUDA). RVM is
+**GPL-3.0**, so it isn't in the zip: run `fetch_models.cmd`.
+
 ### HSEmotion Face Emotion (`HSEmotion.tox`)
 Finds faces with a built-in YuNet and adds emotion scores to each face track: `emotion_label`
 plus one `emotion_<name>` score for anger, disgust, fear, happiness, neutral, sadness and

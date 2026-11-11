@@ -1,15 +1,18 @@
 # Downloads the models that aren't in the release zip into the installed models\ folder:
 #
 #   YOLO26 (Yolo26Detect / Yolo26Seg / Yolo26Pose)  AGPL-3.0, so not bundled; asks first. ~90 MB.
+#   Robust Video Matting (RVM)                      GPL-3.0, so not bundled; asks first. ~15 MB.
 #   Kokoro-82M (MediaPipeTextToSpeech)              Apache-2.0; left out of the zip for size. ~280 MB.
 #
 # Every file is pinned to a Hugging Face revision and checked by SHA-256: the same files the toxes
 # were tested with. Files already present are skipped. No Python needed.
 #
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-SkipYolo] [-SkipKokoro]
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-SkipYolo] [-SkipRvm] [-SkipKokoro]
 param(
 	[switch] $AcceptAgpl,
+	[switch] $AcceptGpl,
 	[switch] $SkipYolo,
+	[switch] $SkipRvm,
 	[switch] $SkipKokoro
 )
 $ErrorActionPreference = 'Stop'
@@ -34,6 +37,11 @@ $yolo = @(
 	@{ path = 'onnx\yolo26\yolo26n-pose.onnx'; size = 12081961
 	   url = 'https://huggingface.co/onnx-community/yolo26n-pose-ONNX/resolve/8a9197eeec75fdb4953322a455126ca6d9780b41/onnx/model.onnx'
 	   sha256 = '6ca5dc9681e0305708085715427f50779c761d5abfddaa0c38ac7c2d89b56085' }
+)
+$rvm = @(
+	@{ path = 'onnxvmvm_mobilenetv3_fp32.onnx'; size = 14975696
+	   url = 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx'
+	   sha256 = '88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828' }
 )
 $kokoro = @(
 	@{ path = 'tts\kokoro_int8_fp16.litertlm'; size = 294783298
@@ -68,8 +76,9 @@ function Save-Models($files) {
 }
 
 $missingYolo = if ($SkipYolo) { @() } else { Get-Missing $yolo }
+$missingRvm = if ($SkipRvm) { @() } else { Get-Missing $rvm }
 $missingKokoro = if ($SkipKokoro) { @() } else { Get-Missing $kokoro }
-if ($missingYolo.Count -eq 0 -and $missingKokoro.Count -eq 0) {
+if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0) {
 	Write-Host "[fetch_models] All models are present in $models"
 	exit 0
 }
@@ -82,6 +91,15 @@ unless you hold an Ultralytics Enterprise license.
 "@
 	$accepted = $AcceptAgpl -or ((Read-Host 'Download the YOLO26 models under these terms? [y/N]') -match '^[yY]')
 	if ($accepted) { Save-Models $missingYolo } else { Write-Host '[fetch_models] Skipped YOLO26.' }
+}
+if ($missingRvm.Count -gt 0) {
+	Write-Host @"
+Robust Video Matting (PeterL1n/RobustVideoMatting) is licensed under GPL-3.0:
+https://github.com/PeterL1n/RobustVideoMatting/blob/master/LICENSE
+Distributing it, or a project that ships it, carries GPL-3.0 obligations.
+"@
+	$accepted = $AcceptGpl -or ((Read-Host 'Download the RVM model under these terms? [y/N]') -match '^[yY]')
+	if ($accepted) { Save-Models $missingRvm } else { Write-Host '[fetch_models] Skipped RVM.' }
 }
 if ($missingKokoro.Count -gt 0) {
 	Write-Host '[fetch_models] Kokoro-82M text to speech (Apache-2.0).'

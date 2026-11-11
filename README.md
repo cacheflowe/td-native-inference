@@ -27,16 +27,17 @@ image, tables with stable track ids, and CHOP channels. More detail on each:
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
    `OnnxTOP.dll`, `MediaPipeTOP.dll` and `MediaPipeCHOP.dll`.
-3. **Optional, for YOLO26 and text to speech:** in the installed folder, double-click
+3. **Optional, for YOLO26, Robust Video Matting and text to speech:** in the installed folder, double-click
    `fetch_models.cmd`. It downloads, checksum-verified, into the folder's `models\`:
    - **YOLO26** (about 90 MB). It's AGPL-3.0, so it isn't in the zip, and the script asks first.
+   - **Robust Video Matting** (about 15 MB). It's GPL-3.0, so it isn't in the zip, and the script asks first.
    - **The Kokoro voice** for text to speech (about 280 MB).
 
 Keep the `tox` folder wherever you like, for example next to your projects.
 
 **Updating:**
 - Replace the installed `td-native-inference` folder with the new one, then restart TouchDesigner.
-- Keep the old folder's `models\tts\` and `models\onnx\yolo26\`, or run `fetch_models.cmd` again.
+- Keep the old folder's `models\tts\`, `models\onnx\yolo26\` and `models\onnx\rvm\`, or run `fetch_models.cmd` again.
 - Replace the `.tox` files in your projects too: each tox expects the plugins of its own version (its **About** page shows which).
 
 Install the plugins in **one** place per machine. That's either `Documents\Derivative\Plugins\`, or a `Plugins` folder next to a show's `.toe` (handy for a portable show machine), but not both: TouchDesigner would load two copies of the same operators.
@@ -58,6 +59,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/YuNet.jpg" width="200"> | **YuNet Face Detection** | Very fast face boxes with eye, nose and mouth points, plus which way each head is turned. |
 | <img src="docs/images/models/DepthAnything.jpg" width="200"> | **Depth Anything V2** | Estimates how far away everything in the frame is, from a single camera (near is bright). |
 | <img src="docs/images/models/MODNet.jpg" width="200"> | **MODNet Portrait Matting** | Cuts a person out of the frame as an alpha matte, hair detail included. |
+| <img src="docs/images/models/RVM.jpg" width="200"> | **Robust Video Matting** | Cuts a person out of live video as an alpha matte, steadier than a per-frame matte when the subject moves fast. Downloaded by `fetch_models.cmd` (GPL-3.0). |
 | <img src="docs/images/models/HSEmotion.jpg" width="200"> | **HSEmotion** | Finds faces and scores each one for 7 emotions (happiness, surprise, anger, ...). |
 
 ### Audio

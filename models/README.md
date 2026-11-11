@@ -4,7 +4,7 @@ Model files aren't committed (they're large, and some licenses don't allow redis
 Put them here with this layout. The wrappers refer to them as `models/...`; the plugins look for
 that path under the project folder first, then under the folder holding the plugin DLL (an
 installed `Documents/Derivative/Plugins/td-native-inference/models/`). The release zip bundles
-every model below except YOLO26 and Kokoro, which `scripts/fetch_models.ps1` downloads.
+every model below except YOLO26, RVM and Kokoro, which `scripts/fetch_models.ps1` downloads.
 
 ```
 models/
@@ -51,6 +51,7 @@ Larger speech-to-text bundles (Parakeet TDT, Qwen3-ASR) are in litert-community 
 | `onnx/hsemotion/emotion.onnx` | Classify Crops | HSEmotion `enet_b2_7.onnx` (byte-identical), [EmotiEffLib](https://github.com/sb-ai-lab/EmotiEffLib) (formerly HSE-asavchenko/face-emotion-recognition), `models/affectnet_emotions/onnx/` | Apache-2.0 |
 | `onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx` | Raw | [Depth-Anything-ONNX](https://github.com/fabio-sim/Depth-Anything-ONNX) ([Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) Small) | Apache-2.0 (Small only; Base/Large are CC-BY-NC) |
 | `onnx/modnet/modnet.onnx` | Raw | [MODNet](https://github.com/ZHKKKe/MODNet) portrait matting, ONNX export from [Xenova/modnet](https://huggingface.co/Xenova/modnet) on Hugging Face (fp32, 25 MB). Input normalized to -1..1 (Input Normalize = -1 to 1), dynamic H/W in multiples of 32, output alpha 0-1 | Apache-2.0 |
+| `onnx/rvm/rvm_mobilenetv3_fp32.onnx` | Raw (recurrent) | [Robust Video Matting](https://github.com/PeterL1n/RobustVideoMatting) MobileNetV3, fp32 ONNX from the v1.0.0 release, SHA-256 `88d45312...`. Inputs `src`, `r1i`..`r4i` (state), `downsample_ratio`; outputs `fgr`, `pha`, `r1o`..`r4o`. Not bundled: `fetch_models.ps1` | GPL-3.0 |
 
 Per-model settings (normalization, channel order, input size, thresholds) are in
 [cpp/OnnxTOP/README.md](../cpp/OnnxTOP/README.md).
