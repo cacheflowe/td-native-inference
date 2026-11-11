@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.2.5 (2026-11-10)
+
 - ONNX models (YOLO, MoveNet, YuNet, HSEmotion): **Wait for Result** on the Model page. On (the
   default, as before): detections match the image exactly. Off: TouchDesigner's cook no longer
   waits for the inference; results arrive a frame later (`result_delay` info channel). Depth
