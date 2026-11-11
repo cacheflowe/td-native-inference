@@ -82,4 +82,8 @@ if DEMO:
 		wrapper_builder.export_demo(audio_demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
 	report['AudioDemo'] = entry
+if WRAPPERS:
+	# With the lab's Cooking flag off, wrappers just rebuilt (and force-cooked) inside it can keep
+	# cooking every frame anyway; switching the flag on and off again stops them.
+	wrapper_builder.refresh_cooking(op(LAB))
 print(json.dumps(report, indent=1))

@@ -37,7 +37,10 @@ def _wrappers():
 def start():
 	REPORT.unlink(missing_ok=True)
 	state = {'queue': _wrappers(), 'results': {}, 'frames': 0,
-		'original': op(LAB).op('source').par.file.eval()}
+		'original': op(LAB).op('source').par.file.eval(), 'cooking': op(LAB).allowCooking}
+	# The wrappers must cook to be tested (their forced output cooks don't reach a plugin inside
+	# a COMP with cooking off); _finish restores the flag.
+	op(LAB).allowCooking = True
 	op(LAB).store('lab_test', state)
 	_begin_next()
 
@@ -243,6 +246,9 @@ def _finish():
 	op(LAB).unstore('lab_test')
 	REPORT.parent.mkdir(parents=True, exist_ok=True)
 	REPORT.write_text(json.dumps(state['results'], indent=1, default=str), encoding='utf-8')
+	# Back to the lab's own Cooking flag. A real on -> off switch also stops nodes that would
+	# otherwise go on cooking every frame inside a COMP with cooking off.
+	op(LAB).allowCooking = state.get('cooking', True)
 
 
 start()

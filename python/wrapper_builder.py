@@ -134,6 +134,17 @@ def version():
 	return path.read_text(encoding='utf-8').strip() if path.exists() else '0.0.0'
 
 
+def refresh_cooking(comp, frames=5):
+	"""Re-apply a COMP's Cooking-off flag: on now, off again a few frames later. Nodes rebuilt or
+	force-cooked inside a COMP with cooking off can go on cooking every frame regardless (seen in
+	the wrapper lab: whole wrappers cooking, ~350 ms/s); a fresh off-switch stops them. Does
+	nothing while cooking is on."""
+	if comp is None or comp.allowCooking:
+		return
+	comp.allowCooking = True
+	td.run('args[0].allowCooking = False', comp, delayFrames=frames)
+
+
 def _connect(destination, *sources):
 	for index, source in enumerate(sources):
 		destination.inputConnectors[index].connect(source.outputConnectors[0])
