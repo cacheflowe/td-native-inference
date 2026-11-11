@@ -44,6 +44,9 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
     Next: a `wrappers/MODNet.json` like DepthAnything's (Raw mode, Dynamic Size, Raw Map To Input
     on, no Raw Normalize since the output is already 0-1), `models/README.md` + `fetch_models.ps1`
     entry (redistributable: can be bundled), then the lab test and a thumbnail.
+    Live check (Nov 11): the matte is very good, but MODNet is sensitive to motion blur and moving
+    subjects (per-frame, no temporal state). RVM's recurrent state is the fix; a cheap stopgap is
+    temporal smoothing of the matte.
   - BiRefNet lite, `models/onnx/birefnet/birefnet_lite.onnx`, from onnx-community/BiRefNet_lite-ONNX
     (MIT, 224 MB fp32 / 115 MB fp16; the full BiRefNet is 973 MB). Higher quality, much heavier
     (1024x1024). The benchmark was interrupted during its first TensorRT build (several minutes):

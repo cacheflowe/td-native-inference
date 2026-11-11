@@ -35,7 +35,8 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   (keeping position and wires) and exports a self-contained tox: Python is embedded, file syncs and
   shared-tox links are stripped from the saved copy only. Wrappers use the registered custom OPs,
   so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`. Set
-  `DEMO = True` in the script to regenerate both demos and `tox/VisionDemo.tox` / `tox/AudioDemo.tox`.
+  `DEMO = True` in the script to regenerate both demos and `tox/VisionDemo.tox` / `tox/AudioDemo.tox`. **Whenever a model is added
+  (or a spec changes), regenerate the demos too** and commit the demo toxes with the wrapper.
 - **Node icons:** `python scripts/build_icons.py` (outside TD; headless Chrome/Edge) renders each
   tox's card to `docs/images/icons/<Name>.png` (td-http-api's app-icon layout; logo in
   `docs/images/icons/logo.svg`). The builder loads it into a locked `icon` TOP as the COMP's
