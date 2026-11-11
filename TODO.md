@@ -47,6 +47,7 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
     Live check (Nov 11): the matte is very good, but MODNet is sensitive to motion blur and moving
     subjects (per-frame, no temporal state). RVM's recurrent state is the fix; a cheap stopgap is
     temporal smoothing of the matte.
+  - **BiRefNet: dropped (Nov 11)** as too slow (92 ms) with an enormous TensorRT engine (304 MB, 22 min build); engine deleted, not wrapped. Notes kept for reference:
   - BiRefNet lite, `models/onnx/birefnet/birefnet_lite.onnx`, from onnx-community/BiRefNet_lite-ONNX
     (MIT, 224 MB fp32 / 115 MB fp16; the full BiRefNet is 973 MB). Higher quality, much heavier
     (1024x1024). **Benchmarked Nov 11** (RTX 4090 laptop, TensorRT fp16): input `input_image`
@@ -68,6 +69,8 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       In TOP + tracks DAT in, FBX File par imports and binds the character at runtime (the tox carries none:
       Mixamo license), outputs character render / over image / bone CHOP. Checked: exported tox dropped in
       fresh, FBX set -> 65 bones bound, same placement as the lab. Open: hand-rig variant, joint limits.
+- [x] `HandsGeometry` tox (Nov 11): the lab's POP hand geometry (spheres + cylinders from a hands joints DAT) with a
+      render rig, `scripts/build_hands_tox.py`; checked as a fresh drop-in on the hand clip. POP-capable TD only.
 - [x] A short user manual (Nov 11, `docs/MANUAL.md`, with a Puppets section): what each tox does, how to wire it, its main parameters and outputs,
       and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).
 - [ ] RTMPose for puppets: plain RTMPose / RTMW is 2D only, which the Mixamo solver can't use. The

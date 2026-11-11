@@ -187,6 +187,7 @@ the parameters on the model tox instead.
 | `HSEmotion` | video | Finds faces and scores 7 emotions each | tracks with `emotion_label`, `emotion_<name>` |
 | `DepthAnything` | video | Relative depth of the whole frame (near is bright) | TOP 1 depth |
 | `MODNet` | video | Person alpha matte, hair detail included | TOP 1 matte |
+| `HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |
 | `MixamoPuppet` | video + tracks | Poses a Mixamo character from Holistic / Pose tracking (see Puppets) | TOP 1 character, TOP 2 over the input, CHOP rotations |
 | `RVM` | video | Person alpha matte that stays steady across frames (recurrent); **Reset State** after a cut | TOP 1 matte |
 | `MediaPipeSpeechToText` | audio CHOP | Speech to text with closed captions | TOP 1 captions; CHOP `speaking`, `new_segment`; DATs `transcript`, `latest` |
@@ -279,6 +280,16 @@ columns. Choosing between similar ones:
   To choose a device, turn it off and wire CHOP 1 into your own Audio Device Out.
 - **A tox from an older release misbehaves:** replace the tox files in your project along with
   the plugin folder; each tox expects the plugins of its own version (see its **About** page).
+
+## Hands Geometry
+
+`HandsGeometry.tox` turns a MediaPipe Hands tox's `out_joints` DAT into 3D hands: a sphere per
+joint and a cylinder per finger bone, colored from the joint table. Wire `out_joints` into its input.
+Outputs: a transparent render (TOP) and the geometry itself as a POP (`out_hands`) for your own
+scene. **Aspect Ratio** should be the source image's width / height; **Depth Scale** exaggerates the
+(relative, not metric) depth; **Joint Radius** and **Bone Radius** set the thickness; **Camera
+Distance**, **Field of View** and **Resolution** control the built-in render. It needs a
+TouchDesigner with POPs (2025 and later). Separate hands never connect to each other.
 
 ## Puppets
 

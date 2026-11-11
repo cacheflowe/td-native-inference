@@ -41,6 +41,7 @@ DEMOS = {
 	'VisionDemo': ('Vision Demo', 'All video models'),
 	'AudioDemo': ('Audio Demo', 'All audio models'),
 	'MixamoPuppet': ('Mixamo Puppet', 'Pose tracking'),
+	'HandsGeometry': ('Hands Geometry', 'MediaPipe Hands'),
 }
 BROWSERS = [
 	Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe'),

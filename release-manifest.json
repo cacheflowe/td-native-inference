@@ -11,6 +11,7 @@
 		"tox/MODNet.tox",
 		"tox/RVM.tox",
 		"tox/MixamoPuppet.tox",
+		"tox/HandsGeometry.tox",
 		"tox/HSEmotion.tox",
 		"tox/MediaPipeFace.tox",
 		"tox/MediaPipeFaceDetector.tox",

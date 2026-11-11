@@ -62,6 +62,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/MODNet.jpg" width="200"> | **MODNet Portrait Matting** | Cuts a person out of the frame as an alpha matte, hair detail included. |
 | <img src="docs/images/models/RVM.jpg" width="200"> | **Robust Video Matting** | Cuts a person out of live video as an alpha matte, steadier than a per-frame matte when the subject moves fast. Downloaded by `fetch_models.cmd` (GPL-3.0). |
 |  | **Mixamo Puppet** | Poses a Mixamo character from Holistic or Pose tracking and draws it over the video or on its own. You supply the character (FBX); see the [manual](docs/MANUAL.md#puppets). |
+|  | **Hands Geometry** | Draws tracked hands as 3D spheres and cylinders (a POP plus a render). Needs TouchDesigner 2025 or later. |
 | <img src="docs/images/models/HSEmotion.jpg" width="200"> | **HSEmotion** | Finds faces and scores each one for 7 emotions (happiness, surprise, anger, ...). |
 
 ### Audio
