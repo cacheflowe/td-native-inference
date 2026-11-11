@@ -42,3 +42,7 @@ media/
 __pycache__/
 .venv/
 tmp/
+
+# RTMPose / mmdeploy download metadata next to the (already ignored) models
+models/onnx/rtmpose/
+models/onnx/rtmw3d/
