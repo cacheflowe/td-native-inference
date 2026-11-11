@@ -167,6 +167,11 @@ Relative depth for the whole frame (near = bright). TOP 1 is the depth image at 
 resolution. **Dynamic Size** sets the inference resolution (multiple of 14); **Normalize** and
 **Range Smoothing** keep the brightness range steady between frames. GPU. Depth Anything V2 Small, Apache-2.0.
 
+### MODNet Portrait Matting (`MODNet.tox`)
+Alpha matte of the person in frame (white = person), hair detail included. TOP 1 is the matte at
+the input's resolution; use it as a mask over the input. **Dynamic Size** sets the inference
+resolution (multiple of 32; 512 x 288 for 16:9 is about 2 ms with TensorRT). GPU. MODNet, Apache-2.0.
+
 ### HSEmotion Face Emotion (`HSEmotion.tox`)
 Finds faces with a built-in YuNet and adds emotion scores to each face track: `emotion_label`
 plus one `emotion_<name>` score for anger, disgust, fear, happiness, neutral, sadness and

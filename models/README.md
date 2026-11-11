@@ -50,6 +50,7 @@ Larger speech-to-text bundles (Parakeet TDT, Qwen3-ASR) are in litert-community 
 | `onnx/movenet/movenet-multipose-lightning.onnx` | MoveNet Multipose | Google MoveNet multipose lightning, tf2onnx 1.16.1 conversion (original converter unrecorded). Not the `_fp16` variant: its scores are always 0 | Apache-2.0 |
 | `onnx/hsemotion/emotion.onnx` | Classify Crops | HSEmotion `enet_b2_7.onnx` (byte-identical), [EmotiEffLib](https://github.com/sb-ai-lab/EmotiEffLib) (formerly HSE-asavchenko/face-emotion-recognition), `models/affectnet_emotions/onnx/` | Apache-2.0 |
 | `onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx` | Raw | [Depth-Anything-ONNX](https://github.com/fabio-sim/Depth-Anything-ONNX) ([Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) Small) | Apache-2.0 (Small only; Base/Large are CC-BY-NC) |
+| `onnx/modnet/modnet.onnx` | Raw | [MODNet](https://github.com/ZHKKKe/MODNet) portrait matting, ONNX export from [Xenova/modnet](https://huggingface.co/Xenova/modnet) on Hugging Face (fp32, 25 MB). Input normalized to -1..1 (Input Normalize = -1 to 1), dynamic H/W in multiples of 32, output alpha 0-1 | Apache-2.0 |
 
 Per-model settings (normalization, channel order, input size, thresholds) are in
 [cpp/OnnxTOP/README.md](../cpp/OnnxTOP/README.md).

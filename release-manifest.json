@@ -7,6 +7,7 @@
 		"CHANGELOG.md",
 		"docs/MODELS.md",
 		"tox/DepthAnything.tox",
+		"tox/MODNet.tox",
 		"tox/HSEmotion.tox",
 		"tox/MediaPipeFace.tox",
 		"tox/MediaPipeFaceDetector.tox",
@@ -46,6 +47,7 @@
 		"models/onnx/yunet/face_detection_yunet_2023mar.onnx": "td-native-inference/models/onnx/yunet/face_detection_yunet_2023mar.onnx",
 		"models/onnx/movenet/movenet-multipose-lightning.onnx": "td-native-inference/models/onnx/movenet/movenet-multipose-lightning.onnx",
 		"models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx": "td-native-inference/models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx",
-		"models/onnx/hsemotion/emotion.onnx": "td-native-inference/models/onnx/hsemotion/emotion.onnx"
+		"models/onnx/hsemotion/emotion.onnx": "td-native-inference/models/onnx/hsemotion/emotion.onnx",
+		"models/onnx/modnet/modnet.onnx": "td-native-inference/models/onnx/modnet/modnet.onnx"
 	}
 }

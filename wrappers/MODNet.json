@@ -1,0 +1,17 @@
+{
+	"name": "MODNet",
+	"label": "MODNet Portrait Matting",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/modnet/modnet.onnx",
+		"Mode": "raw",
+		"Inputnorm": "signed",
+		"Rawnormalize": "none",
+		"Dynamicsize1": 512,
+		"Dynamicsize2": 288
+	},
+	"model": [
+		"Dynamicsize"
+	]
+}

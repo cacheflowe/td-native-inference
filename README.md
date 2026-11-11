@@ -57,6 +57,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/MoveNet.jpg" width="200"> | **MoveNet MultiPose** | Fast 17-point skeletons for up to 6 people, on the GPU. |
 | <img src="docs/images/models/YuNet.jpg" width="200"> | **YuNet Face Detection** | Very fast face boxes with eye, nose and mouth points, plus which way each head is turned. |
 | <img src="docs/images/models/DepthAnything.jpg" width="200"> | **Depth Anything V2** | Estimates how far away everything in the frame is, from a single camera (near is bright). |
+| <img src="docs/images/models/MODNet.jpg" width="200"> | **MODNet Portrait Matting** | Cuts a person out of the frame as an alpha matte, hair detail included. |
 | <img src="docs/images/models/HSEmotion.jpg" width="200"> | **HSEmotion** | Finds faces and scores each one for 7 emotions (happiness, surprise, anger, ...). |
 
 ### Audio
