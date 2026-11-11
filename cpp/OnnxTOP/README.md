@@ -68,6 +68,8 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | Execution Provider | **Auto** (default): CUDA now, TensorRT once its engine is built. **TensorRT**: wait for the build. **CUDA**: never build. TensorRT falls back to CUDA if session creation fails. Saved nodes keep their value |
 | ONNX | TensorRT FP16 | Part of the engine cache key |
 | ONNX | Reload Model | Retries after a failure, or reloads in place |
+| ONNX | Scalar Input | Value for a model's extra single-number float input, e.g. RVM's `downsample_ratio` (the model works on the frame scaled by this: 0.25 for HD, 0.5 for SD). Only enabled when the model has one; changing it reloads the model |
+| ONNX | Reset State | Recurrent models: forget the previous frames (after a cut). Only enabled when the model has state |
 | ONNX | Active | Off = skip inference, clear the output |
 | ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
 | ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, or **Raw Output Tensor**. A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
@@ -144,6 +146,19 @@ from the full-resolution input.
 to match 16:9 input with almost no letterbox). The output is relative inverse depth (near =
 bright), min/max normalized. On an RTX 4090 Laptop GPU, ViT-S at 518² takes about 5 ms per frame
 with TensorRT FP16 (engine build ~3 min) and about 25 ms on CUDA.
+
+#### Recurrent models (Robust Video Matting)
+
+`models/onnx/rvm/rvm_mobilenetv3_fp32.onnx`: Output Mode **Raw**, Execution Provider **CUDA** (the
+state's shape changes after the first frame, which TensorRT would rebuild an engine for), Input
+Normalize **0 to 1**, Raw Output Index **1** (`pha`, the alpha; 0 is `fgr`, the foreground), Raw
+Normalize **None**, Dynamic Size a multiple of 32, **Scalar Input** = `downsample_ratio`.
+
+An input named `<x>i` paired with an output named `<x>o` (RVM's `r1i`..`r4i` / `r1o`..`r4o`) is
+recurrent state: it starts as a 1×1×1×1 zero tensor and each run's output becomes the next run's
+input, on the GPU, with no readback. **Reset State** returns it to zero. State advances once per run,
+so a still input converges rather than flickers. A lone `[1]` float input gets Scalar Input. Neither
+appears in the Info DAT's input list, which names the image input only.
 
 ### Outputs
 

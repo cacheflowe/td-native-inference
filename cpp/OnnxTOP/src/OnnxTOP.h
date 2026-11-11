@@ -79,6 +79,7 @@ private:
 	std::string					myLoadStatus;	// shown as warning while Loading
 	std::string					myLoadWarning;	// shown as warning once Ready
 	std::atomic<bool>			myCancelLoad{ false };
+	std::atomic<bool>			myResetState{ false };	// Reset State pulse: consumed by the next cook
 	std::atomic<bool>			myUpgrading{ false };	// Auto: running on CUDA, TensorRT building
 	std::string					myStaticModelPath;		// last model probed as fixed-size (Dynamic Size ignored)
 	EngineConfig				myRequestedConfig;

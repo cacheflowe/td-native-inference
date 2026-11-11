@@ -151,6 +151,16 @@ void OnnxEngine::release()
 	myBinding.reset();
 	myInputValues.clear();
 	myOutputValues.clear();
+	for (auto& st : myStates)
+	{
+		st.zero = Ort::Value(nullptr);
+		if (st.zeroDevice)
+			cudaFree(st.zeroDevice);
+	}
+	myStates.clear();
+	if (myScalarDevice)
+		cudaFree(myScalarDevice);
+	myScalarDevice = nullptr;
 	mySession.reset();
 	for (auto* list : { &myInputs, &myOutputs })
 	{
@@ -298,10 +308,61 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 		myBinding = std::make_unique<Ort::IoBinding>(*mySession);
 		Ort::AllocatorWithDefaultOptions cpuAlloc;
 
+		std::vector<std::string> outputNames;
+		for (size_t i = 0; i < mySession->GetOutputCount(); i++)
+			outputNames.push_back(mySession->GetOutputNameAllocated(i, cpuAlloc).get());
+		auto outputIndexOf = [&](const std::string& n) -> int {
+			auto it = std::find(outputNames.begin(), outputNames.end(), n);
+			return it == outputNames.end() ? -1 : (int)(it - outputNames.begin());
+		};
+		std::vector<bool> isStateOutput(outputNames.size(), false);
+
 		for (size_t i = 0; i < mySession->GetInputCount(); i++)
 		{
 			TensorSlot slot;
 			slot.name = mySession->GetInputNameAllocated(i, cpuAlloc).get();
+			if (i > 0)
+			{
+				Ort::TypeInfo extraType = mySession->GetInputTypeInfo(i);
+				auto extra = extraType.GetTensorTypeAndShapeInfo();
+				const auto type = extra.GetElementType();
+				const int stateOut = slot.name.size() > 1 && slot.name.back() == 'i' ?
+					outputIndexOf(slot.name.substr(0, slot.name.size() - 1) + "o") : -1;
+				if (stateOut >= 0 && ortTypeSize(type) > 0)
+				{
+					StateLink link;
+					link.inputName = slot.name;
+					link.outputIndex = (size_t)stateOut;
+					const int64_t zeroShape[4] = { 1, 1, 1, 1 };
+					const size_t bytes = ortTypeSize(type);
+					if (cudaMalloc(&link.zeroDevice, bytes) != cudaSuccess)
+					{
+						err = "cudaMalloc failed for state input '" + slot.name + "'";
+						return false;
+					}
+					cudaMemset(link.zeroDevice, 0, bytes);
+					link.zero = Ort::Value::CreateTensor(*myCudaMem, link.zeroDevice, bytes, zeroShape, 4, type);
+					myBinding->BindInput(slot.name.c_str(), link.zero);
+					isStateOutput[stateOut] = true;
+					myStates.push_back(std::move(link));
+					continue;
+				}
+				if (!myScalarDevice && type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT &&
+					extra.GetShape() == std::vector<int64_t>{ 1 })
+				{
+					const int64_t scalarShape[1] = { 1 };
+					if (cudaMalloc(&myScalarDevice, sizeof(float)) != cudaSuccess)
+					{
+						err = "cudaMalloc failed for input '" + slot.name + "'";
+						return false;
+					}
+					cudaMemcpy(myScalarDevice, &myConfig.scalarInput, sizeof(float), cudaMemcpyHostToDevice);
+					myInputValues.emplace_back(Ort::Value::CreateTensor(*myCudaMem, myScalarDevice, sizeof(float),
+						scalarShape, 1, type));
+					myBinding->BindInput(slot.name.c_str(), myInputValues.back());
+					continue;
+				}
+			}
 			// Keep the TypeInfo alive: GetTensorTypeAndShapeInfo() returns a non-owning view into it,
 			// so chaining it off the temporary reads freed memory (garbage names/types in TD).
 			Ort::TypeInfo typeInfo = mySession->GetInputTypeInfo(i);
@@ -354,7 +415,10 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 			slot.shape = info.GetShape();
 			if (!slot.shape.empty() && slot.shape[0] < 0)	// dynamic batch: same as the input
 				slot.shape[0] = cfg.batch > 0 ? cfg.batch : 1;
-			bool isStatic = std::all_of(slot.shape.begin(), slot.shape.end(), [](int64_t d) { return d > 0; });
+			// A state output is always ORT-allocated: run() hands it back as the next run's input,
+			// which must not alias a buffer ORT is writing.
+			bool isStatic = !isStateOutput[i] &&
+				std::all_of(slot.shape.begin(), slot.shape.end(), [](int64_t d) { return d > 0; });
 
 			if (isStatic && ortTypeSize(slot.type) > 0)
 			{
@@ -392,7 +456,16 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 		release();
 		return false;
 	}
+	resetState();	// the warm-up run advanced it
 	return true;
+}
+
+void OnnxEngine::resetState()
+{
+	if (!myBinding)
+		return;
+	for (auto& st : myStates)
+		myBinding->BindInput(st.inputName.c_str(), st.zero);
 }
 
 bool OnnxEngine::run(std::string& err, bool sync)
@@ -425,6 +498,11 @@ bool OnnxEngine::run(std::string& err, bool sync)
 			slot.type = info.GetElementType();
 			slot.device = values[i].GetTensorMutableRawData();
 		}
+		// Recurrent state: this run's output is the next run's input. The binding keeps its own
+		// reference, so the buffer lives until the next run replaces it.
+		for (const auto& st : myStates)
+			if (st.outputIndex < values.size())
+				myBinding->BindInput(st.inputName.c_str(), values[st.outputIndex]);
 		bool anyDynamic = std::any_of(myOutputs.begin(), myOutputs.end(), [](const TensorSlot& s) { return !s.owned; });
 		if (anyDynamic)
 		{

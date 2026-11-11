@@ -606,6 +606,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	segOpt.matteNms = (float)inputs->getParDouble("Mattenms");
 	segOpt.instances = inputs->getParInt("Matteencoding") == 1;
 	myWaitResult = inputs->getParInt("Waitforresult") != 0;
+	const float scalarInput = (float)inputs->getParDouble("Scalarinput");
 
 	inputs->enablePar("Fp16", provider != OrtProvider::CUDA);
 	inputs->enablePar("Cachefolder", provider != OrtProvider::CUDA);
@@ -624,6 +625,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		inputs->enablePar(p, mode == ModeRaw);
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
 	inputs->enablePar("Waitforresult", mode != ModeRaw);
+	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
+	inputs->enablePar("Resetstate", myEngine && myEngine->hasState());
 
 	EngineConfig desired;
 	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
@@ -635,6 +638,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	desired.inputW = std::max(0, dynW);
 	desired.inputH = std::max(0, dynH);
 	desired.batch = mode == ModeCrops ? batchSize : 0;
+	desired.scalarInput = scalarInput;
 	manageLoading(desired);
 	{
 		std::lock_guard<std::mutex> lock(myLoadMutex);
@@ -765,6 +769,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	if (myPending.active && (!async || myPending.engine != engine || myPending.mode != mode))
 		myPending.active = false;	// switched to waiting, or engine / mode changed: not wanted
 	readInferMs();
+	if (myResetState.exchange(false) && engine)
+		engine->resetState();
 	auto queueRun = [&](bool sync) -> bool
 	{
 		cudaEventRecord(myRunStart, myStream);
@@ -1235,6 +1241,25 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		check(manager->appendPulse(np));
 	}
 	{
+		OP_NumericParameter np("Scalarinput");
+		np.label = "Scalar Input";
+		np.page = "ONNX";
+		np.defaultValues[0] = 0.25;
+		np.minValues[0] = np.minSliders[0] = 0.0;
+		np.maxValues[0] = np.maxSliders[0] = 1.0;
+		np.clampMins[0] = true;
+		np.help = "Value for a model's extra single-number input (RVM's downsample_ratio: the model works on the frame "
+			"scaled by this, e.g. 0.25 for HD, 0.5 for SD). Changing it reloads the model.";
+		check(manager->appendFloat(np));
+	}
+	{
+		OP_NumericParameter np("Resetstate");
+		np.label = "Reset State";
+		np.page = "ONNX";
+		np.help = "For a recurrent model (RVM): forget the previous frames, e.g. after a cut.";
+		check(manager->appendPulse(np));
+	}
+	{
 		OP_NumericParameter np("Active");
 		np.label = "Active";
 		np.page = "ONNX";
@@ -1513,4 +1538,6 @@ void OnnxTOP::pulsePressed(const char* name, void*)
 {
 	if (!strcmp(name, "Reload"))
 		myForceReload = true;
+	else if (!strcmp(name, "Resetstate"))
+		myResetState = true;
 }

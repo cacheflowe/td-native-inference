@@ -36,12 +36,16 @@ struct EngineConfig
 	// (onnxtop_tool --graph): ORT then waits for the replay, so the launch costs the whole
 	// inference (docs/learnings/td-cook-performance.md).
 	bool			cudaGraph = false;
+	// Value for a model's extra single-number float input (RVM's downsample_ratio). Ignored by
+	// models without one.
+	float			scalarInput = 0.25f;
 
 	bool operator==(const EngineConfig& o) const
 	{
 		return modelPath == o.modelPath && provider == o.provider && fp16 == o.fp16 &&
 			cacheDir == o.cacheDir && deviceId == o.deviceId && stream == o.stream &&
-			inputW == o.inputW && inputH == o.inputH && batch == o.batch && cudaGraph == o.cudaGraph;
+			inputW == o.inputW && inputH == o.inputH && batch == o.batch && cudaGraph == o.cudaGraph &&
+			scalarInput == o.scalarInput;
 	}
 	bool operator!=(const EngineConfig& o) const { return !(*this == o); }
 };
@@ -76,6 +80,16 @@ public:
 	// (e.g. with an event) before reading them on the CPU.
 	bool run(std::string& err, bool sync = true);
 
+	// Recurrent models (RVM): an input named <x>i paired with an output <x>o is state. It starts as a
+	// 1x1x1x1 zero tensor and is fed this run's output on the next run, entirely on the GPU. Such
+	// inputs (and a lone [1] float input, the scalar) are not listed in inputs(), which holds the
+	// image input(s) only.
+	bool hasState() const { return !myStates.empty(); }
+	bool hasScalarInput() const { return myScalarDevice != nullptr; }
+	// Back to the zero state (a scene cut, or a fresh subject). Not while run() is in flight on
+	// another thread.
+	void resetState();
+
 	const std::vector<TensorSlot>&	inputs() const { return myInputs; }
 	const std::vector<TensorSlot>&	outputs() const { return myOutputs; }
 	const EngineConfig&				config() const { return myConfig; }
@@ -86,7 +100,17 @@ private:
 	Ort::SessionOptions	makeOptions(OrtProvider provider, std::string& desc);
 	void				release();
 
+	struct StateLink
+	{
+		std::string		inputName;
+		size_t			outputIndex = 0;
+		void*			zeroDevice = nullptr;
+		Ort::Value		zero{ nullptr };
+	};
+
 	EngineConfig					myConfig;
+	std::vector<StateLink>			myStates;
+	void*							myScalarDevice = nullptr;
 	std::string						myProviderDesc;
 	std::unique_ptr<Ort::Session>	mySession;
 	std::unique_ptr<Ort::IoBinding>	myBinding;
