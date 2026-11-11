@@ -1,19 +1,71 @@
 # TODO: td-native-inference
 
-## Status (Nov 7, 2026)
+## Status (Nov 11, 2026)
 
-v0.1.0 (13 video toxes + VisionDemo) published Nov 7. In main for v0.2: three audio toxes +
-AudioDemo. Everything is generated from `wrappers/*.json`; clean-process tests; Apache-2.0
-LICENSE and NOTICE; release tooling that bundles the redistributable models. The previous plan (Package Root,
-CPlusPlus TOP wrappers) is in git history before commit 7ddfb48.
+v0.2.5 published Nov 10: 13 video toxes + VisionDemo, three audio toxes + AudioDemo, the puppet
+lab (Mixamo body + rigged hand) in the dev project. Everything is generated from
+`wrappers/*.json`; clean-process tests; Apache-2.0 LICENSE and NOTICE; release tooling that
+bundles the redistributable models. The previous plan (Package Root, CPlusPlus TOP wrappers) is in
+git history before commit 7ddfb48. Performance lessons from v0.2.4/0.2.5:
+[docs/learnings/td-cook-performance.md](docs/learnings/td-cook-performance.md).
 
-## v0.1.0 release (published Nov 7)
+## Now (Nov 11 plan, in order) -- handoff state
 
-- [x] `fetch_models.ps1` downloads the three YOLO26 ONNX files from Hugging Face (byte-identical
-      to the files the wrappers were tested with; tested Nov 7). The seg file is from a personal
-      repo (zwh20081/yolo26-onnx): if it disappears, host it as a separate AGPL release download or
-      export with Ultralytics (the old Python export path is in git history).
-- [x] Packaged, clean-tested, verified and published.
+Work since v0.2.5 is **uncommitted** (both plugins' sources and READMEs, the bench tool, the lab
+test, `CLAUDE.md`, `TODO.md`, `docs/learnings/`, the `.toe`, the MODNet wrapper). TD was restarted
+Nov 11 on the new DLLs and the double-cook fix verified (below).
+
+- [x] Learnings write-up: [docs/learnings/td-cook-performance.md](docs/learnings/td-cook-performance.md)
+      (GPU readback stall, Wait for Result / result_delay, cookEveryFrame double cooks, CHOP sample
+      rate, cooking-flag leaks, Python-in-TD limits, CUDA graph result).
+- [x] Demo model toggles: verified fine as they are (on -> off, and a freshly rebuilt demo, leave
+      0 cooks in switched-off wrappers over 60 frames). No code change.
+- [x] **Holistic double cooks: fixed and verified Nov 11** (0.6 cooks/frame on the 30 fps dancer clip, was 1.4; full wrapper lab: all 16 detect). Cause: both plugins set
+      `cookEveryFrame` while a result was pending (almost always with async readback), which adds a
+      cook of its own besides the input-triggered one: 168 cooks in 120 frames at a steady 60 fps.
+      Fix in `MediaPipeTOP.cpp` / `OnnxTOP.cpp` `getGeneralInfo()`: `cookEveryFrameIfAsked` only
+      (MediaPipe keeps `cookEveryFrame` while loading). To verify after the restart: sample
+      `holistic/inference.totalCooks` per frame in `/project1/PuppetLab` (expect 1 per frame on the
+      dancer clip), then run the full wrapper lab test (still images: results must still land, so
+      every wrapper should still detect). Optionally re-run the Wait for Result off check on an ONNX
+      model with a still input.
+- [x] Wrapper lab thumbnails: `THUMBNAILS = False` by default in `tests/td_wrapper_lab.py`; set it
+      True when preparing a release (noted in CLAUDE.md).
+- [x] ONNX Runtime launch cost: measured with `onnxtop_tool --graph` (new flag; the bench now
+      prints launch and inference separately). TensorRT CUDA graphs make `Run()` wait for the
+      replay, so the launch costs the whole inference: not offered in the plugin. The ~2.5 ms YOLO
+      launch is ORT's own CPU cost. New info channel `run_ms` (launch CPU time) on OnnxTOP.
+- [ ] **Matting (MODNet done, BiRefNet / RVM open).** MODNet: `wrappers/MODNet.json`, `tox/MODNet.tox`, icon, lab test + thumbnail, README / MODELS.md / manifest entries (Nov 11); still to do: clean-process test and bundling check at release. Downloaded (gitignored) and benchmarked:
+  - MODNet, `models/onnx/modnet/modnet.onnx`, from Xenova/modnet on Hugging Face (Apache-2.0,
+    25 MB fp32; also `model_fp16.onnx` 13 MB). Input `input` [1, 3, H, W] float32 (dynamic H/W,
+    multiples of 32), output `output` [1, 1, H, W] alpha 0-1. MODNet normalizes the input to
+    -1..1 (OnnxTOP Input Normalization = Signed; check against the reference). TensorRT fp16 p50:
+    1.8 ms at 512x288, 4.6 ms at 1024x576; launch 1.1-1.4 ms. First TensorRT build ~2 min per size.
+    Next: a `wrappers/MODNet.json` like DepthAnything's (Raw mode, Dynamic Size, Raw Map To Input
+    on, no Raw Normalize since the output is already 0-1), `models/README.md` + `fetch_models.ps1`
+    entry (redistributable: can be bundled), then the lab test and a thumbnail.
+  - BiRefNet lite, `models/onnx/birefnet/birefnet_lite.onnx`, from onnx-community/BiRefNet_lite-ONNX
+    (MIT, 224 MB fp32 / 115 MB fp16; the full BiRefNet is 973 MB). Higher quality, much heavier
+    (1024x1024). The benchmark was interrupted during its first TensorRT build (several minutes):
+    re-run `plugins\onnxtop_tool.exe "C:\Program Files\Derivative\TouchDesigner\bin"
+    models\onnx\birefnet\birefnet_lite.onnx tensorrt 60` and check its input/output names and
+    whether TensorRT accepts the graph. Likely a stills / quality option rather than real time.
+- [ ] RVM (Robust Video Matting, PeterL1n/RobustVideoMatting, GPL-3.0: fetch only, never bundle).
+      Fast (mobilenetv3: authors report HD 104 fps on a GTX 1080 Ti) and temporally stable, but its
+      ONNX export has recurrent state: inputs `src`, `r1i`..`r4i`, `downsample_ratio`, outputs
+      `fgr`, `pha`, `r1o`..`r4o`. OnnxTOP accepts exactly one image input today, so this needs a
+      new mode: feed each `r*o` back into `r*i` next run (device-to-device copy, zeros at start),
+      `downsample_ratio` a scalar input (e.g. 0.25 for HD).
+- [ ] Puppets: a generated `MixamoPuppet` tox (see the puppet section for the plan).
+- [ ] A short user manual: what each tox does, how to wire it, its main parameters and outputs,
+      and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).
+- [ ] RTMPose for puppets: plain RTMPose / RTMW is 2D only, which the Mixamo solver can't use. The
+      candidate is **RTMW3D** (MMPose projects/rtmpose3d, 2024, Apache-2.0): 133 whole-body
+      keypoints in 2D and 3D, multi-person, top-down (person detector, then one run per person,
+      384x288, ~65M params for -L). Likely lower CPU load than Holistic (GPU via TensorRT) and
+      multi-person, but coarser fingers (hands from the full-body crop) and a 68-point face. No
+      official ONNX export: step one is exporting it and timing it with `onnxtop_tool`, before
+      any plugin work (SimCC decoder in the crops path, a 133-keypoint name map for the solver).
 
 ## Next: more model types
 
@@ -25,8 +77,7 @@ Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (I
       (AudioTranscriber, `.litertlm` from litert-community) and Speak Text (TextToSpeech, Kokoro).
       Toxes `MediaPipeSoundClassifier`, `MediaPipeSpeechToText`, `MediaPipeTextToSpeech` and
       `AudioDemo`, lab-tested; offline tools `audio_test`, `asr_test`, `tts_test`.
-- [ ] v0.2 release: `prepare minor`, rebuild the plugins, package (about 540 MB with Kokoro),
-      clean-test a video, an audio and the text-to-speech tox, publish.
+- [x] v0.2 release (v0.2.0-v0.2.5 published Nov 8-10).
 - [ ] Speech to text: try parakeet-tdt (615 MB, CC-BY-4.0) and Qwen3-ASR (960 MB, Apache-2.0);
       a fetch for the large ones. Moonshine sometimes mishears ("pay" for "fade").
 - [ ] Text to speech: word timestamps (`MpTextToSpeechComputeWordTimestamps`) for read-along
@@ -35,7 +86,11 @@ Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (I
       MediaPipeTOP's MpApi into `cpp/common/`.
 - [ ] Also exported and cheap to add: MediaPipe text classifier/embedder, language detector,
       object detector, image classifier/embedder, interactive segmenter.
-- [ ] Other ONNX candidates: RF-DETR (Apache-2.0), RVM (GPL-3.0: fetch only).
+- [ ] Other ONNX candidates: RF-DETR (Apache-2.0); RTMPose / RTMW whole-body pose (133 keypoints;
+      top-down: needs person crops, like Classify Crops); MODNet / BiRefNet / RVM matting (above);
+      Real-ESRGAN upscaling and fast style transfer (Raw mode); Segment Anything (MobileSAM /
+      EfficientSAM: needs prompt inputs) and RAFT optical flow (needs two frames). Check each
+      license before bundling.
 
 ## Dev vs installed plugins
 
@@ -77,12 +132,18 @@ Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
 - [ ] Tune live with a webcam: head yaw/pitch (looks under-turned), whether the forearm should
       take only part of the hand's twist, foot roll.
 - [ ] Rotation smoothing (slerp) and joint limits (no backward elbows/knees); for now only the
-      tracker's position smoothing.
+      tracker's position smoothing. The hand rig already has finger hinge limits
+      (`hand_retarget.FINGER_LIMITS`).
+- [ ] Full pose model in Holistic: repack `holistic_landmarker.task` with
+      `pose_landmarker_full`'s landmark model (Holistic ships the lite one); steadier, ~2x slower.
 - [x] Hips translation: Over Image placement (above) moves the character with the person.
 - [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject
       a frame whose hip line flips faster than a person can turn.
-- [ ] Package: a `MixamoPuppet` tox (Tracks DAT + FBX COMP in, rotations out, binds the bones)
-      generated like the wrappers.
+- [ ] Package: a `MixamoPuppet` tox generated like the wrappers. Easiest use: drop it in, set
+      its FBX file (any Mixamo character) and point it at a Holistic / Pose tox; it imports the
+      FBX inside, captures the rest pose, binds the bones and renders (or exposes the FBX COMP for
+      your own render). Pars: Mirror, Placement (Center / Over Image), Image FOV, smoothing,
+      joint limits. A hand variant for Blender-style hand rigs.
 - [ ] Face: Holistic's blendshapes could drive a Mixamo face only if the character has matching
       shape keys (ARKit names); out of scope until a character needs it.
 
@@ -94,6 +155,10 @@ Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
       questions to be collected from that testing.
 
 ## Housekeeping
+
+- [x] Nov 10: async GPU readback in both plugins, Wait for Result / Max Wait, `result_delay`,
+      cheaper Info DATs, trackers apply a result once and snap back after a gap, Sound Classifier
+      output at the timeline rate, the wrapper lab restores its Cooking flag.
 
 - [x] Retired `/project1/ONNX_Native` and `python/mediapipe_hands_component.py` (Nov 7).
 - [x] Deleted the stale `cache/trt/` engine folder (Nov 7); `.gitattributes` added.

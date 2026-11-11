@@ -42,7 +42,8 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   viewer, so no renderer runs in the toxes. Re-render before rebuilding whenever `VERSION`, a
   spec's label or the plugin changes.
 - **Testing wrappers:** POST `tests/td_wrapper_lab.py` to `/run` (checks every lab wrapper on the
-  official MediaPipe images in `build/`, report in `build/wrapper-lab.json`);
+  photos in `docs/images/sources/`, report in `build/wrapper-lab.json`; set `THUMBNAILS = True` when
+  preparing a release to refresh the README thumbnails in `docs/images/models/`);
   `tests/run_clean_wrapper.ps1` tests an exported tox in a fresh TD process.
 - **Python:** the tracker COMPs `import onnxtop_tables`. After editing a module, reload it (the
   td-http-api bridge's `GET /reload` reloads every imported module under the project folder).
