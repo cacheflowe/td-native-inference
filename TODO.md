@@ -80,6 +80,23 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       multi-person, but coarser fingers (hands from the full-body crop) and a 68-point face. No
       official ONNX export: step one is exporting it and timing it with `onnxtop_tool`, before
       any plugin work (SimCC decoder in the crops path, a 133-keypoint name map for the solver).
+      **RTMW3D-X measured Nov 11: viable, ~5x faster than Holistic.** No export needed: an Apache-2.0
+      ONNX of the X variant exists (`Soykaf/RTMW3D-x` on Hugging Face, 369 MB, the one `rtmlib` uses;
+      L is only published as .pth). `models/onnx/rtmw3d/rtmw3d-x.onnx`: input [1, 3, 384, 288] (RGB,
+      ImageNet mean/std on 0-255), outputs `output` [1, 133, 576] (simcc_x), `1554` [1, 133, 768]
+      (simcc_y), `1556` [1, 133, 576] (simcc_z). Decode (from rtmlib): argmax per axis / 2 (simcc split
+      ratio), x, y in crop px, z = (kz / 192 - 1) * 2.1744869 (relative to the root, not metric).
+      TensorRT fp16: **4.15 ms p50** (launch 1.6 ms), engine build 6.7 min, engine 184 MB; Holistic
+      reads 23 ms on the dancer clip (CPU). Quality, warrior photo, crop from the MODNet matte: 2D
+      points sit correctly on the person (body, feet, face); **limb directions vs Holistic world
+      landmarks: 9.4 deg mean, 18 deg worst (a forearm)** after an axis map (x = x, y = -y, z = -z).
+      One photo, and it includes Holistic's own error. Weak spot: fingers (hands are tiny in the 288 px
+      full-body crop), so the likely design is RTMW3D for the body + MediaPipe Hands for the fingers.
+      Plan: (1) "Pose Crops" mode in OnnxTOP: YOLO26 person boxes -> affine crops (padding 1.25, aspect
+      3:4) -> RTMW3D -> SimCC decode kernel (3 heads) -> image + 3D coords per keypoint; (2) a name map
+      from COCO-WholeBody 133 to the MediaPipe pose / hand names the trackers and `mixamo_retarget` use
+      (world landmarks in metres, hip origin, y up: needs the axis map and a scale from the body's
+      proportions); (3) re-check bone rotations on clips against Holistic, fingers via Hands.
       **2D benchmark done Nov 11** (the RTMW3D export is still to do). TensorRT fp16, models in
       `models/onnx/rtmpose/` (OpenMMLab `onnx_sdk` zips, gitignored): 256x192 crops, dynamic batch,
       SimCC outputs `simcc_x` [N, K, 384] / `simcc_y` [N, K, 512].
