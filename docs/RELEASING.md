@@ -15,7 +15,7 @@ td-native-inference-vX.Y.Z/
     fetch_models.cmd        (double-click: runs fetch_models.ps1, which downloads YOLO26, RVM and Kokoro)
     models/mediapipe/...  models/asr/...  models/tts/...  models/onnx/...
   tox/                      the model toxes + VisionDemo.tox, AudioDemo.tox
-  README.md  docs/MODELS.md  LICENSE  NOTICE  CHANGELOG.md  VERSION  release.json
+  README.md  docs/MODELS.md  docs/MANUAL.md  LICENSE  NOTICE  CHANGELOG.md  VERSION  release.json
 ```
 
 `release-manifest.json` lists it exactly: `files` keep their path, `map` sends a source path to a

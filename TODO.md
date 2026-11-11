@@ -62,7 +62,10 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       back: 1.2% vs 2.7%; second difference 0.104 vs 0.171); equal on the calm dancer clip. Edges are
       softer than MODNet's (downsample 0.25). Open: try fp16 / TensorRT with a fixed-size state
       export, `rvm_resnet50`, and use `fgr` (foreground colour) as a second output.
-- [ ] Puppets: a generated `MixamoPuppet` tox (see the puppet section for the plan).
+- [x] Puppets: `MixamoPuppet` tox (Nov 11): `python/puppet_builder.py` + `puppet_runtime.py`, `scripts/build_puppet_tox.py`.
+      In TOP + tracks DAT in, FBX File par imports and binds the character at runtime (the tox carries none:
+      Mixamo license), outputs character render / over image / bone CHOP. Checked: exported tox dropped in
+      fresh, FBX set -> 65 bones bound, same placement as the lab. Open: hand-rig variant, joint limits.
 - [ ] A short user manual: what each tox does, how to wire it, its main parameters and outputs,
       and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).
 - [ ] RTMPose for puppets: plain RTMPose / RTMW is 2D only, which the Mixamo solver can't use. The
@@ -145,7 +148,7 @@ Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
 - [x] Hips translation: Over Image placement (above) moves the character with the person.
 - [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject
       a frame whose hip line flips faster than a person can turn.
-- [ ] Package: a `MixamoPuppet` tox generated like the wrappers. Easiest use: drop it in, set
+- [x] Package (done, see Now): a `MixamoPuppet` tox generated like the wrappers. Easiest use: drop it in, set
       its FBX file (any Mixamo character) and point it at a Holistic / Pose tox; it imports the
       FBX inside, captures the rest pose, binds the bones and renders (or exposes the FBX COMP for
       your own render). Pars: Mirror, Placement (Center / Over Image), Image FOV, smoothing,

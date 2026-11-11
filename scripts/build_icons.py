@@ -40,6 +40,7 @@ ENGINES = {
 DEMOS = {
 	'VisionDemo': ('Vision Demo', 'All video models'),
 	'AudioDemo': ('Audio Demo', 'All audio models'),
+	'MixamoPuppet': ('Mixamo Puppet', 'Pose tracking'),
 }
 BROWSERS = [
 	Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe'),

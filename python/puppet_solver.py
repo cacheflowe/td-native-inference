@@ -236,6 +236,9 @@ def cook(scriptOp):
 	par = scriptOp.par
 	over_image = par.Placement.eval() == 'image'
 	world, image, side, line = read(par.Tracks.eval(), par.Hand.eval() if hand else None)
+	table = par.Tracks.eval()
+	if table is not None and table.numRows > 1 and not _layout(table)['world']:
+		scriptOp.addWarning('The tracks table has no world landmark columns: turn on World Landmark Columns on the tracker')
 	top = par.Image.eval()
 	# The same tracked row and settings as last cook (it cooks every frame; the tracker only
 	# moves on a new model result): keep the channels as they are.

@@ -12,7 +12,8 @@ no Python ML stack to install. The MediaPipe models (Google's own library, bundl
 
 Each model is a ready-made `.tox`: drag it in, wire video (or audio) into it, and get a debug
 image, tables with stable track ids, and CHOP channels. More detail on each:
-[docs/MODELS.md](docs/MODELS.md).
+[docs/MODELS.md](docs/MODELS.md). How the pieces fit together (wiring, tracking, latency, recipes):
+[docs/MANUAL.md](docs/MANUAL.md).
 
 ## Requirements
 
@@ -60,6 +61,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/DepthAnything.jpg" width="200"> | **Depth Anything V2** | Estimates how far away everything in the frame is, from a single camera (near is bright). |
 | <img src="docs/images/models/MODNet.jpg" width="200"> | **MODNet Portrait Matting** | Cuts a person out of the frame as an alpha matte, hair detail included. |
 | <img src="docs/images/models/RVM.jpg" width="200"> | **Robust Video Matting** | Cuts a person out of live video as an alpha matte, steadier than a per-frame matte when the subject moves fast. Downloaded by `fetch_models.cmd` (GPL-3.0). |
+|  | **Mixamo Puppet** | Poses a Mixamo character from Holistic or Pose tracking and draws it over the video or on its own. You supply the character (FBX); see the [manual](docs/MANUAL.md#puppets). |
 | <img src="docs/images/models/HSEmotion.jpg" width="200"> | **HSEmotion** | Finds faces and scores each one for 7 emotions (happiness, surprise, anger, ...). |
 
 ### Audio
