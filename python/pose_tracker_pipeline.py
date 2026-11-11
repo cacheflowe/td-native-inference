@@ -104,7 +104,7 @@ OUTPUT_SMOOTHING = 0.23
 PART_CONFIRM_FRAMES = 3
 # A track matched again after at least this many lost frames snaps to its fresh detection instead
 # of gliding there from where it was held (or coasted) while lost.
-REACQUIRE_SNAP_FRAMES = 2
+REACQUIRE_SNAP_FRAMES = object_tracker.REACQUIRE_SNAP_FRAMES
 
 
 # ==================== CUSTOM PARAMETERS ====================

@@ -846,12 +846,27 @@ def prune_stale(active_ids, *state_dicts):
 				del d[tid]
 
 
-def box_smooth(state_dict, track_id, box, smoothing):
+# A track matched again after at least this many lost frames starts from its fresh detection
+# instead of gliding there from where it was held or predicted while lost (every pipeline).
+REACQUIRE_SNAP_FRAMES = 2
+
+
+def reacquired(gap_state, track_id, lost_frames):
+	"""True on the frame a track is matched again after REACQUIRE_SNAP_FRAMES or more lost
+	frames. Call once per frame for every active track; gap_state[track_id] keeps its last
+	lost_frames (prune it with prune_stale like the other per-track state)."""
+	previous = gap_state.get(track_id, 0)
+	gap_state[track_id] = lost_frames
+	return lost_frames == 0 and previous >= REACQUIRE_SNAP_FRAMES
+
+
+def box_smooth(state_dict, track_id, box, smoothing, snap=False):
 	"""EMA-smooth a 4-element [x1,y1,x2,y2] box into state_dict[track_id] (created on
 	first sight, lerped toward `box` by `smoothing` on every call after) and return the
-	(mutable, in-place) smoothed list. Same lerp every caller used independently."""
+	(mutable, in-place) smoothed list. Same lerp every caller used independently. snap: start
+	over from `box` (a track back after a gap, see reacquired())."""
 	smoothed = state_dict.get(track_id)
-	if smoothed is None:
+	if smoothed is None or snap:
 		smoothed = list(box)
 		state_dict[track_id] = smoothed
 	else:

@@ -168,6 +168,7 @@ class BoxTrackerPipeline:
 		self.conf_threshold = d['Confthreshold']
 		self.low_conf_threshold = d['Lowconfthreshold']
 		self._box_state = {}
+		self._gap_state = {}	# track_id -> last lost_frames (object_tracker.reacquired)
 		self._mask_state = {}
 		self._presence_state = {}
 		# Structured tracking data for CHOP/table consumption; see update() for the dict keys.
@@ -191,11 +192,12 @@ class BoxTrackerPipeline:
 		active_ids = {t.track_id for t in active_tracks}
 		self.tracked_objects = []
 		for t in active_tracks:
+			snap = object_tracker.reacquired(self._gap_state, t.track_id, t.lost_frames)
 			if not t.confirmed:
 				continue
 			if not self.segmentation and t.score < conf_threshold:
 				continue
-			smoothed = object_tracker.box_smooth(self._box_state, t.track_id, t.box, smoothing)  # t.box = Kalman estimate
+			smoothed = object_tracker.box_smooth(self._box_state, t.track_id, t.box, smoothing, snap)  # t.box = Kalman estimate
 			obj = {
 				'track_id': t.track_id,
 				'class_id': t.payload.get('class_id'),
@@ -227,7 +229,7 @@ class BoxTrackerPipeline:
 			self.tracked_objects.append(obj)
 
 		# Prune box/mask/presence state for tracks the tracker has dropped entirely.
-		object_tracker.prune_stale(active_ids, self._box_state, self._mask_state, self._presence_state)
+		object_tracker.prune_stale(active_ids, self._box_state, self._mask_state, self._presence_state, self._gap_state)
 		return self.tracked_objects
 
 	def write_tracks_table(self, tbl):

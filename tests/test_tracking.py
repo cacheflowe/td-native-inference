@@ -125,6 +125,42 @@ class SkipRepeatedResultTests(unittest.TestCase):
 			self.assertTrue(onnxtop_tables._fresh(Table(), comp, ('detect', onnxtop_tables._result_number(comp))))
 
 
+import box_tracker_pipeline  # noqa: E402
+
+
+class ReacquireSnapTests(unittest.TestCase):
+	def test_reacquired_after_a_gap(self):
+		gaps = {}
+		seq = [0, 1, 2, 0, 1, 0]	# lost 2 frames -> back (snap); lost 1 -> back (no snap)
+		self.assertEqual([object_tracker.reacquired(gaps, 7, n) for n in seq], [False, False, False, True, False, False])
+
+	def test_box_smooth_snap(self):
+		state = {}
+		object_tracker.box_smooth(state, 1, [0, 0, 1, 1], 0.9)
+		self.assertAlmostEqual(object_tracker.box_smooth(state, 1, [1, 1, 2, 2], 0.9)[0], 0.1)
+		self.assertEqual(object_tracker.box_smooth(state, 1, [3, 3, 4, 4], 0.9, snap=True), [3, 3, 4, 4])
+
+	def test_box_track_back_after_a_gap_jumps_to_it(self):
+		def det(x):
+			return {'box': [x, 0.3, x + 0.3, 0.7], 'score': 0.9, 'class_id': 0, 'class_name': 'person'}
+
+		def cx(gap):
+			p = box_tracker_pipeline.BoxTrackerPipeline()
+			kw = dict(conf_threshold=0.3, low_conf_threshold=0.1, track_iou_threshold=0.3, track_buffer=30,
+				min_hits=1, smoothing=0.9)
+			for _ in range(5):
+				objs = p.update([det(0.2)], **kw)
+			for _ in range(gap):
+				p.update([], **kw)
+			objs = p.update([det(0.26)], **kw)
+			return objs[0]['cx']
+
+		start = 0.2 + 0.15
+		snapped, smoothed = cx(3) - start, cx(1) - start
+		self.assertGreater(snapped, 0.03)	# most of the 0.06 jump at once (the Kalman estimate)
+		self.assertLess(smoothed, 0.02)	# a one-frame dropout still eases in
+
+
 if __name__ == '__main__':
 	unittest.main()
 

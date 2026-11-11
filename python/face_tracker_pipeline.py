@@ -398,6 +398,7 @@ class FaceTrackerPipeline:
 		self.conf_threshold = CONF_THRESHOLD
 		self.low_conf_threshold = LOW_CONF_THRESHOLD
 		self._box_state = {}
+		self._gap_state = {}	# track_id -> last lost_frames (object_tracker.reacquired)
 		self._kpt_state = {}
 		# Structured tracking data for CHOP/table consumption; see update() for the dict keys.
 		self.tracked_objects = []
@@ -424,6 +425,8 @@ class FaceTrackerPipeline:
 
 		self.tracked_objects = []
 		for t in active_tracks:
+			# Back after a gap: box, keypoints and head direction start from this detection.
+			snap = object_tracker.reacquired(self._gap_state, t.track_id, t.lost_frames)
 			# t.confirmed gates display, same reasoning as the score check -- a track still
 			# in its min_hits confirmation window is genuinely "alive" (kept in active_ids,
 			# keeps its tracker-side Kalman/box/keypoint state) but not yet trusted as a real
@@ -431,7 +434,7 @@ class FaceTrackerPipeline:
 			if t.score < conf_threshold or not t.confirmed:
 				continue
 			box = t.box  # Kalman estimate
-			smoothed = object_tracker.box_smooth(self._box_state, t.track_id, box, smoothing)
+			smoothed = object_tracker.box_smooth(self._box_state, t.track_id, box, smoothing, snap)
 
 			# Keypoints/head direction: only advance on a frame where this track actually
 			# matched a real detection -- a Kalman-predicted-only frame (lost_frames > 0) has
@@ -441,7 +444,7 @@ class FaceTrackerPipeline:
 				# Smoothed BEFORE head direction is derived from them, so it's a genuine noise
 				# reduction on the pose input -- complements Posesmoothing's separate lerp on
 				# the resulting yaw/pitch/roll.
-				prev_pose = self._kpt_state.get(t.track_id)
+				prev_pose = None if snap else self._kpt_state.get(t.track_id)
 				if prev_pose is not None and prev_pose.get('keypoints') is not None:
 					prev_kpts = prev_pose['keypoints']
 					smoothed_kpts = [
@@ -483,7 +486,7 @@ class FaceTrackerPipeline:
 			})
 
 		# Prune box/keypoint state for tracks the tracker has dropped entirely.
-		object_tracker.prune_stale(active_ids, self._box_state, self._kpt_state)
+		object_tracker.prune_stale(active_ids, self._box_state, self._kpt_state, self._gap_state)
 		return self.tracked_objects
 
 	def write_tracks_table(self, tbl):
