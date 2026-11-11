@@ -49,10 +49,12 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
     temporal smoothing of the matte.
   - BiRefNet lite, `models/onnx/birefnet/birefnet_lite.onnx`, from onnx-community/BiRefNet_lite-ONNX
     (MIT, 224 MB fp32 / 115 MB fp16; the full BiRefNet is 973 MB). Higher quality, much heavier
-    (1024x1024). The benchmark was interrupted during its first TensorRT build (several minutes):
-    re-run `plugins\onnxtop_tool.exe "C:\Program Files\Derivative\TouchDesigner\bin"
-    models\onnx\birefnet\birefnet_lite.onnx tensorrt 60` and check its input/output names and
-    whether TensorRT accepts the graph. Likely a stills / quality option rather than real time.
+    (1024x1024). **Benchmarked Nov 11** (RTX 4090 laptop, TensorRT fp16): input `input_image`
+    [1, 3, 1024, 1024] (fixed size), output `output_image` [1, 1, 1024, 1024]; TensorRT accepts the
+    graph. **92 ms p50** per frame (launch 3.5 ms): about 10 fps, so a stills / quality option, not
+    real time. The first engine build took **22 minutes** and 7.5 GB of RAM (the Auto provider would
+    run CUDA meanwhile). Not wrapped yet; quality vs MODNet / RVM not compared (ImageNet
+    normalization, Raw index 0, fixed 1024 input).
 - [x] **RVM (Nov 11).** `OnnxEngine` pairs `<x>i`/`<x>o` as recurrent state (zero start, output rebound
       as the next input, no readback), a lone `[1]` float input is the new **Scalar Input**
       (`downsample_ratio`), plus a **Reset State** pulse. `wrappers/RVM.json` (CUDA provider: the state
@@ -66,7 +68,7 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       In TOP + tracks DAT in, FBX File par imports and binds the character at runtime (the tox carries none:
       Mixamo license), outputs character render / over image / bone CHOP. Checked: exported tox dropped in
       fresh, FBX set -> 65 bones bound, same placement as the lab. Open: hand-rig variant, joint limits.
-- [ ] A short user manual: what each tox does, how to wire it, its main parameters and outputs,
+- [x] A short user manual (Nov 11, `docs/MANUAL.md`, with a Puppets section): what each tox does, how to wire it, its main parameters and outputs,
       and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).
 - [ ] RTMPose for puppets: plain RTMPose / RTMW is 2D only, which the Mixamo solver can't use. The
       candidate is **RTMW3D** (MMPose projects/rtmpose3d, 2024, Apache-2.0): 133 whole-body
@@ -75,6 +77,24 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       multi-person, but coarser fingers (hands from the full-body crop) and a 68-point face. No
       official ONNX export: step one is exporting it and timing it with `onnxtop_tool`, before
       any plugin work (SimCC decoder in the crops path, a 133-keypoint name map for the solver).
+      **2D benchmark done Nov 11** (the RTMW3D export is still to do). TensorRT fp16, models in
+      `models/onnx/rtmpose/` (OpenMMLab `onnx_sdk` zips, gitignored): 256x192 crops, dynamic batch,
+      SimCC outputs `simcc_x` [N, K, 384] / `simcc_y` [N, K, 512].
+
+      | Model | Keypoints | batch 1 p50 | batch 4 p50 | engine build |
+      |---|---|---|---|---|
+      | RTMPose-m body7 | 17 | 2.4 ms | 1.8 ms | 3.2 / 3.4 min |
+      | RTMW-l (cocktail14) | 133 | 3.6 ms | 10.0 ms | 5.4 / 5.8 min |
+
+      Batch-4 numbers are noisy (p95 up to 50 ms, one 600 ms outlier; the GPU was shared). Cost is
+      roughly linear in people, about 2.5-3.6 ms each for 133 keypoints, on top of a detector. Each
+      batch size is its own static engine (a dynamic-batch profile would avoid that). The OpenMMLab
+      YOLOX-m detector (NMS inside the graph) does not run on TensorRT (`TopK K exceeds 3840`) and
+      falls back to CUDA at 95 ms, so the NMS-free YOLO26 detect (AGPL, fetched) would be the person
+      detector. Verdict for 2D multi-person whole-body keypoints: worth building (a "Pose Crops" mode
+      next to Classify Crops: YOLO26 boxes -> crops -> RTMW -> SimCC argmax per keypoint -> image
+      coordinates, confidence from the peak). Still no 3D world landmarks, so puppets stay on
+      Holistic unless RTMW3D exports cleanly. The RTMW weights' dataset terms are unchecked.
 
 ## Next: more model types
 
