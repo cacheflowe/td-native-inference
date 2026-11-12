@@ -6,8 +6,18 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status:** planned (Nov 12, 2026), not started. Behavioral inventory of the current Python tracker
-was taken the same day; its findings are folded in below.
+**Status (Nov 12, 2026):** phases 0 and 1 done. 16 sessions recorded in TD
+(`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
+recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
+skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
+mp_facedet, pose, movenet, rtmw). Trimmed fixtures in `tests/data/tracking/`;
+`tests/test_tracking_replay.py` replays them through both engines. Next: phase 2 (the TD plugin).
+
+Run: `cpp\Tracking\build.cmd`, then `python tests/tracking_replay.py build/tracking/*.jsonl.gz
+--engine cpp` (full recordings) or `python -m unittest tests.test_tracking_replay` (committed ones).
+Things that had to match Python exactly: `math.hypot` (CPython's exact-sum algorithm, not the C
+library's), round-half-even, stable sort of match pairs, correctly rounded parse/format
+(`from_chars` / `to_chars`), and no FMA (`/fp:precise`).
 
 ## Design
 
@@ -69,11 +79,11 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 
 ## Proving it's the same
 
-1. **Recorded fixtures:** a small TD script records each wrapper's Info DAT text per applied result
-   (plus `result_delay` / `results`), on the clips in `media/` and the photos: dancer (Holistic GPU,
-   Holistic, Pose, RTMW), people-walking (YOLO detect / seg / pose, MoveNet), hands (Hands, Gesture),
-   a face clip (YuNet, Face, Face Detector). A few hundred frames each, gitignored except a small
-   set committed under `tests/data/tracking/`.
+1. **Recorded fixtures:** `tests/td_tracking_recorder.py` records, per frame, each wrapper's Info
+   DAT text, `results` / `result_delay`, how many times each tracker script cooked, and the tables
+   it wrote, on the clips in `media/` and the photos (faces: `face.jpg` moved by a Transform TOP,
+   there's no face clip). Full recordings in `build/tracking/` (gitignored, ~20 MB), trimmed copies
+   in `tests/data/tracking/`.
 2. **Replay tool** `tracker_replay.exe` (C++, links the core) and a Python replay harness (the
    existing pipelines, TD objects faked as `tests/test_tracking.py` already does) run the same
    fixture and write the tables per frame. A test diffs them cell by cell: exact text match for

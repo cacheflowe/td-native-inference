@@ -161,10 +161,6 @@ class ReacquireSnapTests(unittest.TestCase):
 		self.assertLess(smoothed, 0.02)	# a one-frame dropout still eases in
 
 
-if __name__ == '__main__':
-	unittest.main()
-
-
 import pose_tracker_pipeline  # noqa: E402
 
 HOLISTIC = mediapipe_skeletons.MP_HOLISTIC
@@ -364,3 +360,7 @@ class ReadWorldTests(unittest.TestCase):
 		b = FakeDat([['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label', 'kp0_u', 'kp0_v', 'kp0_c']], path='/fake/cache')
 		col, header = onnxtop_tables._columns(b)
 		self.assertEqual(col['kp0_c'], 10)
+
+
+if __name__ == '__main__':
+	unittest.main()
