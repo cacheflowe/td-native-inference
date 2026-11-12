@@ -6,10 +6,12 @@
 
 New models:
 - **MediaPipe Holistic GPU** (`MediaPipeHolisticGPU.tox`): Holistic's own models converted to ONNX and
-  run on the GPU, with Holistic's cropping logic in the plugin. About 5.7 ms per frame for body, hands
-  and face (vs ~20 ms for the CPU wrapper waiting for its result), several people at once, and the
-  same table, so it drops in for the CPU wrapper (Mixamo Puppet included). Agrees with CPU Holistic to
-  a few pixels. Finds people with a nested YOLO26 detector (AGPL-3.0, `fetch_models.cmd`).
+  run on the GPU, with Holistic's cropping logic in the plugin. Body, hands and face for several
+  people at once, in the same table, so it drops in for the CPU wrapper (Mixamo Puppet included).
+  Runs in the background by default: about 1.5 ms of TouchDesigner's main thread, results one frame
+  late (5.7 ms with Wait for Result on, exact frame). Agrees with CPU Holistic to a few pixels. Finds
+  people with a nested YOLO26 detector (AGPL-3.0, `fetch_models.cmd`) that only runs while someone is
+  missing.
 - **DAViD** (Microsoft, MIT): `DAViDNormals.tox` (a person's surface normals as a normal map, for
   relighting), `DAViDMatte.tox` (a soft matte with hair detail), about 10 ms each, and
   `DAViDHuman.tox` (depth, normals and matte from one model in one pass, about 21 ms). 2.3 GB, so

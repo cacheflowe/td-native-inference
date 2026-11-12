@@ -62,7 +62,7 @@ LAYOUT = {
 	'local/modules/box_tracker_pipeline': (1, 0), 'local/modules/face_tracker_pipeline': (1, -150),
 	'local/modules/pose_tracker_pipeline': (1, -300), 'local/modules/onnxtop_tables': (2, -150),
 	'local/modules/rtmw_convert': (2, -300),
-	'detector': (1, -20), 'crop_boxes': (2, 320), 'rtmw_info': (2, 60),
+	'detector': (1, -20), 'crop_boxes': (2, 320), 'rtmw_info': (2, 60), 'detector_gate': (0, 320),
 }
 LAYOUT_KIND = {
 	# No tracker or visualizers: the resized result sits right after inference.
@@ -269,6 +269,25 @@ def _build_posecrops(comp, spec):
 	_connect(detector, comp.op('input'))
 	# script_tracks, not out_tracks: the crops must not depend on the pose table.
 	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
+	if spec.get('preset', {}).get('Mode') == 'holistic':
+		# Holistic tracks each person from their own landmarks; the detector only finds new people. It
+		# runs while fewer are tracked than Max Detections, without waiting for its result (a person
+		# is picked up a frame later). Set at frame start, not by expression: an expression on the
+		# tracked count would be a cook loop (the inference reads the detector's boxes).
+		detector.par.Active.expr = ''
+		detector.par.Waitforresult = False
+		gate = comp.create('executeDAT', 'detector_gate')
+		gate.par.framestart = True
+		gate.text = ("def onFrameStart(frame):\n"
+			"\tw = parent()\n"
+			"\tif not w.allowCooking:\n"
+			"\t\treturn\n"
+			"\tstats = w.op('inference_stats')\n"
+			"\ttracked = stats['num_detections'].eval() if stats['num_detections'] is not None else 0\n"
+			"\tneed = bool(w.par.Active.eval()) and tracked < w.par.Maxdetections.eval()\n"
+			"\tdetector = w.op('detector')\n"
+			"\tif bool(detector.par.Active.eval()) != need:\n"
+			"\t\tdetector.par.Active = need\n")
 	converter = spec.get('converter')
 	if converter:
 		convert = comp.create('scriptDAT', 'rtmw_info')

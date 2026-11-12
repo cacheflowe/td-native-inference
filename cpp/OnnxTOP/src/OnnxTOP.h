@@ -15,6 +15,7 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -140,10 +141,49 @@ private:
 		bool	hands = true;
 		bool	face = true;
 	};
+	// One pass of the chain on `inSurf` (person boxes from the detector); `sheet` gets every crop it
+	// ran. timed: record infer_ms with the run events (synchronous mode only).
 	bool		runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const HolisticOptions& opt,
-					cudaSurfaceObject_t outSurf, int outW, int outH, std::string& err);
+					const std::vector<CropBox>& personBoxes, const std::vector<std::string>& personIds, bool timed,
+					std::vector<CropBox>& sheet, std::string& err);
+	void		drawHolisticSheet(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const std::vector<CropBox>& sheet,
+					cudaSurfaceObject_t outSurf, int outW, int outH, cudaStream_t stream);
 	holistic::Tracker			myHolistic;
-	bool						myHolisticMode = false;	// whether the Info DAT shows myHolistic's people
+	bool						myHolisticMode = false;	// whether the Info DAT shows myHoloShown
+	std::vector<holistic::Person>	myHoloShown;		// the people the Info DAT shows (main thread)
+
+	// Background Holistic (Wait for Result off): a worker thread runs the chain on a copy of the frame
+	// (myHoloFrame) on myStream, while the cook's own work goes on myIoStream and never waits for it.
+	// While the worker runs, only it touches the engines, myHolistic, myHostStage and myDevCropBoxes.
+	struct HoloJob
+	{
+		std::vector<CropBox>		boxes;
+		std::vector<std::string>	ids;
+		HolisticOptions				opt;
+		TexFormat					fmt = TexFormat::Unsupported;
+		int							w = 0, h = 0;
+		int64_t						frame = -1;
+	};
+	void		holisticWorker();
+	void		waitHolisticIdle();		// main thread: before touching anything the worker uses
+	void		stopHolisticWorker();
+	std::thread					myHoloThread;
+	std::mutex					myHoloMutex;
+	std::condition_variable		myHoloCv;
+	bool						myHoloQuit = false, myHoloHasJob = false, myHoloHasResult = false;
+	std::atomic<bool>			myHoloBusy{ false };
+	HoloJob						myHoloJob;
+	cudaArray_t					myHoloFrame = nullptr;
+	cudaChannelFormatDesc		myHoloFrameDesc = {};
+	size_t						myHoloFrameW = 0, myHoloFrameH = 0;
+	cudaStream_t				myIoStream = nullptr;
+	cudaEvent_t					myHoloCopied = nullptr;	// the frame copy is done (worker waits on it)
+	std::vector<holistic::Person>	myHoloPublished;	// worker -> main, under myHoloMutex
+	std::vector<CropBox>		myHoloPublishedSheet, myHoloSheet;
+	std::string					myHoloPublishedError;
+	int64_t						myHoloPublishedFrame = -1;
+	std::atomic<double>			myHoloMs{ 0.0 };
+	int64_t						myHoloDropped = 0;
 	float*						myHostStage = nullptr;	// pinned: model outputs read back per crop
 	size_t						myHostStageBytes = 0;
 	CropBox*					myDevSheetBoxes = nullptr;	// kMaxBatch: every crop of the frame, for the debug sheet

@@ -9,12 +9,14 @@
 		"Model": "models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",
 		"Mode": "holistic",
 		"Cropdat": "crop_boxes",
-		"Maxdetections": 1
+		"Maxdetections": 1,
+		"Waitforresult": false
 	},
 	"model": [
 		"Maxdetections",
 		"Holistichands",
-		"Holisticface"
+		"Holisticface",
+		"Waitforresult"
 	],
 	"tracking": [
 		"Tracklossframes",

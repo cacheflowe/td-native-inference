@@ -198,7 +198,12 @@ the face crop from the pose's face points instead of BlazeFace, and there's no l
 The Info DAT is MediaPipeTOP's Holistic table (553 points, `kp{i}_z`, `w{i}_x/y/z` for the first 75),
 so `OnnxTopTables` mode **MediaPipe Holistic** reads it unchanged. The image output is a contact
 sheet of every crop. Against CPU Holistic (a still photo): pose 2.5 px, hands 2–4 px, face mesh
-0.7 px; world landmarks within a few cm. 5.7 ms per frame for one person (RTX 4090 Laptop GPU).
+0.7 px; world landmarks within a few cm. One person, RTX 4090 Laptop GPU: **Wait for Result** on, the
+cook runs the chain itself, 5.7 ms on TouchDesigner's main thread with this frame's result; off, a
+worker thread runs it on a GPU copy of the frame (the cook's own work goes on a second CUDA stream, so
+it never waits for the inference): about 1.5 ms on the main thread, the result one frame late
+(`result_delay` 1), frames that arrive while it's busy skipped, `infer_ms` the worker's time. Engine
+swaps and mode changes wait for the worker first.
 
 #### Landmark Crops
 

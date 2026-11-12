@@ -350,8 +350,10 @@ OnnxTOP::OnnxTOP(const OP_NodeInfo*, TOP_Context* context) :
 	myContext(context)
 {
 	cudaStreamCreateWithFlags(&myStream, cudaStreamNonBlocking);
+	cudaStreamCreateWithFlags(&myIoStream, cudaStreamNonBlocking);
 	cudaEventCreate(&myRunStart);
 	cudaEventCreate(&myRunDone);
+	cudaEventCreateWithFlags(&myHoloCopied, cudaEventDisableTiming);
 }
 
 OnnxTOP::~OnnxTOP()
@@ -361,8 +363,17 @@ OnnxTOP::~OnnxTOP()
 	myCancelLoad = true;
 	if (myLoader.joinable())
 		myLoader.join();
+	stopHolisticWorker();
 	if (myStream)
 		cudaStreamSynchronize(myStream);
+	if (myIoStream)
+		cudaStreamSynchronize(myIoStream);
+	if (myHoloFrame)
+		cudaFreeArray(myHoloFrame);
+	if (myHoloCopied)
+		cudaEventDestroy(myHoloCopied);
+	if (myIoStream)
+		cudaStreamDestroy(myIoStream);
 	if (myRunStart)
 		cudaEventDestroy(myRunStart);
 	if (myRunDone)
@@ -400,7 +411,9 @@ void OnnxTOP::manageLoading(const EngineConfig& desired, const std::vector<std::
 		std::lock_guard<std::mutex> lock(myLoadMutex);
 		if (myNextEngine)
 		{
-			// Last frame's kernels may still be reading the outgoing engine's buffers.
+			// The background Holistic run may be using the outgoing engines; last frame's kernels may
+			// still be reading their buffers.
+			waitHolisticIdle();
 			if (myStream)
 				cudaStreamSynchronize(myStream);
 			myEngine = std::move(myNextEngine);
@@ -425,6 +438,7 @@ void OnnxTOP::manageLoading(const EngineConfig& desired, const std::vector<std::
 
 	// Drop the old engine BEFORE building the new one: both would share myStream, and two
 	// TensorRT engines for the same model can double GPU memory during the swap.
+	waitHolisticIdle();
 	if (myStream)
 		cudaStreamSynchronize(myStream);
 	myEngine.reset();
@@ -747,6 +761,11 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	segOpt.matteNms = (float)inputs->getParDouble("Mattenms");
 	segOpt.instances = inputs->getParInt("Matteencoding") == 1;
 	myWaitResult = inputs->getParInt("Waitforresult") != 0;
+	// Holistic with Wait for Result off runs in the background; anything else must not race it.
+	const bool holoAsync = mode == ModeHolistic && !myWaitResult;
+	if (!holoAsync)
+		waitHolisticIdle();
+	cudaStream_t ioStream = holoAsync ? myIoStream : myStream;
 	const float scalarInput = (float)inputs->getParDouble("Scalarinput");
 
 	inputs->enablePar("Fp16", provider != OrtProvider::CUDA);
@@ -874,7 +893,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 
 	// --- output texture ---
 	TOP_CUDAOutputInfo outInfo;
-	outInfo.stream = myStream;
+	outInfo.stream = ioStream;
 	output->getSuggestedOutputDesc(&outInfo.textureDesc, nullptr);
 	outInfo.textureDesc.texDim = OP_TexDim::e2D;
 	outInfo.textureDesc.depth = 1;
@@ -954,7 +973,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		}
 	}
 	OP_CUDAAcquireInfo acquire;
-	acquire.stream = myStream;
+	acquire.stream = ioStream;
 	const OP_CUDAArrayInfo* inArray = top->getCUDAArray(acquire, nullptr);
 
 	if (!myContext->beginCUDAOperations(nullptr))
@@ -1119,19 +1138,89 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		if ((int)myCropBoxes.size() > kMaxBatch && myWarning.empty())
 			myWarning = std::to_string(myCropBoxes.size()) + " boxes but at most " + std::to_string(kMaxBatch) + " people are tracked";
 	}
-	else if (engine && inSurf && mode == ModeHolistic)
+	else if (engine && inSurf && mode == ModeHolistic && !holoAsync)
 	{
-		// Always synchronous: each stage's crops depend on the previous stage's landmarks.
-		if (runHolistic(inSurf, fmt, srcW, srcH, holisticOpt, outSurf, outW, outH, err))
+		// Wait for Result on: the whole chain in this cook (each stage's crops depend on the previous
+		// stage's landmarks, so it waits for the GPU three times).
+		std::vector<CropBox> sheet;
+		if (runHolistic(inSurf, fmt, srcW, srcH, holisticOpt, myCropBoxes, myCropIds, true, sheet, err))
+		{
+			drawHolisticSheet(inSurf, fmt, srcW, srcH, sheet, outSurf, outW, outH, myStream);
 			wrote = true;
+		}
 		else
 		{
 			myError = err;
 			myHolistic.reset();
 		}
+		myHoloShown = myHolistic.people();
 		readInferMs();
 		myResultFrame = top->totalCooks;
 		myLaunchedFrame = top->totalCooks;
+	}
+	else if (engine && inSurf && inArray && mode == ModeHolistic)
+	{
+		// Wait for Result off: show the worker's last finished result, and hand it this frame if it's free.
+		if (!myHoloThread.joinable())
+		{
+			myHoloQuit = false;
+			myHoloThread = std::thread([this]() { holisticWorker(); });
+		}
+		{
+			std::lock_guard<std::mutex> lock(myHoloMutex);
+			if (myHoloHasResult)
+			{
+				myHoloShown = std::move(myHoloPublished);
+				myHoloSheet = std::move(myHoloPublishedSheet);
+				if (!myHoloPublishedError.empty())
+					myError = myHoloPublishedError;
+				myResultFrame = myHoloPublishedFrame;
+				myHoloHasResult = false;
+			}
+		}
+		if (!myHoloBusy)
+		{
+			cudaChannelFormatDesc desc = {};
+			cudaExtent ext = {};
+			unsigned int flags = 0;
+			cudaArrayGetInfo(&desc, &ext, &flags, inArray->cudaArray);
+			const size_t h = std::max<size_t>(ext.height, 1);
+			if (!myHoloFrame || ext.width != myHoloFrameW || h != myHoloFrameH || memcmp(&desc, &myHoloFrameDesc, sizeof(desc)) != 0)
+			{
+				if (myHoloFrame)
+					cudaFreeArray(myHoloFrame);
+				myHoloFrame = nullptr;
+				if (cudaMallocArray(&myHoloFrame, &desc, ext.width, h, cudaArraySurfaceLoadStore) != cudaSuccess)
+					myHoloFrame = nullptr;
+				myHoloFrameW = ext.width;
+				myHoloFrameH = h;
+				myHoloFrameDesc = desc;
+			}
+			cudaMemcpy3DParms copy = {};
+			copy.srcArray = inArray->cudaArray;
+			copy.dstArray = myHoloFrame;
+			copy.extent = make_cudaExtent(ext.width, h, 1);
+			copy.kind = cudaMemcpyDeviceToDevice;
+			if (myHoloFrame && cudaMemcpy3DAsync(&copy, myIoStream) == cudaSuccess)
+			{
+				cudaEventRecord(myHoloCopied, myIoStream);
+				myHoloBusy = true;
+				{
+					std::lock_guard<std::mutex> lock(myHoloMutex);
+					myHoloJob = { myCropBoxes, myCropIds, holisticOpt, fmt, srcW, srcH, top->totalCooks };
+					myHoloHasJob = true;
+				}
+				myHoloCv.notify_one();
+				myLaunchedFrame = top->totalCooks;
+			}
+			else
+				myError = "Holistic: could not copy the input frame for the background run";
+		}
+		else
+			myHoloDropped++;
+		myInferMs = myHoloMs;
+		drawHolisticSheet(inSurf, fmt, srcW, srcH, myHoloSheet, outSurf, outW, outH, myIoStream);
+		wrote = true;
 	}
 	else if (engine && inSurf && mode == ModeLandmarkCrops)
 	{
@@ -1240,7 +1329,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	}
 	myHolisticMode = mode == ModeHolistic && wrote;
 	if (mode != ModeHolistic)
-		myHolistic.reset();
+	{
+		myHolistic.reset();	// the worker is idle (waitHolisticIdle above)
+		myHoloShown.clear();
+	}
 	myLandmarkMode = mode == ModeLandmarkCrops && wrote;
 	if (!myLandmarkMode)
 		myLandmarks.clear();
@@ -1251,7 +1343,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	{
 		auto pf = outInfo.textureDesc.pixelFormat;
 		int bpp = pf == OP_PixelFormat::Mono32Float ? 4 : pf == OP_PixelFormat::RGBA16Float ? 8 : 16;
-		launchClear(outSurf, outW, outH, bpp, myStream);
+		launchClear(outSurf, outW, outH, bpp, ioStream);
 	}
 	if (!extrasWritten)
 		for (size_t i = 0; i < extras.size(); i++)
@@ -1359,10 +1451,11 @@ bool OnnxTOP::runCrops(OnnxEngine& engine, int n, bool softmax, std::string& err
 }
 
 bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const HolisticOptions& opt,
-	cudaSurfaceObject_t outSurf, int outW, int outH, std::string& err)
+	const std::vector<CropBox>& personBoxes, const std::vector<std::string>& personIds, bool timed,
+	std::vector<CropBox>& sheet, std::string& err)
 {
 	using namespace holistic;
-	myHolisticCrops = 0;
+	sheet.clear();
 	if (myCompanions.size() < 3)
 	{
 		err = "Holistic: the hand and face models are not loaded";
@@ -1392,8 +1485,6 @@ bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, i
 	const InputNorm norm = makeInputNorm(InputNormKind::Unit);	// MediaPipe's 0-1 float input
 	if (!myDevCropBoxes)
 		cudaMalloc(&myDevCropBoxes, kMaxBatch * sizeof(CropBox));
-	if (!myDevSheetBoxes)
-		cudaMalloc(&myDevSheetBoxes, kMaxBatch * sizeof(CropBox));
 
 	auto toBox = [&](const Roi& r)
 	{
@@ -1403,7 +1494,6 @@ bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, i
 		b.replicate = 1;
 		return b;
 	};
-	std::vector<CropBox> sheet;
 	// Runs each (engine, crop) back to back on the stream and reads every output back into pinned
 	// memory, then waits once. out[j][o] points at job j's output o.
 	struct Job
@@ -1471,16 +1561,19 @@ bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, i
 		return true;
 	};
 
-	cudaEventRecord(myRunStart, myStream);
-	myRunRecorded = true;
+	if (timed)
+	{
+		cudaEventRecord(myRunStart, myStream);
+		myRunRecorded = true;
+	}
 	auto tRun = Clock::now();
 
 	// Stage 1: pose, per person (tracked ROI, or a new detector box).
 	std::vector<std::array<float, 4>> boxes;
-	for (const CropBox& b : myCropBoxes)
+	for (const CropBox& b : personBoxes)
 		boxes.push_back({ b.x1, b.y1, b.x2, b.y2 });
 	std::vector<Job> jobs;
-	for (const Crop& c : myHolistic.poseCrops(srcW, srcH, boxes, myCropIds, std::clamp(opt.maxPeople, 1, 8)))
+	for (const Crop& c : myHolistic.poseCrops(srcW, srcH, boxes, personIds, std::clamp(opt.maxPeople, 1, 8)))
 		jobs.push_back({ 0, c });
 	if (!runStage(jobs))
 		return false;
@@ -1518,15 +1611,90 @@ bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, i
 		myHolistic.decodeHand(handJobs[j].crop, out[j][0], out[j][1][0], out[j][3]);	// landmarks, presence, (handedness), world
 	myHolistic.endFrame();
 
-	myRunMs = msSince(tRun);
-	cudaEventRecord(myRunDone, myStream);
+	if (timed)
+	{
+		myRunMs = msSince(tRun);
+		cudaEventRecord(myRunDone, myStream);
+	}
+	else
+		myHoloMs = msSince(tRun);
+	return true;
+}
+
+void OnnxTOP::drawHolisticSheet(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const std::vector<CropBox>& sheet,
+	cudaSurfaceObject_t outSurf, int outW, int outH, cudaStream_t stream)
+{
+	if (!myDevSheetBoxes)
+		cudaMalloc(&myDevSheetBoxes, kMaxBatch * sizeof(CropBox));
 	myHolisticCrops = std::min((int)sheet.size(), kMaxBatch);
 	if (myHolisticCrops > 0)
-		cudaMemcpyAsync(myDevSheetBoxes, sheet.data(), myHolisticCrops * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
+		cudaMemcpyAsync(myDevSheetBoxes, sheet.data(), myHolisticCrops * sizeof(CropBox), cudaMemcpyHostToDevice, stream);
 	const int cells = std::max(1, (outW / kCropSheetCell) * (outH / kCropSheetCell));
 	launchCropSheet(inSurf, fmt, srcW, srcH, myDevSheetBoxes, std::min(myHolisticCrops, cells),
-		std::max(1, outW / kCropSheetCell), kCropSheetCell, outSurf, outW, outH, myStream);
-	return true;
+		std::max(1, outW / kCropSheetCell), kCropSheetCell, outSurf, outW, outH, stream);
+}
+
+// Background Holistic (Wait for Result off): the worker runs the whole chain on a private copy of the
+// frame while TouchDesigner cooks on; each cook publishes the last finished result and hands the
+// worker the newest frame if it's free (otherwise that frame is dropped, as MediaPipe does).
+void OnnxTOP::holisticWorker()
+{
+	for (;;)
+	{
+		HoloJob job;
+		{
+			std::unique_lock<std::mutex> lock(myHoloMutex);
+			myHoloCv.wait(lock, [&] { return myHoloQuit || myHoloHasJob; });
+			if (myHoloQuit)
+				return;
+			job = myHoloJob;
+			myHoloHasJob = false;
+		}
+		cudaStreamWaitEvent(myStream, myHoloCopied, 0);	// the cook's copy of the frame (myIoStream)
+		cudaResourceDesc desc = {};
+		desc.resType = cudaResourceTypeArray;
+		desc.res.array.array = myHoloFrame;
+		cudaSurfaceObject_t surf = 0;
+		std::string err;
+		std::vector<CropBox> sheet;
+		bool ok = cudaCreateSurfaceObject(&surf, &desc) == cudaSuccess;
+		if (!ok)
+			err = "Holistic: could not read the copied frame";
+		else
+			ok = runHolistic(surf, job.fmt, job.w, job.h, job.opt, job.boxes, job.ids, false, sheet, err);
+		if (surf)
+			cudaDestroySurfaceObject(surf);
+		if (!ok)
+			myHolistic.reset();
+		{
+			std::lock_guard<std::mutex> lock(myHoloMutex);
+			myHoloPublished = myHolistic.people();
+			myHoloPublishedSheet = std::move(sheet);
+			myHoloPublishedError = ok ? std::string() : err;
+			myHoloPublishedFrame = job.frame;
+			myHoloHasResult = true;
+		}
+		myHoloBusy = false;
+	}
+}
+
+void OnnxTOP::waitHolisticIdle()
+{
+	while (myHoloBusy)
+		std::this_thread::sleep_for(std::chrono::microseconds(200));
+}
+
+void OnnxTOP::stopHolisticWorker()
+{
+	if (!myHoloThread.joinable())
+		return;
+	{
+		std::lock_guard<std::mutex> lock(myHoloMutex);
+		myHoloQuit = true;
+	}
+	myHoloCv.notify_all();
+	myHoloThread.join();
+	myHoloBusy = false;
 }
 
 bool OnnxTOP::runLandmarkCrops(OnnxEngine& engine, int start, int count, std::string& err)
@@ -1653,7 +1821,7 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 0: chan->name->setString("loaded");			chan->value = myEngine ? 1.f : 0.f; break;
 		case 1: chan->name->setString("loading");			chan->value = st == LoadState::Loading ? 1.f : 0.f; break;
 		case 2: chan->name->setString("tensorrt");			chan->value = myEngine && myEngine->providerDescription().rfind("TensorRT", 0) == 0 ? 1.f : 0.f; break;
-		case 3: chan->name->setString("num_detections");	chan->value = (float)(myHolisticMode ? myHolistic.people().size() : myLandmarkMode ? myLandmarks.size()
+		case 3: chan->name->setString("num_detections");	chan->value = (float)(myHolisticMode ? myHoloShown.size() : myLandmarkMode ? myLandmarks.size()
 			: myCropMode ? myCrops.size() : myYolo.detections().size()); break;
 		case 4: chan->name->setString("infer_ms");			chan->value = (float)myInferMs; break;
 		case 5: chan->name->setString("execute_ms");		chan->value = (float)myExecuteMs; break;
@@ -1671,7 +1839,7 @@ bool OnnxTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 {
 	if (myHolisticMode)
 	{
-		infoSize->rows = 1 + (int32_t)myHolistic.people().size();
+		infoSize->rows = 1 + (int32_t)myHoloShown.size();
 		infoSize->cols = 8 + holistic::kTotal * 4 + holistic::kWorld * 3;
 		infoSize->byColumn = false;
 		return true;
@@ -1729,7 +1897,7 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 			}
 			return;
 		}
-		const auto& people = myHolistic.people();
+		const auto& people = myHoloShown;
 		if (index < 1 || index - 1 >= (int32_t)people.size())
 		{
 			for (int c = 0; c < nEntries; c++)
@@ -2015,7 +2183,9 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.defaultValues[0] = 1.0;
 		np.help = "On: the cook waits for this frame's inference, so detections match the image exactly. Off: "
 			"the cook queues the inference and returns; results arrive a cook later (info channel result_delay), "
-			"freeing TouchDesigner's main thread for the inference time. Raw output never waits either way.";
+			"freeing TouchDesigner's main thread for the inference time. Raw output never waits either way. "
+			"MediaPipe Holistic: Off runs the whole chain on a background thread on a copy of the frame; each cook "
+			"shows the last finished result and frames that arrive while it's busy are skipped.";
 		check(manager->appendToggle(np));
 	}
 	{

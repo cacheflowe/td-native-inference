@@ -103,7 +103,7 @@ Everything else is Apache-2.0 or MIT.
 
 | You need | Use | Why |
 |---|---|---|
-| A rigged character or 3D joints (puppets, metric positions) | **MediaPipe Holistic GPU** (5.7 ms with hands and face) | Metric 3D world landmarks for body and hands, several people, the same table as the CPU version. Needs YOLO26 |
+| A rigged character or 3D joints (puppets, metric positions) | **MediaPipe Holistic GPU** (~1.5 ms in the background, one frame late; 5.7 ms waiting) | Metric 3D world landmarks for body and hands, several people, the same table as the CPU version. Needs YOLO26 |
 | The same without YOLO26 / AGPL, or with blendshapes | **MediaPipe Holistic** (CPU, ~22 ms if waiting) | One person. The CPU wrapper defaults to not waiting, so it runs a frame or more behind |
 | Body only, with 3D | **MediaPipe Pose** (CPU, ~12 ms) | 33 points including feet and hand ends, world landmarks, a few people. No AGPL |
 | Many people in 2D (crowds, audiences) | **YOLO26 Pose** (GPU, ~2 ms) | 17 COCO keypoints for everyone in frame, cost barely grows with people. AGPL |
@@ -199,10 +199,13 @@ One person: body, both hands and the face mesh in one model (75 tracked joints p
 ### MediaPipe Holistic GPU (`MediaPipeHolisticGPU.tox`)
 The same models as MediaPipe Holistic, converted to ONNX and run on the GPU by OnnxTOP, with
 Holistic's cropping logic reimplemented in the plugin. Same table, so it's a drop-in for the
-CPU wrapper, including for Mixamo Puppet. About 3.5× cheaper per frame than the CPU wrapper waiting for its result
-(5.7 ms vs 20 ms on an RTX 4090 Laptop GPU, one person), and it can track several people
-(**Max Detections**): a nested YOLO26 detector finds them, then each is tracked from its own
-landmarks. **Hands** and **Face Mesh** switch those parts off to save time. No blendshapes. It
+CPU wrapper, including for Mixamo Puppet. It runs in the background by default (**Wait for Result**
+off): about 1.5 ms of TouchDesigner's main thread per frame, plus the tracker's share (about 4.5 ms
+of Python, the same as the CPU wrapper's), with results one frame late, where the CPU wrapper runs two
+or more frames behind and skips frames. With Wait for Result on, results match the frame exactly
+for 5.7 ms (RTX 4090 Laptop GPU, one person). It can track several people (**Max Detections**): a
+nested YOLO26 detector finds them, then each is tracked from its own landmarks, and the detector only
+runs while someone is missing. **Hands** and **Face Mesh** switch those parts off to save time. No blendshapes. It
 agrees with CPU Holistic to a few pixels (face mesh under 1 px on a still photo). It doesn't smooth
 the landmarks itself the way MediaPipe does; the tracker's Output Smoothing does. Needs YOLO26
 (**AGPL-3.0**: `fetch_models.cmd`) for the detector; the converted models are Apache-2.0.
