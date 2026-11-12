@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v0.3.0 (2026-11-12)
+
 New models:
 - **MediaPipe Holistic GPU** (`MediaPipeHolisticGPU.tox`): Holistic's own models converted to ONNX and
   run on the GPU, with Holistic's cropping logic in the plugin. About 5.7 ms per frame for body, hands
