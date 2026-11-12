@@ -97,6 +97,23 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       from COCO-WholeBody 133 to the MediaPipe pose / hand names the trackers and `mixamo_retarget` use
       (world landmarks in metres, hip origin, y up: needs the axis map and a scale from the body's
       proportions); (3) re-check bone rotations on clips against Holistic, fingers via Hands.
+      **Pipeline built Nov 12 (experimental, not in the release or the demos yet).** OnnxTOP Output Mode
+      **Pose Crops**: person boxes from a Crop DAT grown to the model's aspect (unclamped, black outside
+      the image), batch-1 models run once per person, GPU SimCC argmax, Info DAT `kp{i}_u/v/c`, `kp{i}_z`,
+      `crop_w`, `crop_h`; matches a NumPy decode of the same photo within 1.2 px mean. `wrappers/RTMW3D.json`:
+      nested Yolo26Detect (people only) -> crop_boxes -> inference -> `rtmw_info` (`python/rtmw_convert.py`:
+      133 COCO-WholeBody -> Holistic's pose + hands, 75 points, metric world from bone-length scaling) ->
+      tracker mode `rtmw` (skeleton `RTMW_BODY`). Tests: `tests/test_rtmw_convert.py`. MixamoPuppet runs
+      from its tracks unchanged.
+      Results: dancer clip **3.4 ms** RTMW3D vs **18.1 ms** Holistic (median infer_ms); warrior photo limb
+      directions vs Holistic 4-21 deg. **Open problems:** (1) head yaw: RTMW3D's ear / eye depths come out
+      reversed vs Holistic on the warrior photo (Holistic is right there), so the head turns the wrong way;
+      flipping z fixes the head but worsens the limbs, so it's the face depth, not the axis. Try deriving the
+      head turn from 2D face points (ears vs nose) instead of z, or weight the head from the shoulders.
+      (2) An occasional limb glitch on the dancer clip (one of four sampled frames leaned badly). (3) Fingers
+      are coarse (full-body crop): plan MediaPipe Hands for fingers. (4) The world scale is per frame
+      (bone-length median): smooth it. (5) Before shipping: fetch_models entries for RTMW3D-X (Apache-2.0,
+      369 MB), demos, docs, a clean-process test.
       **2D benchmark done Nov 11** (the RTMW3D export is still to do). TensorRT fp16, models in
       `models/onnx/rtmpose/` (OpenMMLab `onnx_sdk` zips, gitignored): 256x192 crops, dynamic batch,
       SimCC outputs `simcc_x` [N, K, 384] / `simcc_y` [N, K, 512].

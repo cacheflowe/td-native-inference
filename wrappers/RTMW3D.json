@@ -1,0 +1,24 @@
+{
+	"name": "RTMW3D",
+	"label": "RTMW3D Whole Body",
+	"plugin": "OnnxTOP",
+	"kind": "landmarks",
+	"tracker": "rtmw",
+	"detector": "Yolo26Detect",
+	"preset": {
+		"Model": "models/onnx/rtmw3d/rtmw3d-x.onnx",
+		"Mode": "posecrops",
+		"Inputnorm": "imagenet",
+		"Cropdat": "crop_boxes",
+		"Cropscale": 1.25,
+		"Confthreshold": 0.3
+	},
+	"model": [
+		"Cropscale",
+		"Confthreshold"
+	],
+	"tracking": [
+		"Tracklossframes",
+		"Outputsmoothing"
+	]
+}

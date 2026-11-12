@@ -30,6 +30,7 @@ import td	# imported modules don't get TD's globals (project, op)
 
 MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
+POSE_CROPS_MODULES = ('rtmw_convert',)	# a landmarks spec with a "detector": OnnxTOP Pose Crops after a nested detector
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
 KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript', 'scores', 'speech')
@@ -59,6 +60,8 @@ LAYOUT = {
 	'local/modules/object_tracker': (0, 0), 'local/modules/mediapipe_skeletons': (0, -150),
 	'local/modules/box_tracker_pipeline': (1, 0), 'local/modules/face_tracker_pipeline': (1, -150),
 	'local/modules/pose_tracker_pipeline': (1, -300), 'local/modules/onnxtop_tables': (2, -150),
+	'local/modules/rtmw_convert': (2, -300),
+	'detector': (1, -20), 'crop_boxes': (2, 320), 'rtmw_info': (2, 60),
 }
 LAYOUT_KIND = {
 	# No tracker or visualizers: the resized result sits right after inference.
@@ -70,7 +73,7 @@ LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (
 	# Instances: a band under the CHOP outputs. instance_matte above instance_lookup (input order).
 	'instance_matte': (5, -680), 'instance_colors': (4, -820), 'instance_lookup': (5, -820),
 	'instances': (6, -750), 'out_instances': (7, -750)}
-DOCKED = ('channels_callbacks', 'scores_callbacks', 'instance_colors_callbacks', 'instances_pixel', 'tracker/script_tracks_callbacks',
+DOCKED = ('rtmw_info_callbacks', 'channels_callbacks', 'scores_callbacks', 'instance_colors_callbacks', 'instances_pixel', 'tracker/script_tracks_callbacks',
 	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
 
 # Audio wrappers, same banding: the caption chain on top, the DAT outputs, then the CHOP outputs.
@@ -214,7 +217,7 @@ def _add_code(comp, module_names=MODULES):
 		_synced_dat(modules, module_name, f'python/{module_name}.py')
 
 
-def _build_tracker(comp, mode):
+def _build_tracker(comp, mode, source='detections'):
 	tracker = comp.create('baseCOMP', 'tracker')
 	tables = comp.op('local/modules/onnxtop_tables').module
 	tables.setup_parameters(tracker)
@@ -233,7 +236,7 @@ def _build_tracker(comp, mode):
 		output = tracker.create('outDAT', 'out_' + suffix)
 		output.par.connectorder = index
 		_connect(output, script)
-	_connect(tracker, comp.op('detections'))
+	_connect(tracker, comp.op(source))
 	return tracker
 
 
@@ -250,6 +253,23 @@ def _build_classifier(comp, spec):
 	comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
 		'\tonnxtop_tables.write_scores(scriptOp, parent(), scriptOp.inputs[0], scriptOp.inputs[1])\n')
 	_connect(scores, comp.op('crop_boxes'), comp.op('detections'))
+	return detector
+
+
+def _build_posecrops(comp, spec):
+	"""Pose Crops wrapper: a nested detector finds and tracks the people, `inference` runs the pose model
+	on their crops, and `rtmw_info` reshapes its keypoints into the tracker's Holistic-like table."""
+	detector = build(load_spec(spec['detector']), comp, name='detector')
+	detector.par.Active.expr = 'parent().par.Active.eval()'
+	detector.par.Debugoverlay = False
+	detector.par.Classfilter = 0	# people only (COCO class 0)
+	_connect(detector, comp.op('input'))
+	# script_tracks, not out_tracks: the crops must not depend on the pose table.
+	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
+	convert = comp.create('scriptDAT', 'rtmw_info')
+	comp.op('rtmw_info_callbacks').text = ('import rtmw_convert\ndef onCook(scriptOp):\n'
+		"\trtmw_convert.convert(scriptOp, scriptOp.inputs[0], parent().op('input'))\n")
+	_connect(convert, comp.op('detections'))
 	return detector
 
 
@@ -476,7 +496,8 @@ def build(spec, parent_comp, name=None):
 		_layout(comp, spec)
 		_restore_wires(comp, inputs, outputs)
 		return comp
-	_add_code(comp)
+	posecrops = spec['kind'] == 'landmarks' and bool(spec.get('detector'))
+	_add_code(comp, MODULES + (POSE_CROPS_MODULES if posecrops else ()))
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
@@ -489,8 +510,8 @@ def build(spec, parent_comp, name=None):
 	passthrough = comp.create('nullTOP', 'null_passthrough')
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
-	tracker = _build_tracker(comp, spec['tracker']) if spec.get('tracker') else None
-	detector = _build_classifier(comp, spec) if kind == 'classifier' else None
+	detector = _build_classifier(comp, spec) if kind == 'classifier' else _build_posecrops(comp, spec) if posecrops else None
+	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if posecrops else 'detections') if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
 		for suffix in ('tracks', 'joints', 'bones'):

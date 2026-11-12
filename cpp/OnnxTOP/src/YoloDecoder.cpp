@@ -604,6 +604,8 @@ bool YoloDecoder::addSimcc3D(const OnnxEngine& engine, const CropBox* boxes, int
 			hy = b.y2;
 		}
 		d.cls = 0;
+		d.cropW = sw;
+		d.cropH = sh;
 		d.u1 = std::clamp(lx / srcW, 0.f, 1.f);
 		d.u2 = std::clamp(hx / srcW, 0.f, 1.f);
 		d.v1 = std::clamp(1.f - hy / srcH, 0.f, 1.f);	// image-bottom edge -> lower v

@@ -1135,7 +1135,7 @@ bool OnnxTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 		return true;
 	}
 	infoSize->rows = 1 + (int32_t)myYolo.detections().size();
-	infoSize->cols = infoBaseCols() + myYolo.keypointCount() * 3 + myYolo.keypointZCount();
+	infoSize->cols = infoBaseCols() + myYolo.keypointCount() * 3 + myYolo.keypointZCount() + myYolo.poseExtraCols();
 	infoSize->byColumn = false;
 	return true;
 }
@@ -1207,7 +1207,8 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 	{
 		const int kp3 = myYolo.keypointCount() * 3;
 		float v = c < base ? vals[c] : c < base + kp3 ? (c - base < (int)d.keypoints.size() ? d.keypoints[c - base] : 0.f)
-			: (c - base - kp3 < (int)d.keypointsZ.size() ? d.keypointsZ[c - base - kp3] : 0.f);
+			: c < base + kp3 + myYolo.keypointZCount() ? (c - base - kp3 < (int)d.keypointsZ.size() ? d.keypointsZ[c - base - kp3] : 0.f)
+			: (c - base - kp3 - myYolo.keypointZCount() == 0 ? d.cropW : d.cropH);
 		formatValue(buf, sizeof(buf), v, c < 2);
 		entries->values[c]->setString(buf);
 	}
@@ -1234,11 +1235,13 @@ void OnnxTOP::headerRow(int cols)
 			snprintf(buf, sizeof(buf), "kp%d_%s", (c - base) / 3, suffix[(c - base) % 3]);
 			myHeader[(size_t)c] = buf;
 		}
-		else
+		else if (c < base + kp3 + myYolo.keypointZCount())
 		{
 			snprintf(buf, sizeof(buf), "kp%d_z", c - base - kp3);
 			myHeader[(size_t)c] = buf;
 		}
+		else
+			myHeader[(size_t)c] = c - base - kp3 - myYolo.keypointZCount() == 0 ? "crop_w" : "crop_h";
 	}
 }
 

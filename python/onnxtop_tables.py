@@ -42,10 +42,10 @@ import mediapipe_skeletons
 import object_tracker
 import pose_tracker_pipeline
 
-MODES = ['pose', 'movenet', 'face', 'detect', 'segment', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic', 'mp_facedet']
+MODES = ['pose', 'movenet', 'face', 'detect', 'segment', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic', 'mp_facedet', 'rtmw']
 MODE_LABELS = ['Pose (YOLO26-pose)', 'Pose (MoveNet multipose)', 'Face (YuNet)', 'Detect (YOLO26)', 'Segment (YOLO26-seg)',
 	'MediaPipe Pose (33)', 'MediaPipe Hands / Gesture (21)', 'MediaPipe Face (478)', 'MediaPipe Holistic (553)',
-	'MediaPipe Face Detector (6)']
+	'MediaPipe Face Detector (6)', 'RTMW3D Whole Body (75)']
 # MediaPipeTOP Task that produces each MediaPipe mode's Info DAT.
 MP_SKELETONS = {
 	'mp_pose': mediapipe_skeletons.MP_POSE,
@@ -53,9 +53,10 @@ MP_SKELETONS = {
 	'mp_face': mediapipe_skeletons.MP_FACE,
 	'mp_holistic': mediapipe_skeletons.MP_HOLISTIC,
 	'mp_facedet': mediapipe_skeletons.MP_FACE_DET,
+	'rtmw': mediapipe_skeletons.RTMW_BODY,
 }
 MP_TASKS = {'mp_pose': 'Pose', 'mp_hands': 'Hands or Gesture', 'mp_face': 'Face', 'mp_holistic': 'Holistic',
-	'mp_facedet': 'Face Detector'}
+	'mp_facedet': 'Face Detector', 'rtmw': 'Pose Crops (the RTMW3D wrapper)'}
 POSE_MODES = ('pose', 'movenet', *MP_SKELETONS)
 
 # MediaPipe already detects, tracks and smooths, so the Python side mostly assigns ids:

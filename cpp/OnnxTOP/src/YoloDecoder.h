@@ -19,6 +19,7 @@ struct Detection
 	float				u1 = 0.f, v1 = 0.f, u2 = 0.f, v2 = 0.f;	// TD UV of the source image (0-1, origin bottom-left)
 	std::vector<float>	keypoints;	// u, v, conf triplets (pose), empty otherwise
 	std::vector<float>	keypointsZ;	// Pose Crops (RTMW3D): relative depth per keypoint, else empty
+	float				cropW = 0.f, cropH = 0.f;	// Pose Crops: the crop the model saw, in source px (scales the depth)
 	float				maskFill = -1.f;	// seg: fraction of the box covered by mask > threshold
 };
 
@@ -81,6 +82,7 @@ public:
 	const std::vector<Detection>&	detections() const { return myDetections; }
 	int								keypointCount() const { return myKeypoints; }
 	int								keypointZCount() const { return myKeypointsZ; }
+	int								poseExtraCols() const { return myKeypointsZ ? 2 : 0; }	// crop_w, crop_h after the z columns
 	bool							isSegmentation() const { return mySeg; }
 	void							clear() { myDetections.clear(); }
 
