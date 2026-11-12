@@ -78,17 +78,19 @@ namespace
 	const char* kProviderLabels[] = { "Auto (CUDA now, TensorRT once built)", "TensorRT", "CUDA" };
 	const OrtProvider kProviders[] = { OrtProvider::Auto, OrtProvider::TensorRT, OrtProvider::CUDA };
 	// Menu values are saved by name, so existing nodes keep "yolo" / "raw".
-	const char* kModeNames[] = { "yolo", "movenet", "yunet", "crops", "raw" };
+	const char* kModeNames[] = { "yolo", "movenet", "yunet", "crops", "raw", "posecrops" };
 	const char* kModeLabels[] = { "YOLO End2End (det / seg / pose)", "MoveNet Multipose", "YuNet Faces",
-		"Classify Crops (boxes from a DAT)", "Raw Output Tensor" };
-	enum Mode { ModeYolo = 0, ModeMoveNet = 1, ModeYuNet = 2, ModeCrops = 3, ModeRaw = 4 };
+		"Classify Crops (boxes from a DAT)", "Raw Output Tensor", "Pose Crops (RTMPose / RTMW SimCC)" };
+	enum Mode { ModeYolo = 0, ModeMoveNet = 1, ModeYuNet = 2, ModeCrops = 3, ModeRaw = 4, ModePoseCrops = 5 };
 	constexpr int kCropSheetCell = 128;	// px per tile of the Classify Crops debug image
 
 	// Crop DAT rows -> source-pixel boxes (top-down) + ids. Accepts a tracks table
 	// (track_id, x_left, y_bottom, x_right, y_top) or an OnnxTOP Info DAT (id, u1, v1, u2, v2),
 	// both in TD UV of the source image (origin bottom-left).
+	// aspect > 0 (Pose Crops): each box grows to that width / height ratio and is NOT clamped to the
+	// image (the model sees black beyond it), so the crop maps back to the image by a plain scale.
 	bool parseCropDat(const OP_DATInput* dat, int srcW, int srcH, float scale, bool square, int maxN,
-		std::vector<CropBox>& boxes, std::vector<std::string>& ids, std::string& err)
+		std::vector<CropBox>& boxes, std::vector<std::string>& ids, std::string& err, float aspect = 0.f)
 	{
 		boxes.clear();
 		ids.clear();
@@ -133,8 +135,16 @@ namespace
 			float w = std::fabs(x2 - x1) * scale, h = std::fabs(y2 - y1) * scale;
 			if (square)
 				w = h = std::max(w, h);
-			CropBox b{ std::max(0.f, cx - w * 0.5f), std::max(0.f, cy - h * 0.5f),
-				std::min((float)srcW, cx + w * 0.5f), std::min((float)srcH, cy + h * 0.5f) };
+			if (aspect > 0.f && w > 0.f && h > 0.f)
+			{
+				if (w / h < aspect)
+					w = h * aspect;
+				else
+					h = w / aspect;
+			}
+			CropBox b = aspect > 0.f ? CropBox{ cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f }
+				: CropBox{ std::max(0.f, cx - w * 0.5f), std::max(0.f, cy - h * 0.5f),
+					std::min((float)srcW, cx + w * 0.5f), std::min((float)srcH, cy + h * 0.5f) };
 			if (b.x2 - b.x1 < 2.f || b.y2 - b.y1 < 2.f)
 				continue;
 			boxes.push_back(b);
@@ -591,7 +601,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	bool cropSquare = inputs->getParInt("Cropsquare") != 0;
 	bool cropSoftmax = inputs->getParInt("Softmax") != 0;
 	int cropInterval = std::max(1, inputs->getParInt("Classifyinterval"));
-	const OP_DATInput* cropDat = mode == ModeCrops ? inputs->getParDAT("Cropdat") : nullptr;
+	const OP_DATInput* cropDat = mode == ModeCrops || mode == ModePoseCrops ? inputs->getParDAT("Cropdat") : nullptr;
 	myClassNames = splitNames(inputs->getParString("Classnames"));
 	RawOptions rawOpt;
 	rawOpt.index = inputs->getParInt("Rawoutput");
@@ -612,9 +622,11 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Cachefolder", provider != OrtProvider::CUDA);
 	for (const char* p : { "Confthreshold", "Maxdetections" })
 		inputs->enablePar(p, mode != ModeRaw && mode != ModeCrops);
-	for (const char* p : { "Cropdat", "Batchsize", "Cropscale", "Cropsquare", "Softmax", "Classnames", "Classifyinterval" })
+	for (const char* p : { "Batchsize", "Cropsquare", "Softmax", "Classnames", "Classifyinterval" })
 		inputs->enablePar(p, mode == ModeCrops);
-	inputs->enablePar("Letterbox", mode != ModeCrops);
+	for (const char* p : { "Cropdat", "Cropscale" })
+		inputs->enablePar(p, mode == ModeCrops || mode == ModePoseCrops);
+	inputs->enablePar("Letterbox", mode != ModeCrops && mode != ModePoseCrops);
 	inputs->enablePar("Classfilter", mode == ModeYolo);
 	inputs->enablePar("Nmsthreshold", mode == ModeYuNet);
 	inputs->enablePar("Normscale", normKind == InputNormKind::Custom);
@@ -674,7 +686,15 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 
 	const int srcW = (int)top->textureDesc.width, srcH = (int)top->textureDesc.height;
 	myInputFrame = top->totalCooks;
-	if (mode == ModeCrops && !parseCropDat(cropDat, srcW, srcH, cropScale, cropSquare, kMaxBatch, myCropBoxes, myCropIds, err))
+	// Pose Crops: boxes at the model's own aspect (width / height of its input).
+	float poseAspect = 0.f;
+	if (mode == ModePoseCrops && myEngine && !myEngine->inputs().empty() && myEngine->inputs()[0].shape.size() == 4)
+	{
+		const auto& ps = myEngine->inputs()[0].shape;
+		poseAspect = (float)ps[widthDim(ps)] / (float)std::max<int64_t>(1, ps[heightDim(ps)]);
+	}
+	if ((mode == ModeCrops || mode == ModePoseCrops) &&
+		!parseCropDat(cropDat, srcW, srcH, cropScale, cropSquare && mode == ModeCrops, kMaxBatch, myCropBoxes, myCropIds, err, poseAspect))
 		myWarning = err;
 
 	OnnxEngine* engine = active ? myEngine.get() : nullptr;
@@ -709,10 +729,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	outInfo.textureDesc.depth = 1;
 	outInfo.textureDesc.pixelFormat = OP_PixelFormat::RGBA16Float;
 
-	if (engine && mode == ModeCrops)
+	if (engine && (mode == ModeCrops || mode == ModePoseCrops))
 	{
-		// Debug image: a contact sheet of every batch slot's crop.
-		int B = (int)in->shape[0];
+		// Debug image: a contact sheet of every batch slot's crop (Pose Crops: one cell per person).
+		int B = mode == ModePoseCrops ? std::max(1, (int)std::min<size_t>(myCropBoxes.size(), kMaxBatch)) : (int)in->shape[0];
 		int cols = (int)std::ceil(std::sqrt((double)B));
 		outInfo.textureDesc.width = cols * kCropSheetCell;
 		outInfo.textureDesc.height = ((B + cols - 1) / cols) * kCropSheetCell;
@@ -863,6 +883,49 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		if ((int)myCropBoxes.size() > B && myWarning.empty())
 			myWarning = std::to_string(myCropBoxes.size()) + " boxes but Batch Size is " + std::to_string(B) +
 				" -- only the first " + std::to_string(B) + " are classified";
+	}
+	else if (engine && inSurf && mode == ModePoseCrops)
+	{
+		// One model run per person when the model's batch is 1 (RTMW3D-X), else per batch of crops.
+		// Always synchronous: each run's SimCC heads are decoded before the next reuses the buffers.
+		if (!myDevCropBoxes)
+			cudaMalloc(&myDevCropBoxes, kMaxBatch * sizeof(CropBox));
+		const int B = std::max(1, (int)in->shape[0]);
+		const int n = (int)std::min<size_t>(myCropBoxes.size(), kMaxBatch);
+		if (n > 0)
+			cudaMemcpyAsync(myDevCropBoxes, myCropBoxes.data(), n * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
+		myYolo.clearPose();
+		bool ok = true;
+		for (int start = 0; start < n && ok; start += B)
+		{
+			const int m = std::min(B, n - start);
+			cudaError_t ce = launchCropPreprocess(inSurf, fmt, srcW, srcH, myDevCropBoxes + start, m, B, inputNorm, inLayout,
+				in->device, myModelW, myModelH, myStream);
+			if (ce != cudaSuccess)
+			{
+				myError = std::string("Crop kernel failed: ") + cudaGetErrorString(ce);
+				ok = false;
+			}
+			else if (!queueRun(true))
+				ok = false;
+			else if (!myYolo.addSimcc3D(*engine, myCropBoxes.data() + start, m, srcW, srcH, confThresh, myStream, err))
+			{
+				myError = err;
+				ok = false;
+			}
+		}
+		readInferMs();
+		myResultFrame = top->totalCooks;
+		myYoloMode = true;
+		if (ok)
+		{
+			const int cells = std::max(1, n);
+			launchCropSheet(inSurf, fmt, srcW, srcH, myDevCropBoxes, n, (int)std::ceil(std::sqrt((double)cells)), kCropSheetCell,
+				outSurf, outW, outH, myStream);
+			wrote = true;
+		}
+		if ((int)myCropBoxes.size() > kMaxBatch && myWarning.empty())
+			myWarning = std::to_string(myCropBoxes.size()) + " boxes but at most " + std::to_string(kMaxBatch) + " people are tracked";
 	}
 	else if (engine && inSurf)
 	{
@@ -1072,7 +1135,7 @@ bool OnnxTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 		return true;
 	}
 	infoSize->rows = 1 + (int32_t)myYolo.detections().size();
-	infoSize->cols = infoBaseCols() + myYolo.keypointCount() * 3;
+	infoSize->cols = infoBaseCols() + myYolo.keypointCount() * 3 + myYolo.keypointZCount();
 	infoSize->byColumn = false;
 	return true;
 }
@@ -1142,7 +1205,9 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 	float vals[] = { (float)(index - 1), (float)d.cls, d.conf, d.u1, d.v1, d.u2, d.v2, d.maskFill };
 	for (int c = 0; c < nEntries; c++)
 	{
-		float v = c < base ? vals[c] : (c - base < (int)d.keypoints.size() ? d.keypoints[c - base] : 0.f);
+		const int kp3 = myYolo.keypointCount() * 3;
+		float v = c < base ? vals[c] : c < base + kp3 ? (c - base < (int)d.keypoints.size() ? d.keypoints[c - base] : 0.f)
+			: (c - base - kp3 < (int)d.keypointsZ.size() ? d.keypointsZ[c - base - kp3] : 0.f);
 		formatValue(buf, sizeof(buf), v, c < 2);
 		entries->values[c]->setString(buf);
 	}
@@ -1151,7 +1216,8 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 void OnnxTOP::headerRow(int cols)
 {
 	const int base = infoBaseCols();
-	const std::string key = std::to_string(base) + "/" + std::to_string(cols);
+	const int kp3 = myYolo.keypointCount() * 3;
+	const std::string key = std::to_string(base) + "/" + std::to_string(cols) + "/" + std::to_string(kp3);
 	if (key == myHeaderKey)
 		return;
 	myHeaderKey = key;
@@ -1163,9 +1229,14 @@ void OnnxTOP::headerRow(int cols)
 	{
 		if (c < base)
 			myHeader[(size_t)c] = header[c];
-		else
+		else if (c < base + kp3)
 		{
 			snprintf(buf, sizeof(buf), "kp%d_%s", (c - base) / 3, suffix[(c - base) % 3]);
+			myHeader[(size_t)c] = buf;
+		}
+		else
+		{
+			snprintf(buf, sizeof(buf), "kp%d_z", c - base - kp3);
 			myHeader[(size_t)c] = buf;
 		}
 	}
@@ -1283,8 +1354,10 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		sp.defaultValue = kModeNames[0];
 		sp.help = "YOLO: Ultralytics end2end det / seg / pose. MoveNet: multipose [1, 6, 56] (set Input Normalize "
 			"0 to 255 and Dynamic Size, e.g. 256 x 256). YuNet: OpenCV Zoo face detector (set Input Normalize "
-			"0 to 255 and Channel Order BGR). Raw: show an output tensor as an image (e.g. Depth Anything).";
-		check(manager->appendMenu(sp, 5, kModeNames, kModeLabels));
+			"0 to 255 and Channel Order BGR). Raw: show an output tensor as an image (e.g. Depth Anything). "
+			"Pose Crops: person boxes from the Crop DAT, cropped to the model's aspect, run through an RTMPose / RTMW / RTMW3D "
+			"SimCC model (Input Normalize ImageNet); keypoints (and depth for RTMW3D) go to the Info DAT.";
+		check(manager->appendMenu(sp, 6, kModeNames, kModeLabels));
 	}
 	{
 		OP_NumericParameter np("Letterbox");

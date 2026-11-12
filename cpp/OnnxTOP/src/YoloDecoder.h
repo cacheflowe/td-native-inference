@@ -18,6 +18,7 @@ struct Detection
 	float				conf = 0.f;
 	float				u1 = 0.f, v1 = 0.f, u2 = 0.f, v2 = 0.f;	// TD UV of the source image (0-1, origin bottom-left)
 	std::vector<float>	keypoints;	// u, v, conf triplets (pose), empty otherwise
+	std::vector<float>	keypointsZ;	// Pose Crops (RTMW3D): relative depth per keypoint, else empty
 	float				maskFill = -1.f;	// seg: fraction of the box covered by mask > threshold
 };
 
@@ -68,8 +69,18 @@ public:
 	bool decodeYuNet(const OnnxEngine& engine, const Letterbox& lb, float confThresh, float nmsThresh, int maxDets,
 		cudaSurfaceObject_t outSurf, int outW, int outH, cudaStream_t stream, std::string& err);
 
+	// Pose Crops: start a frame (no detections), then add each batch of crops. engine's outputs are
+	// SimCC heads [B, K, 2W] (x), [B, K, 2H] (y) and optionally [B, K, bins] (z); crop i of `boxes`
+	// (source px, top-down, the crop the model saw, not clamped to the image) is batch slot i.
+	// One Detection per person whose mean body score (first 17 keypoints) reaches confThresh; its
+	// keypoints (u, v, score) are in source UV, keypointsZ is the model's relative depth.
+	void clearPose() { myDetections.clear(); myKeypoints = 0; myKeypointsZ = 0; mySeg = false; }
+	bool addSimcc3D(const OnnxEngine& engine, const CropBox* boxes, int numCrops, int srcW, int srcH,
+		float confThresh, cudaStream_t stream, std::string& err);
+
 	const std::vector<Detection>&	detections() const { return myDetections; }
 	int								keypointCount() const { return myKeypoints; }
+	int								keypointZCount() const { return myKeypointsZ; }
 	bool							isSegmentation() const { return mySeg; }
 	void							clear() { myDetections.clear(); }
 
@@ -86,5 +97,9 @@ private:
 
 	std::vector<Detection>	myDetections;
 	int						myKeypoints = 0;
+	int						myKeypointsZ = 0;
+	float*					myHostSimcc = nullptr;	// pinned: crops * K * 4
+	float*					myDevSimcc = nullptr;
+	size_t					mySimccBytes = 0;
 	bool					mySeg = false;
 };

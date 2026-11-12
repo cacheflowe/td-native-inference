@@ -30,6 +30,10 @@ YoloDecoder::~YoloDecoder()
 		cudaFree(myDevCounts);
 	if (myHostCounts)
 		cudaFreeHost(myHostCounts);
+	if (myHostSimcc)
+		cudaFreeHost(myHostSimcc);
+	if (myDevSimcc)
+		cudaFree(myDevSimcc);
 }
 
 bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float confThresh, int classFilter,
@@ -37,6 +41,7 @@ bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float co
 {
 	myDetections.clear();
 	myKeypoints = 0;
+	myKeypointsZ = 0;
 	mySeg = false;
 
 	const auto& outs = engine.outputs();
@@ -236,6 +241,7 @@ bool YoloDecoder::decodeMoveNet(const OnnxEngine& engine, const Letterbox& lb, f
 	constexpr int K = 17, S = K * 3 + 5;
 	myDetections.clear();
 	myKeypoints = 0;
+	myKeypointsZ = 0;
 	mySeg = false;
 	launchClear(outSurf, outW, outH, 8, stream);
 
@@ -308,6 +314,7 @@ bool YoloDecoder::decodeYuNet(const OnnxEngine& engine, const Letterbox& lb, flo
 	const int strides[3] = { 8, 16, 32 };
 	myDetections.clear();
 	myKeypoints = 0;
+	myKeypointsZ = 0;
 	mySeg = false;
 	launchClear(outSurf, outW, outH, 8, stream);
 
@@ -434,6 +441,7 @@ bool YoloDecoder::decodeDetr(const OnnxEngine& engine, const Letterbox& lb, floa
 {
 	myDetections.clear();
 	myKeypoints = 0;
+	myKeypointsZ = 0;
 	mySeg = false;
 	launchClear(outSurf, outW, outH, 8, stream);
 
@@ -486,6 +494,120 @@ bool YoloDecoder::decodeDetr(const OnnxEngine& engine, const Letterbox& lb, floa
 		d.u2 = toU(b[0] + b[2] * 0.5f);
 		d.v1 = toV(b[1] + b[3] * 0.5f);	// image-bottom edge -> lower v
 		d.v2 = toV(b[1] - b[3] * 0.5f);
+		myDetections.push_back(std::move(d));
+	}
+	return true;
+}
+
+bool YoloDecoder::addSimcc3D(const OnnxEngine& engine, const CropBox* boxes, int numCrops, int srcW, int srcH,
+	float confThresh, cudaStream_t stream, std::string& err)
+{
+	const auto& outs = engine.outputs();
+	if (engine.inputs().empty() || outs.size() < 2)
+	{
+		err = "Pose Crops needs a model with SimCC outputs (x, y and optionally z)";
+		return false;
+	}
+	const auto& in = engine.inputs()[0].shape;	// [B, 3, H, W]
+	const auto &ox = outs[0].shape, &oy = outs[1].shape;
+	const bool hasZ = outs.size() >= 3;
+	const std::vector<int64_t> oz = hasZ ? outs[2].shape : std::vector<int64_t>{};
+	bool ok = in.size() == 4 && ox.size() == 3 && oy.size() == 3 && ox[1] == oy[1] && ox[2] == in[3] * 2 && oy[2] == in[2] * 2;
+	for (const TensorSlot& t : outs)
+		ok = ok && t.type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+	if (hasZ)
+		ok = ok && oz.size() == 3 && oz[1] == ox[1] && oz[2] > 0;
+	if (!ok)
+	{
+		err = "Pose Crops expects SimCC outputs float32 [B, K, 2 * input width], [B, K, 2 * input height] and optionally "
+			"[B, K, depth bins] (RTMPose / RTMW / RTMW3D), got " + shapeString(ox) + " " + shapeString(oy) +
+			(hasZ ? " " + shapeString(oz) : std::string());
+		return false;
+	}
+	const int K = (int)ox[1], B = (int)ox[0];
+	const int n = std::min(numCrops, B);
+	if (n <= 0)
+		return true;
+	const size_t bytes = (size_t)n * K * 4 * sizeof(float);
+	if (bytes > mySimccBytes)
+	{
+		if (myHostSimcc)
+			cudaFreeHost(myHostSimcc);
+		if (myDevSimcc)
+			cudaFree(myDevSimcc);
+		myHostSimcc = nullptr;
+		myDevSimcc = nullptr;
+		if (cudaMallocHost(&myHostSimcc, bytes) != cudaSuccess || cudaMalloc(&myDevSimcc, bytes) != cudaSuccess)
+		{
+			err = "Pose Crops: out of memory for the keypoint buffer";
+			mySimccBytes = 0;
+			return false;
+		}
+		mySimccBytes = bytes;
+	}
+	cudaError_t ce = launchSimccArgmax((const float*)outs[0].device, (const float*)outs[1].device,
+		hasZ ? (const float*)outs[2].device : nullptr, n, K, (int)ox[2], (int)oy[2], hasZ ? (int)oz[2] : 0, myDevSimcc, stream);
+	if (ce == cudaSuccess)
+		ce = cudaMemcpyAsync(myHostSimcc, myDevSimcc, bytes, cudaMemcpyDeviceToHost, stream);
+	if (ce != cudaSuccess)
+	{
+		err = std::string("Pose Crops decode failed: ") + cudaGetErrorString(ce);
+		return false;
+	}
+	cudaStreamSynchronize(stream);
+
+	const float inW = (float)in[3], inH = (float)in[2];
+	constexpr float kZRange = 2.1744869f;	// RTMW3D's z range (mmpose / rtmlib)
+	constexpr float kBoxScore = 0.3f;		// keypoints that count toward the person's box
+	myKeypoints = K;
+	myKeypointsZ = hasZ ? K : 0;
+	for (int i = 0; i < n && (int)myDetections.size() < kMaxDets; i++)
+	{
+		const CropBox& b = boxes[i];
+		const float sw = b.x2 - b.x1, sh = b.y2 - b.y1;
+		Detection d;
+		d.keypoints.reserve((size_t)K * 3);
+		if (hasZ)
+			d.keypointsZ.reserve(K);
+		float bodySum = 0.f;
+		int bodyN = std::min(K, 17);
+		float lx = 1e9f, ly = 1e9f, hx = -1e9f, hy = -1e9f;
+		for (int k = 0; k < K; k++)
+		{
+			const float* r = myHostSimcc + ((size_t)i * K + k) * 4;
+			// bin / 2 = crop px (simcc split ratio 2); crop px -> source px (top-down) -> UV.
+			const float ux = b.x1 + r[0] * 0.5f / inW * sw;
+			const float uy = b.y1 + r[1] * 0.5f / inH * sh;
+			d.keypoints.push_back(ux / srcW);
+			d.keypoints.push_back(1.f - uy / srcH);
+			d.keypoints.push_back(r[3]);
+			if (hasZ)
+				d.keypointsZ.push_back((r[2] / inH - 1.f) * kZRange);
+			if (k < bodyN)
+				bodySum += r[3];
+			if (r[3] >= kBoxScore)
+			{
+				lx = std::min(lx, ux);
+				hx = std::max(hx, ux);
+				ly = std::min(ly, uy);
+				hy = std::max(hy, uy);
+			}
+		}
+		d.conf = bodyN > 0 ? bodySum / bodyN : 0.f;
+		if (d.conf < confThresh)
+			continue;
+		if (hx < lx)
+		{
+			lx = b.x1;
+			hx = b.x2;
+			ly = b.y1;
+			hy = b.y2;
+		}
+		d.cls = 0;
+		d.u1 = std::clamp(lx / srcW, 0.f, 1.f);
+		d.u2 = std::clamp(hx / srcW, 0.f, 1.f);
+		d.v1 = std::clamp(1.f - hy / srcH, 0.f, 1.f);	// image-bottom edge -> lower v
+		d.v2 = std::clamp(1.f - ly / srcH, 0.f, 1.f);
 		myDetections.push_back(std::move(d));
 	}
 	return true;

@@ -68,6 +68,12 @@ cudaError_t launchCropPreprocess(cudaSurfaceObject_t src, TexFormat fmt, int src
 	const CropBox* boxes, int numBoxes, int batch, const InputNorm& norm, const InputLayout& layout,
 	void* dst, int dstW, int dstH, cudaStream_t stream);
 
+// SimCC decode for RTMPose / RTMW / RTMW3D heads: sx [crops, K, nx], sy [crops, K, ny] and
+// optionally sz [crops, K, nz] (device float32). out (device, crops * K * 4 floats) gets per
+// keypoint: argmax bin x, y, z (0 without sz) and score = 0.5 * (peak x + peak y).
+cudaError_t launchSimccArgmax(const float* sx, const float* sy, const float* sz, int numCrops, int K,
+	int nx, int ny, int nz, float* out, cudaStream_t stream);
+
 // Debug view of the crops: a grid of `cols` columns of cell x cell tiles (crop k at row-major
 // position k, top-left first) written to an RGBA16Float surface; empty tiles are black.
 cudaError_t launchCropSheet(cudaSurfaceObject_t src, TexFormat fmt, int srcW, int srcH,

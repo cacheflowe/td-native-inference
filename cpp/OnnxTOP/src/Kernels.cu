@@ -170,8 +170,58 @@ namespace
 		CropBox b = boxes[k];
 		float sx = b.x1 + (x + 0.5f) * (b.x2 - b.x1) / w;
 		float sy = b.y1 + (y + 0.5f) * (b.y2 - b.y1) / h;
-		float4 c = sampleBilinear(src, fmt, srcW, srcH, sx, srcH - sy);	// flip: TD rows are bottom-up
+		// Pose crops (a person box grown to the model's aspect) can reach past the image: black there,
+		// like the affine warp the models were trained with. Classify crops are clamped inside.
+		float4 c = (sx < 0.f || sy < 0.f || sx >= srcW || sy >= srcH) ? make_float4(0.f, 0.f, 0.f, 1.f)
+			: sampleBilinear(src, fmt, srcW, srcH, sx, srcH - sy);	// flip: TD rows are bottom-up
 		writePixel<T>(item, i, plane, nhwc, bgr, norm, c);
+	}
+
+	// SimCC decode: one block per (crop, keypoint). out[4] = argmax bin of x, y, z and the score
+	// 0.5 * (peak x + peak y), as mmpose does. A zero-length axis (no z head) gives bin 0.
+	__global__ void kSimccArgmax(const float* sx, const float* sy, const float* sz, int nx, int ny, int nz, float* out)
+	{
+		const size_t ck = blockIdx.x;
+		const float* arr[3] = { sx + ck * nx, sy + ck * ny, sz ? sz + ck * nz : nullptr };
+		const int len[3] = { nx, ny, sz ? nz : 0 };
+		__shared__ float sv[128];
+		__shared__ int si[128];
+		float best[3];
+		int bi[3];
+		for (int a = 0; a < 3; a++)
+		{
+			float m = -3.4e38f;
+			int mi = 0;
+			for (int t = threadIdx.x; t < len[a]; t += blockDim.x)
+				if (arr[a][t] > m)
+				{
+					m = arr[a][t];
+					mi = t;
+				}
+			sv[threadIdx.x] = m;
+			si[threadIdx.x] = mi;
+			__syncthreads();
+			for (int s = blockDim.x / 2; s > 0; s >>= 1)
+			{
+				if (threadIdx.x < s && (sv[threadIdx.x + s] > sv[threadIdx.x] ||
+					(sv[threadIdx.x + s] == sv[threadIdx.x] && si[threadIdx.x + s] < si[threadIdx.x])))
+				{
+					sv[threadIdx.x] = sv[threadIdx.x + s];
+					si[threadIdx.x] = si[threadIdx.x + s];
+				}
+				__syncthreads();
+			}
+			best[a] = sv[0];
+			bi[a] = si[0];
+			__syncthreads();
+		}
+		if (threadIdx.x == 0)
+		{
+			out[ck * 4 + 0] = (float)bi[0];
+			out[ck * 4 + 1] = (float)bi[1];
+			out[ck * 4 + 2] = len[2] ? (float)bi[2] : 0.f;
+			out[ck * 4 + 3] = 0.5f * (best[0] + best[1]);
+		}
 	}
 
 	__global__ void kProtoMasks(const float* det, int stride, int coefOffset, const SegDet* dets, int numDets,
@@ -586,6 +636,15 @@ cudaError_t launchClear(cudaSurfaceObject_t out, int outW, int outH, int bytesPe
 {
 	dim3 block(16, 16);
 	kClear<<<grid2D(outW, outH, block), block, 0, stream>>>(out, outW, outH, bytesPerPixel);
+	return cudaGetLastError();
+}
+
+cudaError_t launchSimccArgmax(const float* sx, const float* sy, const float* sz, int numCrops, int K,
+	int nx, int ny, int nz, float* out, cudaStream_t stream)
+{
+	if (numCrops <= 0 || K <= 0)
+		return cudaSuccess;
+	kSimccArgmax<<<numCrops * K, 128, 0, stream>>>(sx, sy, sz, nx, ny, nz, out);
 	return cudaGetLastError();
 }
 
