@@ -74,6 +74,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
 | ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, **Raw Output Tensor**, **Pose Crops** (RTMPose / RTMW / RTMW3D on person boxes), **Landmark Crops** or **MediaPipe Holistic** (both below). A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
 | ONNX | Letterbox | Keep aspect with gray padding, like Ultralytics. Off = stretch |
+| ONNX | Letterbox Padding | **Gray** (default, YOLO's training padding) or **Edge Pixels** (the image's border repeated, cv2.BORDER_REPLICATE: what DAViD's own code feeds; gray bars leave artifacts along its outputs' edges) |
 | ONNX | Input Normalize | **0 to 1** (YOLO), **ImageNet mean/std** (Depth Anything, most ViTs), **−1 to 1**, **0 to 255** (MoveNet, YuNet), **Custom** (tensor = rgb01 · Custom Scale + Custom Offset, per channel) |
 | ONNX | Channel Order | RGB, or BGR for OpenCV-trained models (YuNet). Applied before Input Normalize's per-channel values |
 | ONNX | Dynamic Size (W, H) | Only for models whose input H/W are dynamic; greyed out otherwise. Each size is its own TensorRT engine, and only these models include the size in the cache key |
@@ -94,6 +95,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | Raw | Raw Output Index | Which output to show. `[N, H, W]` / `[.., 1, H, W]` → Mono32Float, `[.., C, H, W]` → RGBA32Float (C ≤ 4) |
 | Raw | Normalize | **Min / Max** (default) maps the frame's value range (letterbox padding excluded) to 0–1 on the GPU; **None** passes raw values |
 | Raw | Range Smoothing | Temporal smoothing of that range (0 = per frame, default 0.9) so brightness doesn't pump |
+| Raw | All Outputs (Color Buffers) | Also write every other image-shaped output to color buffers 1, 2, … in output order, raw values (no normalize), same framing; read them with a Render Select TOP (Buffer Index). One inference for a multi-output model (DAViD multi-task: depth in the main output, normals in buffer 1, matte in buffer 2) |
 | Raw | Map to Input Frame | On (default): output at the input's size with the letterbox undone. Off: the tensor's own size |
 
 #### MoveNet multipose
@@ -160,6 +162,22 @@ recurrent state: it starts as a 1×1×1×1 zero tensor and each run's output bec
 input, on the GPU, with no readback. **Reset State** returns it to zero. State advances once per run,
 so a still input converges rather than flickers. A lone `[1]` float input gets Scalar Input. Neither
 appears in the Info DAT's input list, which names the image input only.
+
+#### DAViD (human depth, normals, matte)
+
+Microsoft's [DAViD](https://github.com/microsoft/DAViD) models (MIT): `models/onnx/david/`
+`normal-model-vitb16_384.onnx`, `depth-model-vitb16_384.onnx`,
+`foreground-segmentation-model-vitb16_384.onnx` (ViT-B) and `multi-task-model-vitl16_384.onnx`
+(ViT-L, all three). Output Mode **Raw**, Input Normalize **0 to 1**, Channel Order **BGR**,
+Letterbox Padding **Edge Pixels**; 512 × 512 fixed input. Normals come out as -1..1 vectors
+(RGBA32Float), depth as relative depth (near = small; Min / Max normalize it), the matte 0..1.
+Multi-task: Raw Output Index 0 (depth) with **All Outputs** on puts normals in color buffer 1 and the
+matte in buffer 2. TensorRT FP16 on an RTX 4090 Laptop GPU: about 10 ms for each ViT-B model, 21 ms
+for the multi-task ViT-L (engine builds 2-4 min). The two depth outputs run opposite ways: ViT-B
+depth is near = small, the multi-task one near = large. The ViT-B depth model's whole output sits in
+about 0.419-0.426, which FP16 rounds into visible bands (43 ms in FP32), so the wrappers take depth
+from the multi-task model. Trained on synthetic people only: the background
+is meaningless in depth and normals; mask with the matte.
 
 #### MediaPipe Holistic on the GPU
 

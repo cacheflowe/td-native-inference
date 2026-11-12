@@ -17,7 +17,7 @@ MAX_FRAMES = 1200
 SETTLE_FRAMES = 90
 SOURCES = Path(project.folder) / 'docs' / 'images' / 'sources'
 IMAGES = {'MediaPipeHands': 'hand.jpg', 'MediaPipeFace': 'face.jpg', 'MediaPipeFaceDetector': 'face.jpg',
-	'YuNet': 'face.jpg', 'HSEmotion': 'face.jpg', 'MediaPipeSegment': 'face.jpg'}
+	'YuNet': 'face.jpg', 'HSEmotion': 'face.jpg', 'MediaPipeSegment': 'face.jpg', 'DAViDNormals': 'face.jpg'}
 DEFAULT_IMAGE = 'body.jpg'
 LAB = '/project1/WrapperLab'
 REPORT = Path(project.folder) / 'build' / 'wrapper-lab.json'

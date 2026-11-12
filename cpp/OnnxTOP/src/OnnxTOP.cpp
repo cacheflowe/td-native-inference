@@ -737,6 +737,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	rawOpt.minMax = inputs->getParInt("Rawnormalize") == 1;
 	rawOpt.smoothing = (float)std::clamp(inputs->getParDouble("Rawsmoothing"), 0.0, 0.999);
 	rawOpt.mapToSource = inputs->getParInt("Rawmaptoinput") != 0;
+	const bool rawAll = inputs->getParInt("Rawalloutputs") != 0;
+	const float letterboxPad = inputs->getParInt("Letterboxpad") == 1 ? -1.f : kLetterboxPad;
 	SegOptions segOpt;
 	segOpt.maskThreshold = (float)inputs->getParDouble("Maskthreshold");
 	segOpt.matteConf = (float)inputs->getParDouble("Matteconf");
@@ -765,8 +767,9 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Normoffset", normKind == InputNormKind::Custom);
 	for (const char* p : { "Maskthreshold", "Matteconf", "Matteminfill", "Maskmargin", "Mattenms", "Matteencoding" })
 		inputs->enablePar(p, mode == ModeYolo && myYolo.isSegmentation());
-	for (const char* p : { "Rawoutput", "Rawnormalize", "Rawmaptoinput" })
+	for (const char* p : { "Rawoutput", "Rawnormalize", "Rawmaptoinput", "Rawalloutputs" })
 		inputs->enablePar(p, mode == ModeRaw);
+	inputs->enablePar("Letterboxpad", !cropDatMode && inputs->getParInt("Letterbox") != 0);
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
 	inputs->enablePar("Waitforresult", mode != ModeRaw);
 	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
@@ -916,6 +919,40 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	const OP_CUDAArrayInfo* outArray = output->createCUDAArray(outInfo, nullptr);
 	if (!outArray)
 		return;
+	// Raw + All Outputs: every other image-shaped output in its own color buffer (1, 2, ... in
+	// output order; a Render Select TOP reads them), always raw values, same framing as the main one.
+	struct ExtraOutput
+	{
+		RawOptions				opt;
+		const OP_CUDAArrayInfo*	array = nullptr;
+		int						w = 0, h = 0;
+	};
+	std::vector<ExtraOutput> extras;
+	if (engine && mode == ModeRaw && rawAll)
+	{
+		uint32_t slot = 1;
+		for (int k = 0; k < (int)engine->outputs().size(); k++)
+		{
+			int C, H, W;
+			if (k == rawOpt.index || !rawDims(engine->outputs()[k], C, H, W))
+				continue;
+			ExtraOutput x;
+			x.opt = rawOpt;
+			x.opt.index = k;
+			x.opt.minMax = false;
+			x.opt.mono = C == 1;
+			TOP_CUDAOutputInfo info = outInfo;
+			info.colorBufferIndex = slot++;
+			info.textureDesc.width = rawOpt.mapToSource ? top->textureDesc.width : W;
+			info.textureDesc.height = rawOpt.mapToSource ? top->textureDesc.height : H;
+			info.textureDesc.pixelFormat = x.opt.mono ? OP_PixelFormat::Mono32Float : OP_PixelFormat::RGBA32Float;
+			x.w = (int)info.textureDesc.width;
+			x.h = (int)info.textureDesc.height;
+			x.array = output->createCUDAArray(info, nullptr);
+			if (x.array)
+				extras.push_back(x);
+		}
+	}
 	OP_CUDAAcquireInfo acquire;
 	acquire.stream = myStream;
 	const OP_CUDAArrayInfo* inArray = top->getCUDAArray(acquire, nullptr);
@@ -930,6 +967,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	cudaSurfaceObject_t inSurf = inSurface.surf;
 	int outW = (int)outInfo.textureDesc.width;
 	int outH = (int)outInfo.textureDesc.height;
+	std::vector<std::unique_ptr<FrameSurface>> extraSurfaces;
+	for (const ExtraOutput& x : extras)
+		extraSurfaces.push_back(std::make_unique<FrameSurface>(x.array->cudaArray));
+	bool extrasWritten = false;
 
 	bool wrote = false;
 	// Wait for Result off: decode the run queued last cook, then queue this frame's without waiting.
@@ -1147,7 +1188,12 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			else if (mode == ModeYuNet)
 				ok = myYolo.decodeYuNet(*engine, from, confThresh, nmsThresh, maxDets, outSurf, outW, outH, myStream, err);
 			else
-				return runRaw(*engine, rawOpt, from, outSurf, outW, outH);
+			{
+				bool ok = runRaw(*engine, rawOpt, from, outSurf, outW, outH);
+				for (size_t i = 0; i < extras.size(); i++)
+					extrasWritten |= runRaw(*engine, extras[i].opt, from, extraSurfaces[i]->surf, extras[i].w, extras[i].h);
+				return ok;
+			}
 			if (!ok)
 				myError = err;
 			myYoloMode = true;
@@ -1164,7 +1210,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		if (!(async && decoded && !newInput))
 		{
 			const bool queue = async && newInput;
-			cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, kLetterboxPad, myStream);
+			cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, letterboxPad, myStream);
 			if (ce != cudaSuccess)
 				myError = std::string("Preprocess kernel failed: ") + cudaGetErrorString(ce);
 			else if (queueRun(!queue && mode != ModeRaw))
@@ -1207,6 +1253,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		int bpp = pf == OP_PixelFormat::Mono32Float ? 4 : pf == OP_PixelFormat::RGBA16Float ? 8 : 16;
 		launchClear(outSurf, outW, outH, bpp, myStream);
 	}
+	if (!extrasWritten)
+		for (size_t i = 0; i < extras.size(); i++)
+			if (extraSurfaces[i]->surf)
+				launchClear(extraSurfaces[i]->surf, extras[i].w, extras[i].h, extras[i].opt.mono ? 4 : 16, myStream);
 	}	// surfaces destroyed here, before TD unmaps the arrays
 
 	myContext->endCUDAOperations(nullptr);
@@ -2010,6 +2060,17 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		check(manager->appendToggle(np));
 	}
 	{
+		const char* names[] = { "gray", "edge" };
+		const char* labels[] = { "Gray (Ultralytics)", "Edge Pixels (Repeat)" };
+		OP_StringParameter sp("Letterboxpad");
+		sp.label = "Letterbox Padding";
+		sp.page = "ONNX";
+		sp.defaultValue = names[0];
+		sp.help = "What fills the letterbox bars. Gray: YOLO's training padding. Edge Pixels: the image's edge "
+			"repeated (cv2.BORDER_REPLICATE), what DAViD's own code feeds; gray bars leave artifacts along its edges.";
+		check(manager->appendMenu(sp, 2, names, labels));
+	}
+	{
 		OP_StringParameter sp("Inputnorm");
 		sp.label = "Input Normalize";
 		sp.page = "ONNX";
@@ -2100,6 +2161,16 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.page = "Raw";
 		np.defaultValues[0] = 1.0;
 		np.help = "On: output matches the input's size and framing (letterbox undone). Off: the tensor's own size.";
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Rawalloutputs");
+		np.label = "All Outputs (Color Buffers)";
+		np.page = "Raw";
+		np.defaultValues[0] = 0.0;
+		np.help = "Also write every other image-shaped output, raw values (no normalize), to color buffers 1, 2, ... "
+			"in output order; read them with a Render Select TOP. One inference for a multi-output model "
+			"(DAViD's multi-task depth / normals / matte).";
 		check(manager->appendToggle(np));
 	}
 	{

@@ -1,0 +1,16 @@
+{
+	"name": "DAViDNormals",
+	"label": "DAViD Normals",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/david/normal-model-vitb16_384.onnx",
+		"Mode": "raw",
+		"Inputnorm": "unit",
+		"Channelorder": "bgr",
+		"Letterboxpad": "edge",
+		"Rawnormalize": "none"
+	},
+	"remap": [0.5, 0.5],
+	"model": []
+}

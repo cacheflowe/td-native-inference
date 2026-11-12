@@ -4,7 +4,7 @@ Model files aren't committed (they're large, and some licenses don't allow redis
 Put them here with this layout. The wrappers refer to them as `models/...`; the plugins look for
 that path under the project folder first, then under the folder holding the plugin DLL (an
 installed `Documents/Derivative/Plugins/td-native-inference/models/`). The release zip bundles
-every model below except YOLO26, RVM and Kokoro, which `scripts/fetch_models.ps1` downloads.
+every model below except YOLO26, RVM, Kokoro and DAViD, which `scripts/fetch_models.ps1` downloads.
 
 ```
 models/
@@ -52,6 +52,7 @@ Larger speech-to-text bundles (Parakeet TDT, Qwen3-ASR) are in litert-community 
 | `onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx` | Raw | [Depth-Anything-ONNX](https://github.com/fabio-sim/Depth-Anything-ONNX) ([Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2) Small) | Apache-2.0 (Small only; Base/Large are CC-BY-NC) |
 | `onnx/modnet/modnet.onnx` | Raw | [MODNet](https://github.com/ZHKKKe/MODNet) portrait matting, ONNX export from [Xenova/modnet](https://huggingface.co/Xenova/modnet) on Hugging Face (fp32, 25 MB). Input normalized to -1..1 (Input Normalize = -1 to 1), dynamic H/W in multiples of 32, output alpha 0-1 | Apache-2.0 |
 | `onnx/mediapipe_holistic/pose_landmarks_detector.onnx`, `hand_roi_refinement.onnx`, `hand_landmarks_detector.onnx`, `face_landmarks_detector.onnx` | MediaPipe Holistic | The landmark models inside `mediapipe/holistic_landmarker.task`, converted by `scripts/convert_holistic_onnx.py` (tf2onnx 1.16.1, opset 17; NCHW float input `image`, the pose model's segmentation output dropped). Outputs match the TFLite originals to float32 rounding | Apache-2.0 |
+| `onnx/david/normal-model-vitb16_384.onnx`, `foreground-segmentation-model-vitb16_384.onnx`, `multi-task-model-vitl16_384.onnx` | Raw | [DAViD](https://github.com/microsoft/DAViD) (Microsoft, ICCV 2025): human surface normals and soft matte (ViT-B each), and depth + normals + matte in one (ViT-L), from the repo's release links, SHA-256 checked. Not in the zip (2.3 GB): `fetch_models.ps1` downloads them. The ViT-B depth model isn't used: its output range is too narrow for TensorRT FP16 (banded) and it takes 43 ms in FP32 | MIT |
 | `onnx/rvm/rvm_mobilenetv3_fp32.onnx` | Raw (recurrent) | [Robust Video Matting](https://github.com/PeterL1n/RobustVideoMatting) MobileNetV3, fp32 ONNX from the v1.0.0 release, SHA-256 `88d45312...`. Inputs `src`, `r1i`..`r4i` (state), `downsample_ratio`; outputs `fgr`, `pha`, `r1o`..`r4o`. Not bundled: `fetch_models.ps1` | GPL-3.0 |
 
 Per-model settings (normalization, channel order, input size, thresholds) are in

@@ -87,6 +87,41 @@ The first time an ONNX model runs, it starts on CUDA right away and builds a Ten
 the background (a few minutes, lower frame rate meanwhile). The engine is cached in `trt_cache/`
 next to the model, so later loads take seconds.
 
+## Choosing between similar models
+
+Times are per frame on an RTX 4090 Laptop GPU with TensorRT, for one person.
+
+**Body, hands and face (puppets, full-body tracking):**
+- **MediaPipe Holistic GPU** for anything live: about 5.7 ms on TD's main thread, several people, the
+  same table as the CPU version. Needs YOLO26 (`fetch_models.cmd`) to find people.
+- **MediaPipe Holistic** (CPU) when you can't fetch YOLO26, or need blendshapes. About 20 ms if it waits
+  for each frame; with Wait for Result off it costs TD little but runs a frame or more behind.
+- **MediaPipe Pose** for the body only; **YOLO26 Pose** or **MoveNet** for many people in 2D.
+
+**Cutting a person out (mattes):**
+- **MODNet** (about 2 ms) for most live work; it can shimmer on fast motion.
+- **Robust Video Matting** when the subject moves fast: it carries the previous frames, so it stays
+  steadier. GPL-3.0.
+- **DAViD Matte** (about 10 ms) for the cleanest edges, hair included, when the frame budget allows.
+- **MediaPipe Segmentation** on the CPU, when the GPU is busy.
+
+**Depth:**
+- **Depth Anything V2** for whole scenes (about 5 ms).
+- **DAViD Depth + Normals + Matte** for a person: their shape in more detail, with the background
+  left meaningless. 21 ms, and you get normals and a matte with it.
+
+**DAViD, one model or three:** one map is cheapest from its own model (Normals or Matte, about 10 ms
+each). Two or three maps are cheaper from **DAViD Depth + Normals + Matte** (21 ms for all three) than
+from separate models, and depth only comes from that one.
+
+**Normals from DAViD vs a shader:** a shader (TD's Normal Map TOP, or a normal-map generator tox) turns
+an image's brightness into a height field and takes its slope. It's nearly free, but it measures
+lighting and texture, not shape: a dark shirt pattern becomes bumps, a shadow becomes a dent, and a
+flat-lit face comes out flat. DAViD estimates the actual surface direction of the body (the round of a
+cheek, the turn of an arm, folds in clothing), the same whatever the lighting or color. Use the shader
+for texture detail and stylized embossing; use DAViD when you need the body's real shape, e.g. to
+relight a performer. They also combine: DAViD for the form, a shader layer for fine detail.
+
 ## The models
 
 ### MediaPipe Hands (`MediaPipeHands.tox`)
@@ -190,6 +225,22 @@ per-frame matte such as MODNet. TOP 1 is the matte at the input's resolution. **
 the inference resolution (multiple of 32); **Scalar Input** is RVM's downsample ratio (0.25 for HD,
 0.5 for SD); **Reset State** forgets the previous frames, e.g. after a cut. GPU (CUDA). RVM is
 **GPL-3.0**, so it isn't in the zip: run `fetch_models.cmd`.
+
+### DAViD Normals, Matte (`DAViDNormals.tox`, `DAViDMatte.tox`)
+Microsoft's human-specific models, trained on synthetic people. TOP 1 at the input's resolution:
+- **Normals:** the person's surface normals as a normal map (0..1, i.e. the -1..1 vectors × 0.5 +
+  0.5): the shape of the face, clothing folds and limbs, for relighting a performer or driving shaders.
+- **Matte:** a soft alpha matte with hair detail.
+
+About 10 ms each (RTX 4090 Laptop GPU, TensorRT). The background is meaningless in the normals: mask
+them with a matte. MIT, but 2.3 GB for the DAViD set, so it isn't in the zip: run `fetch_models.cmd`.
+
+### DAViD Depth + Normals + Matte (`DAViDHuman.tox`)
+All three from one larger model (ViT-L) in one inference, about 21 ms. TOP 1 is the person's relative
+depth (near = bright; **Range Smoothing** steadies its range), TOP 3 the normals (0..1 normal map),
+TOP 4 the matte; TOP 2 is the input as usual. This is also the DAViD depth to use: the separate
+ViT-B depth model squeezes its output into a range too narrow for TensorRT's half precision (it comes
+out banded) and costs 43 ms at full precision. MIT, `fetch_models.cmd`.
 
 ### HSEmotion Face Emotion (`HSEmotion.tox`)
 Finds faces with a built-in YuNet and adds emotion scores to each face track: `emotion_label`

@@ -187,6 +187,18 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
 
 ## Next: more model types
 
+- [ ] **DAViD (Microsoft, MIT) wrappers, Nov 12, built after a TD restart.** Human normals / depth / matte
+      (ViT-B, ~10 ms each, TensorRT FP16) and the multi-task ViT-L (all three, 21 ms). OnnxTOP gained
+      Letterbox Padding = Edge Pixels (DAViD's own padding; gray bars left stripes along the outputs) and
+      Raw **All Outputs** (other outputs in color buffers 1, 2, ... for Render Select). Builder: spec
+      `remap` (Math TOP gain / offset on the result) and `extra_outputs` (buffers as TOPs 3, 4, ...).
+      Specs DAViDNormals / DAViDMatte / DAViDHuman; models via fetch_models (2.3 GB, asks). DAViDDepth
+      (ViT-B) dropped: its output spans ~0.419-0.426, banded in FP16, 43 ms in FP32; depth comes from
+      DAViDHuman (near = large there, no flip needed).
+      Remaining edge lines at the image's real left / right borders are the model's (background only).
+      Ideas: run on a person crop (YOLO box) so small people get the full 512 px; mask normals / depth
+      with the matte inside the wrapper; a relighting example.
+
 Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (In CHOP; kinds
 `transcript`, `scores`) and `text` (In DAT; kind `speech`), all from `wrappers/*.json`.
 

@@ -50,7 +50,8 @@ struct InputLayout
 };
 
 // Resize/letterbox the source texture into a 3-channel tensor (layout.nhwc ? NHWC : NCHW),
-// normalized with `norm` (padding is the 0..1 padValue, normalized the same way). Integer
+// normalized with `norm` (padding is the 0..1 padValue, normalized the same way; a negative
+// padValue repeats the image's edge pixels instead, like cv2.BORDER_REPLICATE). Integer
 // element types truncate after clamping to their range, like numpy's astype.
 cudaError_t launchPreprocess(cudaSurfaceObject_t src, TexFormat fmt, const Letterbox& lb,
 	const InputNorm& norm, const InputLayout& layout, void* dst, float padValue, cudaStream_t stream);

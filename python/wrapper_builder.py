@@ -311,7 +311,7 @@ def _build_visuals(comp, spec):
 	preview.par.index.expr = 'int(parent().par.Debugoverlay.eval())'
 	if kind == 'image':
 		overlay = comp.create('resolutionTOP', 'overlay')
-		_connect(overlay, comp.op('inference'))
+		_connect(overlay, _remapped(comp, comp.op('inference'), spec.get('remap'), 'remap'))
 		overlay.par.outputresolution = 'custom'
 		overlay.par.resolutionw.expr = "op('input').width"
 		overlay.par.resolutionh.expr = "op('input').height"
@@ -353,6 +353,33 @@ def _build_visuals(comp, spec):
 			_build_instances(comp)
 	else:
 		_connect(preview, transparent, overlay)
+
+
+def _remapped(comp, source, remap, name):
+	"""`source`, or a Math TOP `name` on it applying a spec's "remap": [gain, offset] (value * gain +
+	offset: DAViD's -1..1 normals -> 0..1 with [0.5, 0.5], depth flipped to near = bright with [-1, 1])."""
+	if not remap:
+		return source
+	math = comp.create('mathTOP', name)
+	math.par.gain, math.par.postoff = remap
+	_connect(math, source)
+	return math
+
+
+def _build_extra_outputs(comp, spec):
+	"""A spec's "extra_outputs": [{"name", "buffer", "remap"?}, ...]: the inference node's other color
+	buffers (OnnxTOP Raw mode, All Outputs) as TOP outputs 3, 4, ... in a band under the CHOPs."""
+	for index, extra in enumerate(spec.get('extra_outputs', ())):
+		name, y = extra['name'], -700 - index * 140
+		select = comp.create('renderselectTOP', name + '_select')
+		select.par.top = 'inference'
+		select.par.bufferindex = extra['buffer']
+		result = _remapped(comp, select, extra.get('remap'), name + '_remap')
+		output = comp.create('outTOP', 'out_' + name)
+		output.par.connectorder = 3 + index
+		_connect(output, result)
+		for node, column in ((select, 5), (result, 6), (output, 7)):
+			node.nodeX, node.nodeY = column * COLUMN, y
 
 
 INSTANCES_GLSL = '''// Instances: each pixel's owner (the matte's G = detection index + 1) in its track's color.
@@ -454,6 +481,8 @@ def _layout(comp, spec):
 		positions, docked = dict(LAYOUT, **LAYOUT_KIND.get(spec['kind'], {})), DOCKED
 		if spec.get('result') == 'inference':
 			positions.update(LAYOUT_RESULT_INFERENCE)
+		if spec.get('remap'):
+			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:
@@ -533,6 +562,7 @@ def build(spec, parent_comp, name=None):
 		output = comp.create('outTOP', suffix)
 		output.par.connectorder = index
 		_connect(output, comp.op(source))
+	_build_extra_outputs(comp, spec)
 	tables = ('tracks', 'joints', 'bones') if comp.op('joints') is not None else ('tracks',)
 	for index, suffix in enumerate(tables, 1):
 		output = comp.create('outDAT', 'out_' + suffix)

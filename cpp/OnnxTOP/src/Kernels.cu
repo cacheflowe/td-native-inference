@@ -116,10 +116,18 @@ namespace
 		float sy = (y + 0.5f - lb.padY) / lb.scaleY;
 
 		float4 c;
-		if (sx < 0.f || sy < 0.f || sx >= lb.srcW || sy >= lb.srcH)
+		if (pad >= 0.f && (sx < 0.f || sy < 0.f || sx >= lb.srcW || sy >= lb.srcH))
 			c = make_float4(pad, pad, pad, 1.f);
 		else
+		{
+			if (pad < 0.f)
+			{
+				// The letterbox repeats the image's edge pixels (cv2.BORDER_REPLICATE).
+				sx = fminf(fmaxf(sx, 0.5f), lb.srcW - 0.5f);
+				sy = fminf(fmaxf(sy, 0.5f), lb.srcH - 0.5f);
+			}
 			c = sampleBilinear(src, fmt, lb.srcW, lb.srcH, sx, lb.srcH - sy);	// flip: TD rows are bottom-up
+		}
 
 		float ch[3] = { bgr ? c.z : c.x, c.y, bgr ? c.x : c.z };
 		size_t plane = (size_t)lb.dstW * lb.dstH;

@@ -1,0 +1,23 @@
+{
+	"name": "DAViDHuman",
+	"label": "DAViD Depth + Normals + Matte",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/david/multi-task-model-vitl16_384.onnx",
+		"Mode": "raw",
+		"Inputnorm": "unit",
+		"Channelorder": "bgr",
+		"Letterboxpad": "edge",
+		"Rawoutput": 0,
+		"Rawnormalize": "minmax",
+		"Rawalloutputs": true
+	},
+	"extra_outputs": [
+		{ "name": "normals", "buffer": 1, "remap": [0.5, 0.5] },
+		{ "name": "matte", "buffer": 2 }
+	],
+	"model": [
+		"Rawsmoothing"
+	]
+}

@@ -3,17 +3,20 @@
 #   YOLO26 (Yolo26Detect / Yolo26Seg / Yolo26Pose)  AGPL-3.0, so not bundled; asks first. ~90 MB.
 #   Robust Video Matting (RVM)                      GPL-3.0, so not bundled; asks first. ~15 MB.
 #   Kokoro-82M (MediaPipeTextToSpeech)              Apache-2.0; left out of the zip for size. ~280 MB.
+#   DAViD (DAViDNormals / Matte / Human)           MIT; left out of the zip for size; asks first. ~2.3 GB.
 #
-# Every file is pinned to a Hugging Face revision and checked by SHA-256: the same files the toxes
+# Every file is pinned (a Hugging Face revision, or DAViD's release URL) and checked by SHA-256: the same files the toxes
 # were tested with. Files already present are skipped. No Python needed.
 #
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-SkipYolo] [-SkipRvm] [-SkipKokoro]
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid]
 param(
 	[switch] $AcceptAgpl,
 	[switch] $AcceptGpl,
 	[switch] $SkipYolo,
 	[switch] $SkipRvm,
-	[switch] $SkipKokoro
+	[switch] $SkipKokoro,
+	[switch] $AcceptDavid,
+	[switch] $SkipDavid
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
@@ -39,7 +42,7 @@ $yolo = @(
 	   sha256 = '6ca5dc9681e0305708085715427f50779c761d5abfddaa0c38ac7c2d89b56085' }
 )
 $rvm = @(
-	@{ path = 'onnxvmvm_mobilenetv3_fp32.onnx'; size = 14975696
+	@{ path = 'onnx\rvm\rvm_mobilenetv3_fp32.onnx'; size = 14975696
 	   url = 'https://github.com/PeterL1n/RobustVideoMatting/releases/download/v1.0.0/rvm_mobilenetv3_fp32.onnx'
 	   sha256 = '88d4531297118f595bf2fd60f6f566aec2e559393802d1f436c380f0cbbd2828' }
 )
@@ -47,6 +50,16 @@ $kokoro = @(
 	@{ path = 'tts\kokoro_int8_fp16.litertlm'; size = 294783298
 	   url = 'https://huggingface.co/litert-community/Kokoro-82M/resolve/33ad69fec6c4d9eb10a547aaf9a8c63e7c446a56/kokoro_int8_fp16.litertlm'
 	   sha256 = 'e7b931ee5d4b7104012a838c9eee240d19ea69cb3ca269041a3274f83dbb7fa1' }
+)
+
+$davidUrl = 'https://facesyntheticspubwedata.z6.web.core.windows.net/iccv-2025/models'
+$david = @(
+	@{ path = 'onnx\david\normal-model-vitb16_384.onnx'; size = 449232211; url = "$davidUrl/normal-model-vitb16_384.onnx"
+	   sha256 = '3d37ecc812b6b50a09c514f3c8c8ad95da5cd6ae9b68c425bc52f1c9cd78c344' },
+	@{ path = 'onnx\david\foreground-segmentation-model-vitb16_384.onnx'; size = 449231719; url = "$davidUrl/foreground-segmentation-model-vitb16_384.onnx"
+	   sha256 = '2bf71a4756fb4356d98d07fa4a284120a6a08a1b0989d90c01067ef6dd6c489d' },
+	@{ path = 'onnx\david\multi-task-model-vitl16_384.onnx'; size = 1380619058; url = "$davidUrl/multi-task-model-vitl16_384.onnx"
+	   sha256 = 'cf993e33ac7d6acac642c59b1512bdf97cd576975e93fe5c9697f3425023b6c1' }
 )
 
 function Get-Sha256([string] $path) {
@@ -78,7 +91,8 @@ function Save-Models($files) {
 $missingYolo = if ($SkipYolo) { @() } else { Get-Missing $yolo }
 $missingRvm = if ($SkipRvm) { @() } else { Get-Missing $rvm }
 $missingKokoro = if ($SkipKokoro) { @() } else { Get-Missing $kokoro }
-if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0) {
+$missingDavid = if ($SkipDavid) { @() } else { Get-Missing $david }
+if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0) {
 	Write-Host "[fetch_models] All models are present in $models"
 	exit 0
 }
@@ -105,4 +119,10 @@ if ($missingKokoro.Count -gt 0) {
 	Write-Host '[fetch_models] Kokoro-82M text to speech (Apache-2.0).'
 	Save-Models $missingKokoro
 }
-Write-Host '[fetch_models] Done. The first run of each YOLO model builds a TensorRT engine (a few minutes).'
+if ($missingDavid.Count -gt 0) {
+	$gb = [Math]::Round((($missingDavid | Measure-Object -Property size -Sum).Sum) / 1GB, 1)
+	Write-Host "[fetch_models] DAViD human depth / normals / matte (Microsoft, MIT): $($missingDavid.Count) files, $gb GB."
+	$accepted = $AcceptDavid -or ((Read-Host 'Download the DAViD models? [y/N]') -match '^[yY]')
+	if ($accepted) { Save-Models $missingDavid } else { Write-Host '[fetch_models] Skipped DAViD.' }
+}
+Write-Host '[fetch_models] Done. The first run of each YOLO or DAViD model builds a TensorRT engine (a few minutes).'

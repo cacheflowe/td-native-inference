@@ -1,0 +1,15 @@
+{
+	"name": "DAViDMatte",
+	"label": "DAViD Matte",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/david/foreground-segmentation-model-vitb16_384.onnx",
+		"Mode": "raw",
+		"Inputnorm": "unit",
+		"Channelorder": "bgr",
+		"Letterboxpad": "edge",
+		"Rawnormalize": "none"
+	},
+	"model": []
+}

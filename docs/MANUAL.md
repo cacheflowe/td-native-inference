@@ -178,6 +178,8 @@ the parameters on the model tox instead.
 | `MediaPipeFace` | video | 478-point face mesh, optional blendshapes and transform matrix | tracks, joints |
 | `MediaPipeFaceDetector` | video | Fast face boxes with 6 points | tracks |
 | `MediaPipeHolistic` | video | Body, both hands and face mesh of one person | tracks, joints, bones |
+| `DAViDNormals` / `DAViDMatte` | video | A person's surface normals / soft matte (one model each) | TOP 1 the image |
+| `DAViDHuman` | video | A person's depth, normals and matte from one model | TOP 1 depth, TOP 3 normals, TOP 4 matte |
 | `MediaPipeHolisticGPU` | video | The same on the GPU (ONNX), one or more people; needs YOLO26 | tracks, joints, bones |
 | `MediaPipeSegment` | video | Person/background mask | TOP 1 mask |
 | `Yolo26Detect` | video | Boxes for 80 object classes. Class Filter keeps one class | tracks with `class_name` |
