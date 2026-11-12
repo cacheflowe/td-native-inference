@@ -5,6 +5,9 @@
 - **Tracker DAT** (`TrackerDAT.dll`, a fourth plugin to allow): the tracker in C++, writing exactly
   the tables the Python tracker wrote. MediaPipe Holistic GPU uses it: one person, all three tables,
   4.5 to 1.3 ms per frame with Face Mesh on, 2.7 to 0.4 ms with it off. The other wrappers follow.
+- MediaPipe Holistic GPU: **Output Smoothing** now defaults to 0.4 (was 0). Unlike CPU Holistic it
+  has no landmark filter of its own, so it was noticeably jittery; 0.4 is about as steady as CPU
+  Holistic for two thirds of a frame of lag.
 - MediaPipe Holistic: **Face Mesh** on the Tracking page. Off, the tables carry the body and hands
   only (75 joints instead of 553) and the tracker costs about a quarter as much (4.7 to 1.2 ms per
   person). The Mixamo Puppet doesn't use the face. On Holistic GPU the Model page's **Face Mesh**

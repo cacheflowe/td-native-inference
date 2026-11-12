@@ -209,8 +209,10 @@ for 5.7 ms (RTX 4090 Laptop GPU, one person). It can track several people (**Max
 nested YOLO26 detector finds them, then each is tracked from its own landmarks, and the detector only
 runs while someone is missing. **Hands** and **Face Mesh** switch those parts off to save time;
 Face Mesh off also leaves the face out of the tables. No blendshapes. It
-agrees with CPU Holistic to a few pixels (face mesh under 1 px on a still photo). It doesn't smooth
-the landmarks itself the way MediaPipe does; the tracker's Output Smoothing does. Needs YOLO26
+agrees with CPU Holistic to a few pixels (face mesh under 1 px on a still photo). It doesn't filter
+the landmarks itself the way MediaPipe does, so the tracker's **Output Smoothing** defaults to 0.4
+here (0 on the CPU wrapper): about as steady as CPU Holistic on the body and steadier on the hands,
+for about two thirds of a frame of lag. Lower it for faster response. Needs YOLO26
 (**AGPL-3.0**: `fetch_models.cmd`) for the detector; the converted models are Apache-2.0.
 
 ### MediaPipe Segmentation (`MediaPipeSegment.tox`)

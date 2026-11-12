@@ -5,6 +5,9 @@
 	"kind": "landmarks",
 	"tracker": "mp_holistic",
 	"tracker_engine": "cpp",
+	"tracker_defaults": {
+		"Outputsmoothing": 0.4
+	},
 	"detector": "Yolo26Detect",
 	"preset": {
 		"Model": "models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",

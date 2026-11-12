@@ -14,6 +14,9 @@ The spec decides what differs:
 	plugin, preset   the custom OP type and its fixed settings (member names like Dynamicsize1 ok)
 	kind             landmarks | boxes | image | classifier (second stage on a nested detector)
 	tracker          onnxtop_tables tracker mode (omit for image models)
+	tracker_engine   'cpp' runs it on the Tracker DAT (cpp/Tracking), else the Python tracker
+	tracker_defaults tracker parameter values that differ from the mode's defaults (e.g. smoothing
+	                 for Holistic GPU, which unlike MediaPipe's own Holistic has no landmark filter)
 	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
 	instances        seg only: TOP 4 colors each tracked object's pixels (Matte Encoding = Instances)
 	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
@@ -236,7 +239,7 @@ def _tracker_dat(tracker, name, table):
 	return node
 
 
-def _build_tracker(comp, mode, source='detections', engine='python'):
+def _build_tracker(comp, mode, source='detections', engine='python', defaults=None):
 	"""The tracker COMP: its Setup / Tracking pages (onnxtop_tables.setup_parameters) and three
 	nodes writing tracks, joints and bones. engine 'python': Script DATs calling onnxtop_tables;
 	'cpp': Tracker DATs, their parameters bound to the COMP's."""
@@ -245,6 +248,10 @@ def _build_tracker(comp, mode, source='detections', engine='python'):
 	tables.setup_parameters(tracker)
 	tracker.par.Trackermode = mode
 	tables.setup_parameters(tracker)
+	for name, value in (defaults or {}).items():
+		parameter = getattr(tracker.par, name)
+		parameter.default = value
+		parameter.val = value
 	info = tracker.create('inDAT', 'in_info')
 	cpp = engine == 'cpp'
 	assert not cpp or mode in TRACKER_DAT_MODES, f'[WrapperBuilder] the Tracker DAT does not run {mode} yet'
@@ -605,7 +612,8 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 	kind = spec['kind']
 	detector = _build_classifier(comp, spec) if kind == 'classifier' else _build_posecrops(comp, spec) if posecrops else None
 	engine = tracker_engine or spec.get('tracker_engine', 'python')
-	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine) if spec.get('tracker') else None
+	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine,
+		spec.get('tracker_defaults')) if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
 		for suffix in ('tracks', 'joints', 'bones'):
