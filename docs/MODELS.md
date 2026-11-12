@@ -89,26 +89,75 @@ next to the model, so later loads take seconds.
 
 ## Choosing between similar models
 
-Times are per frame on an RTX 4090 Laptop GPU with TensorRT, for one person.
+Times are per frame for one person (or one frame of detections): GPU models on an RTX 4090 Laptop
+GPU with TensorRT, MediaPipe (CPU) models on an i9-13900H laptop. MediaPipe models run on a worker
+thread, so with **Wait for Result** off (their default) they cost TouchDesigner's main thread little
+but deliver results a frame or more late; the CPU times below are what a cook pays if it waits.
 
-**Body, hands and face (puppets, full-body tracking):**
-- **MediaPipe Holistic GPU** for anything live: about 5.7 ms on TD's main thread, several people, the
-  same table as the CPU version. Needs YOLO26 (`fetch_models.cmd`) to find people.
-- **MediaPipe Holistic** (CPU) when you can't fetch YOLO26, or need blendshapes. About 20 ms if it waits
-  for each frame; with Wait for Result off it costs TD little but runs a frame or more behind.
-- **MediaPipe Pose** for the body only; **YOLO26 Pose** or **MoveNet** for many people in 2D.
+**Licenses decide some of these.** The YOLO26 models are **AGPL-3.0** and Robust Video Matting is
+**GPL-3.0**: both are fetched, never bundled, and carry obligations if you distribute a project
+using them. **MediaPipe Holistic GPU** uses YOLO26 to find people, so the same applies to it.
+Everything else is Apache-2.0 or MIT.
 
-**Cutting a person out (mattes):**
-- **MODNet** (about 2 ms) for most live work; it can shimmer on fast motion.
-- **Robust Video Matting** when the subject moves fast: it carries the previous frames, so it stays
-  steadier. GPL-3.0.
-- **DAViD Matte** (about 10 ms) for the cleanest edges, hair included, when the frame budget allows.
-- **MediaPipe Segmentation** on the CPU, when the GPU is busy.
+### Bodies and skeletons
 
-**Depth:**
-- **Depth Anything V2** for whole scenes (about 5 ms).
-- **DAViD Depth + Normals + Matte** for a person: their shape in more detail, with the background
-  left meaningless. 21 ms, and you get normals and a matte with it.
+| You need | Use | Why |
+|---|---|---|
+| A rigged character or 3D joints (puppets, metric positions) | **MediaPipe Holistic GPU** (5.7 ms with hands and face) | Metric 3D world landmarks for body and hands, several people, the same table as the CPU version. Needs YOLO26 |
+| The same without YOLO26 / AGPL, or with blendshapes | **MediaPipe Holistic** (CPU, ~22 ms if waiting) | One person. The CPU wrapper defaults to not waiting, so it runs a frame or more behind |
+| Body only, with 3D | **MediaPipe Pose** (CPU, ~12 ms) | 33 points including feet and hand ends, world landmarks, a few people. No AGPL |
+| Many people in 2D (crowds, audiences) | **YOLO26 Pose** (GPU, ~2 ms) | 17 COCO keypoints for everyone in frame, cost barely grows with people. AGPL |
+| A few people in 2D, Apache-licensed | **MoveNet MultiPose** (GPU, ~1.5 ms) | 17 keypoints, up to 6 people, no AGPL |
+
+Only MediaPipe Pose and Holistic (CPU or GPU) give 3D world landmarks; YOLO26 Pose and MoveNet
+are image coordinates only, with no depth. MediaPipe Pose has 33 points, the 17-point models skip
+the hand and foot ends.
+
+### Hands
+
+| You need | Use | Why |
+|---|---|---|
+| Fingers, gestures, hands on their own (a table, a close-up) | **MediaPipe Hands** (CPU, ~7-10 ms for one hand) | 21 joints with depth, Google's 7 gestures with onsets, finds hands without a body |
+| Hands that belong to a body (which person, left vs right) | **MediaPipe Holistic GPU** / **Holistic** | Each hand is found from its arm, so sides and ownership are known; hands share the body's 3D space |
+| Drawing tracked hands in 3D | **Hands Geometry** on either of the above | Spheres and cylinders from a joints table |
+
+### Faces
+
+| You need | Use | Why |
+|---|---|---|
+| Where the faces are, fast, plus head direction | **YuNet** (GPU, ~1.2 ms) | Boxes, 5 points, `yaw` / `pitch` / `roll`, many faces |
+| Face boxes on the CPU | **MediaPipe Face Detector** (CPU, ~1.5 ms) | 6 points, up to 4 faces; the GPU stays free |
+| Expressions, face shape, face tracking for effects | **MediaPipe Face Landmarks** (CPU, ~5.6 ms) | 478-point mesh, 52 blendshapes (smile, blink, jaw open), a 4×4 head transform |
+| Emotion per face | **HSEmotion** | 7 emotion scores per tracked face (uses YuNet inside); raise **Classify Interval** to save time |
+| A face mesh together with the body | **MediaPipe Holistic GPU** / **Holistic** | The 478-point mesh per person; blendshapes only from the CPU version |
+
+### Objects
+
+| You need | Use | Why |
+|---|---|---|
+| What's in the frame and where (80 everyday classes) | **YOLO26 Object Detection** (GPU, ~2.5 ms) | Boxes and labels with tracking; **Class Filter** keeps one class |
+| The same plus each object's exact shape | **YOLO26 Segmentation** (GPU, ~2.4 ms) | A mask per object; **Instances** keeps overlapping people apart, with a color per track |
+
+Both are AGPL-3.0; there's no Apache-licensed object detector in the set yet.
+
+### Cutting a person out (mattes)
+
+| You need | Use | Why |
+|---|---|---|
+| A good matte for most live work | **MODNet** (GPU, ~2 ms) | Hair detail; can shimmer under fast motion |
+| A steady matte on fast movement | **Robust Video Matting** (GPU, CUDA) | Carries the previous frames, so it holds up under motion blur. GPL-3.0 |
+| The cleanest edges | **DAViD Matte** (GPU, ~10 ms) | Sharpest hair and limbs; costs 5× MODNet |
+| Each person separately (overlaps, one person's mask) | **YOLO26 Segmentation**, Instances | Per-person masks with track ids. AGPL |
+| A matte with the GPU busy | **MediaPipe Segmentation** (CPU, ~4.5 ms) | Selfie segmenter; other MediaPipe segmenters load too (hair, multi-class) |
+
+### Depth and shape
+
+| You need | Use | Why |
+|---|---|---|
+| Depth of a whole scene | **Depth Anything V2** (GPU, ~5 ms at 518²) | Everything in frame, near = bright |
+| A person's depth, normals and matte | **DAViD Depth + Normals + Matte** (GPU, ~21 ms) | Finer body shape; the background is meaningless |
+| A person's surface normals (relighting) | **DAViD Normals** (GPU, ~10 ms) | Real surface direction, see below |
+| 3D joints rather than surfaces | **MediaPipe Holistic** / **Pose** | Metric world landmarks |
 
 **DAViD, one model or three:** one map is cheapest from its own model (Normals or Matte, about 10 ms
 each). Two or three maps are cheaper from **DAViD Depth + Normals + Matte** (21 ms for all three) than
@@ -250,13 +299,13 @@ surprise. **Classify Interval** runs the classifier every Nth frame to save GPU 
 
 ## VisionDemo (`VisionDemo.tox`)
 
-All 13 models in one COMP for trying them side by side. Wire a video TOP in and switch models on
+Every video model in one COMP for trying them side by side. Wire a video TOP in and switch models on
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
 overlay composited together (image results behind the overlays); TOP 2 is the input.
 
 ## Audio models
 
-Coming in v0.2. The audio toxes run on the CPU through `MediaPipeCHOP.dll`:
+The audio toxes run on the CPU through `MediaPipeCHOP.dll`:
 - **Speech to text and the sound classifier** take an audio CHOP: Audio Device In, Audio File In, and so on. Any sample rate works, and channels are mixed to mono.
 - **Text to speech** takes text.
 
