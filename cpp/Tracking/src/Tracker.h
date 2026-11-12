@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "BoxPipeline.h"
 #include "Common.h"
 #include "PoseTracker.h"
 
@@ -71,12 +72,17 @@ private:
 	std::string modeError(const InfoView* info);
 	std::vector<std::shared_ptr<const Detection>> readDetections(const InfoView* info, int maxKeypoints);
 	bool fresh(TableKind kind, const Table& out);
+	bool isPoseMode() const;
 	PoseTracker& pipeline();
+	void cookBox(const InfoView* info, Table& out);
+	void cookFace(const InfoView* info, Table& out);
 
 	std::string mode_;
 	std::map<std::string, double> pars_;
 	std::optional<double> results_, resultDelay_;
 	std::unique_ptr<PoseTracker> pose_;
+	std::unique_ptr<BoxPipeline> box_;
+	std::unique_ptr<FacePipeline> face_;
 	std::string pipelineKey_;
 	Layout layout_;
 	bool layoutValid_ = false;

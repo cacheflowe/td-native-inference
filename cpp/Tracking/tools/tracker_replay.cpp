@@ -4,6 +4,7 @@
 #include <string>
 
 #include "Common.h"
+#include "BoxPipeline.h"
 #include "Tracker.h"
 
 using namespace tracking;
@@ -50,5 +51,18 @@ __declspec(dllexport) const char* trk_fixed(double v, int digits) {
 	static std::string s;
 	s = fixed(v, digits);
 	return s.c_str();
+}
+}
+
+extern "C" {
+// Tests: the solvePnP head pose (yaw, pitch, roll in degrees) for 5 keypoints in TD UV.
+__declspec(dllexport) int trk_head_pose_solvepnp(const double* kp10, double width, double height, double focalScale,
+		double* out3) {
+	double kp[5][2];
+	for (int i = 0; i < 5; ++i) {
+		kp[i][0] = kp10[2 * i];
+		kp[i][1] = kp10[2 * i + 1];
+	}
+	return headPoseSolvePnP(kp, width, height, focalScale, out3) ? 1 : 0;
 }
 }

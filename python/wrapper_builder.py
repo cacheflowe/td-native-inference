@@ -222,7 +222,8 @@ def _add_code(comp, module_names=MODULES):
 
 
 # Tracker modes the C++ Tracker DAT runs (cpp/Tracking); the others stay on the Python tracker.
-TRACKER_DAT_MODES = ('pose', 'movenet', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic', 'mp_facedet', 'rtmw')
+TRACKER_DAT_MODES = ('pose', 'movenet', 'face', 'detect', 'segment', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic',
+	'mp_facedet', 'rtmw')
 TRACKER_DAT_PLUGIN = 'plugins/TrackerDAT.dll'
 
 
@@ -267,6 +268,8 @@ def _build_tracker(comp, mode, source='detections', engine='python', defaults=No
 						par.expr = f'parent().par.{par.name}'
 				if comp.op('inference_stats') is not None:
 					script.par.Resultschop = '../inference_stats'
+				if comp.op('null_passthrough') is not None:
+					script.par.Frametop = '../null_passthrough'	# solvePnP's frame size
 		else:
 			script = tracker.create('scriptDAT', 'script_' + suffix)
 			arguments = 'scriptOp, parent(), scriptOp.inputs[0]' if suffix == 'tracks' else 'scriptOp, parent()'

@@ -5,6 +5,9 @@
 - **Tracker DAT** (`TrackerDAT.dll`, a fourth plugin to allow): the tracker in C++, writing exactly
   the tables the Python tracker wrote. MediaPipe Holistic GPU uses it: one person, all three tables,
   4.5 to 1.3 ms per frame with Face Mesh on, 2.7 to 0.4 ms with it off. The other wrappers follow.
+- YOLO26 Detect / Segmentation: detections with equal scores now go through NMS in detection
+  order. Before, the order depended on numpy's sort internals, so which of two overlapping
+  equal-score boxes survived (and which new track got the lower id) could vary.
 - MediaPipe Holistic GPU: **Output Smoothing** now defaults to 0.4 (was 0). Unlike CPU Holistic it
   has no landmark filter of its own, so it was noticeably jittery; 0.4 is about as steady as CPU
   Holistic for two thirds of a frame of lag.

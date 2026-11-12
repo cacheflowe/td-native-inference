@@ -13,16 +13,21 @@ namespace {
 const char* kTableNames[] = {"tracks", "joints", "bones"};
 const char* kTableLabels[] = {"Tracks", "Joints", "Bones"};
 
-const char* kModeNames[] = {"pose", "movenet", "mp_pose", "mp_hands", "mp_face", "mp_holistic", "mp_facedet", "rtmw"};
-const char* kModeLabels[] = {"Pose (YOLO26-pose)", "Pose (MoveNet multipose)", "MediaPipe Pose (33)",
-	"MediaPipe Hands / Gesture (21)", "MediaPipe Face (478)", "MediaPipe Holistic (553)", "MediaPipe Face Detector (6)",
-	"RTMW3D Whole Body (75)"};
+const char* kModeNames[] = {"pose", "movenet", "face", "detect", "segment", "mp_pose", "mp_hands", "mp_face", "mp_holistic",
+	"mp_facedet", "rtmw"};
+const char* kModeLabels[] = {"Pose (YOLO26-pose)", "Pose (MoveNet multipose)", "Face (YuNet)", "Detect (YOLO26)",
+	"Segment (YOLO26-seg)", "MediaPipe Pose (33)", "MediaPipe Hands / Gesture (21)", "MediaPipe Face (478)",
+	"MediaPipe Holistic (553)", "MediaPipe Face Detector (6)", "RTMW3D Whole Body (75)"};
 
-enum class Kind { Float, Toggle };
+const char* kPoseMethodNames[] = {"geometric", "solvepnp"};
+const char* kPoseMethodLabels[] = {"Geometric (Keypoint Ratios)", "SolvePnP (3D Model)"};
 
-// pose_tracker_pipeline's PARAMETERS + PERSISTENCE / LABEL parameters + Holistic's Face Mesh. Defaults
-// here are the Pose mode's; a mode's own defaults apply where the wrapper doesn't set a value (it binds
-// every parameter to its tracker COMP, which builds the per-mode Tracking page).
+enum class Kind { Float, Toggle, Menu };
+
+// The union of every mode's tracking parameters: pose_tracker_pipeline's (+ persistence, gesture labels,
+// Holistic's Face Mesh), box_tracker_pipeline's and face_tracker_pipeline's. Defaults here are the Pose
+// mode's; a wrapper binds every parameter its mode has to its tracker COMP, which builds the per-mode
+// Tracking page.
 struct Par {
 	const char* name;
 	const char* label;
@@ -60,6 +65,23 @@ const Par kPars[] = {
 	{"Gestureminscore", "Gesture Min Score", Kind::Float, 0.5, 0.0, 1.0, true, "MediaPipe Hands: weaker gestures count as None."},
 	{"Facemesh", "Face Mesh", Kind::Toggle, 1, 0, 1, true,
 		"MediaPipe Holistic: track and output the 478 face mesh points. Off: pose and hands only (75 points)."},
+	{"Lowconfthreshold", "Low Confidence Threshold (Recovery)", Kind::Float, 0.1, 0.0, 1.0, true,
+		"Detect / Segment / Face: detections between this and Confidence Threshold can keep an existing track alive "
+		"but never start one."},
+	{"Nmsiouthreshold", "NMS IoU Threshold (Dedup)", Kind::Float, 0.45, 0.0, 1.0, true,
+		"Detect / Segment: overlapping detections above this IoU collapse into the highest-scoring one."},
+	{"Minmaskarea", "Min Mask Fill Ratio (Of Own Box)", Kind::Float, 0.15, 0.0, 1.0, true,
+		"Segment: masks filling less of their own box than this are dropped."},
+	{"Trackiouthreshold", "Track IoU Threshold", Kind::Float, 0.3, 0.0, 1.0, true,
+		"Detect / Segment / Face: minimum box overlap to match a detection to a track."},
+	{"Posemethod", "Head Pose Method", Kind::Menu, 0, 0, 1, true,
+		"Face: yaw / pitch / roll from keypoint ratios (geometric) or a 3D face model (solvePnP)."},
+	{"Poseyawscale", "Head Pose Yaw Scale (Geometric)", Kind::Float, 340, 1.0, 1000.0, false, "Face: degrees per yaw ratio."},
+	{"Posepitchscale", "Head Pose Pitch Scale (Geometric)", Kind::Float, 100, 1.0, 1000.0, false,
+		"Face: degrees per pitch ratio."},
+	{"Posefocalscale", "Head Pose Focal Scale (SolvePnP)", Kind::Float, 1, 0.1, 5.0, false,
+		"Face: assumed focal length as a multiple of the frame width."},
+	{"Posesmoothing", "Head Pose Smoothing", Kind::Float, 0.5, 0.0, 1.0, true, "Face: extra smoothing of yaw / pitch / roll."},
 };
 
 // Tracks nodes by op id, so the Joints / Bones nodes wired after one can read its tracker.
@@ -139,6 +161,13 @@ void TrackerDAT::setupParameters(OP_ParameterManager* manager, void*) {
 		manager->appendStringMenu(sp, int32_t(std::size(kModeNames)), kModeNames, kModeLabels);
 	}
 	{
+		OP_StringParameter sp("Frametop");
+		sp.label = "Frame TOP";
+		sp.page = "Tracker";
+		sp.help = "Face with Head Pose Method SolvePnP: the source image, for the camera model's frame size.";
+		manager->appendTOP(sp);
+	}
+	{
 		OP_StringParameter sp("Resultschop");
 		sp.label = "Results CHOP";
 		sp.page = "Tracker";
@@ -156,6 +185,15 @@ void TrackerDAT::setupParameters(OP_ParameterManager* manager, void*) {
 			manager->appendToggle(np);
 			continue;
 		}
+		if (p.kind == Kind::Menu) {
+			OP_StringParameter sp(p.name);
+			sp.label = p.label;
+			sp.page = "Tracking";
+			sp.help = p.help;
+			sp.defaultValue = kPoseMethodNames[0];
+			manager->appendMenu(sp, 2, kPoseMethodNames, kPoseMethodLabels);
+			continue;
+		}
 		np.minValues[0] = np.minSliders[0] = p.min;
 		np.maxValues[0] = np.maxSliders[0] = p.max;
 		np.clampMins[0] = true;
@@ -168,6 +206,7 @@ void TrackerDAT::setParameterEnableStates(const OP_Inputs* inputs, OP_ParEnableS
 	const bool tracks = tableOf(inputs) == TableKind::Tracks;
 	state->setEnableState("Trackermode", tracks);
 	state->setEnableState("Resultschop", tracks);
+	state->setEnableState("Frametop", tracks);
 	for (const Par& p : kPars) state->setEnableState(p.name, tracks);
 }
 
@@ -199,7 +238,18 @@ void TrackerDAT::cookTracks(const OP_Inputs* inputs) {
 	if (!tracker_) tracker_ = std::make_unique<Tracker>(mode);
 	tracker_->setMode(mode);
 	for (const Par& p : kPars)
-		tracker_->setPar(p.name, p.kind == Kind::Toggle ? double(inputs->getParInt(p.name)) : inputs->getParDouble(p.name));
+		tracker_->setPar(p.name, p.kind == Kind::Float ? inputs->getParDouble(p.name) : double(inputs->getParInt(p.name)));
+	// onnxtop_tables._frame_size: the source frame, else 1000 x 1000. Only solvePnP uses it, so the TOP
+	// is only read then (reading it makes this node depend on it).
+	double frameW = 1000, frameH = 1000;
+	if (mode == "face" && inputs->getParInt("Posemethod") == 1)
+		if (const OP_TOPInput* top = inputs->getParTOP("Frametop"))
+			if (top->textureDesc.height > 0) {
+				frameW = top->textureDesc.width;
+				frameH = top->textureDesc.height;
+			}
+	tracker_->setPar("Framewidth", frameW);
+	tracker_->setPar("Frameheight", frameH);
 
 	// onnxtop_tables._result_number: both channels, or neither (never skip).
 	std::optional<double> results, delay;
@@ -266,13 +316,15 @@ void TrackerDAT::write(DAT_Output* output, const Table& table) {
 	}
 }
 
-int32_t TrackerDAT::getNumInfoCHOPChans(void*) { return 5; }
+int32_t TrackerDAT::getNumInfoCHOPChans(void*) { return 6; }
 
 void TrackerDAT::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*) {
 	// cook_ms: the whole execute; track_ms: without writing the table; input_ms: getting the input DAT.
-	// next_track_id: the process-wide id counter (the lab test starts the Python tracker's there).
-	const char* names[] = {"cook_ms", "track_ms", "input_ms", "num_tracks", "next_track_id"};
-	const double values[] = {cookMs_, trackMs_, inputMs_, double(numTracks_), double(KeypointTrack::nextId)};
+	// next_track_id / next_box_track_id: the process-wide id counters of the keypoint and box trackers
+	// (the lab test starts the Python tracker's there).
+	const char* names[] = {"cook_ms", "track_ms", "input_ms", "num_tracks", "next_track_id", "next_box_track_id"};
+	const double values[] = {cookMs_, trackMs_, inputMs_, double(numTracks_), double(KeypointTrack::nextId),
+		double(BoxTrack::nextId)};
 	chan->name->setString(names[index]);
 	chan->value = float(values[index]);
 }

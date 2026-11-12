@@ -244,7 +244,9 @@ def nms(boxes, scores, iou_threshold):
 	brand-new phantom track instead of just being dropped."""
 	if len(boxes) == 0:
 		return []
-	order = scores.argsort()[::-1]
+	# Highest score first, ties in detection order: numpy's default argsort orders ties
+	# differently by array size and CPU (SIMD sorts), and the C++ tracker must match this.
+	order = np.argsort(-scores, kind='stable')
 	keep = []
 	while len(order) > 0:
 		i = order[0]

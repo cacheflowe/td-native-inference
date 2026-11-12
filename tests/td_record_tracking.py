@@ -38,6 +38,8 @@ SESSIONS = [
 	{'name': 'yunet_walking', 'wrapper': 'YuNet', 'source': f'{MEDIA}/people-walking-forward.mp4', 'frames': 300},
 	{'name': 'yunet_moving', 'wrapper': 'YuNet', 'source': f'{PHOTOS}/face.jpg', 'frames': 300, 'motion': 1.0},
 	{'name': 'yunet_photo', 'wrapper': 'YuNet', 'source': f'{PHOTOS}/face.jpg', 'frames': 40},
+	{'name': 'yunet_solvepnp_moving', 'wrapper': 'YuNet', 'instance': 'YuNet_solvepnp', 'source': f'{PHOTOS}/face.jpg',
+		'frames': 300, 'motion': 1.0, 'pars': {'Trackposemethod': 'solvepnp'}},
 ]
 
 tests_dir = (Path(project.folder) / 'tests').as_posix()

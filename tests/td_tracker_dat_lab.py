@@ -22,6 +22,9 @@ SESSIONS = [
 	{'name': 'holistic_gpu', 'wrapper': 'MediaPipeHolisticGPU', 'source': f'{MEDIA}/dancer.mp4', 'frames': 300},
 	{'name': 'holistic_gpu_noface', 'wrapper': 'MediaPipeHolisticGPU', 'source': f'{MEDIA}/dancer.mp4', 'frames': 300,
 		'pars': {'Holisticface': False}},
+	{'name': 'detect', 'wrapper': 'Yolo26Detect', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
+	{'name': 'segment', 'wrapper': 'Yolo26Seg', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
+	{'name': 'yunet', 'wrapper': 'YuNet', 'source': f'{MEDIA}/people-walking-forward.mp4', 'frames': 300},
 ]
 ONLY = []
 TABLES = ('tracks', 'joints', 'bones')
@@ -90,11 +93,9 @@ def sync_ids(wrapper):
 	info.par.op = probe
 	probe.cook(force=True)
 	info.cook(force=True)
-	next_id = int(info['next_track_id'].eval()) if info['next_track_id'] is not None else 1	# builds before the channel
 	tracker_module = modules.op('object_tracker').module
-	tracker_module.Track._next_id = 1
-	tracker_module.KeypointTrack._next_id = next_id
-	return next_id
+	tracker_module.KeypointTrack._next_id = int(info['next_track_id'].eval())
+	tracker_module.Track._next_id = int(info['next_box_track_id'].eval())
 
 
 def begin():

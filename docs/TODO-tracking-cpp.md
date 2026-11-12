@@ -6,7 +6,8 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status (Nov 12, 2026):** phases 0, 1 and 2 done. 16 sessions recorded in TD
+**Status (Nov 12, 2026):** phases 0-3 done; phase 3 (box and face modes) still needs its check in TD
+(`tests/td_tracker_dat_lab.py` after a restart). 16 sessions recorded in TD
 (`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
 recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
 skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
@@ -24,7 +25,27 @@ one person: Face Mesh on (2,456-column tracks table) Python 4.5 ms, Tracker DAT 
 joints 0.4, bones 0.2); Face Mesh off Python 2.7 ms, Tracker DAT 0.4 ms. Inside the plugin roughly a
 third is reading the input DAT and writing cells (only changed cells are written; the output table
 persists between cooks), and TD adds 0.05-0.2 ms per node. Lesson: measure with the other demos
-paused; a second Holistic GPU running alongside doubled every number. Next: phase 3.
+paused; a second Holistic GPU running alongside doubled every number.
+
+Phase 3 (Nov 12): ByteTracker (`BoxTracker.cpp`), the box and face pipelines and the solvePnP head
+pose in C++; every mode now runs on the Tracker DAT. Replays exactly on detect, segment and YuNet
+(geometric). Two things found on the way:
+- **NMS tie order** (a deliberate change, Python too): numpy's default `argsort` orders equal
+  scores by array size and CPU (SIMD sorts), and the Info DAT's 3-decimal `conf` ties in about half
+  the detect / segment frames, which decided which overlapping box survived and which new track got
+  the lower id. Both trackers now sort stably (ties in detection order); segment_walking was
+  re-recorded.
+- **solvePnP can't match exactly:** OpenCV's Levenberg-Marquardt stops on a step that is small
+  relative to the whole parameter vector (dominated by the ~800 distance), and on most frames of a
+  moving face its rotation vector wanders past pi. The C++ solver follows the same steps and agrees
+  within 1e-5 degrees on 234 of 302 solves, within 1e-3 on 279; the rest are frames where the solve
+  is chaotic in either. The replay allows yaw / pitch / roll differences on that fixture only.
+- The recorder reset the tracker before the new session's image was in place, so one cook ran on
+  the previous image unrecorded (yunet_photo); the reset now happens in the first step.
+
+Kalman exactness: the filter's matrices are 0s and 1s and the dimensions independent, so products
+round the same in any order; numpy's solve multiplies by the reciprocal of the (diagonal) Cholesky
+factor, checked bit for bit in TD's numpy 2.1 and 2.5. NMS is float32 like numpy's.
 
 Run: `cpp\Tracking\build.cmd`, then `python tests/tracking_replay.py build/tracking/*.jsonl.gz
 --engine cpp` (full recordings) or `python -m unittest tests.test_tracking_replay` (committed ones).
@@ -114,7 +135,7 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 0 | Fixture recorder, Python replay harness, fix the test file's mid-file `unittest.main()` | done |
 | 1 | Core: KeypointTracker + pose pipeline + skeletons + formatting; replay tool; exact diff on every skeleton mode | done |
 | 2 | `TrackerDAT` plugin, wrapper builder option, Holistic GPU on it, measured | done |
-| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | 2 sessions |
+| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done (TD check pending) |
 | 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert`, `write_instance_colors` (see below) | 1-2 sessions |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
 | 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++ | 2 sessions |
@@ -129,8 +150,8 @@ moves to C++; event-driven or once-per-build code stays Python.
 
 | Code | Where | Cost | Plan |
 |---|---|---|---|
-| Box tracker (`box_tracker_pipeline`) | Detect / Seg wrappers, and the nested detector in Holistic GPU, RTMW3D, HSEmotion | 0.16-0.22 ms every frame even for Holistic GPU's mostly idle detector | Phase 3 |
-| Face tracker (`face_tracker_pipeline`) | YuNet, HSEmotion's detector | not measured (one row per face, plus head pose) | Phase 3 |
+| Box tracker (`box_tracker_pipeline`) | Detect / Seg wrappers, and the nested detector in Holistic GPU, RTMW3D, HSEmotion | 0.16-0.22 ms every frame even for Holistic GPU's mostly idle detector | Phase 3: ported; wrappers switch in phase 5 |
+| Face tracker (`face_tracker_pipeline`) | YuNet, HSEmotion's detector | not measured (one row per face, plus head pose) | Phase 3: ported; wrappers switch in phase 5 |
 | `write_channels` (`wrapper_runtime`) | Every tracking wrapper's `out_channels` CHOP: `t{id}_{column}` per numeric cell | **7.3 ms** for Holistic with the face mesh (2,481 channels), 1.8 ms without (569); only when something reads `out_channels` | Phase 4: a C++ CHOP reading the tracks table |
 | `write_scores` (`onnxtop_tables`) | HSEmotion: class scores joined onto the face tracks | small (a row per face) | Phase 4, in the Tracker DAT (a Scores table mode) |
 | `rtmw_convert` | RTMW3D: reshapes the Pose Crops Info DAT for the tracker | not measured (75 points a person, a full table pass in Python) | Phase 4: the Tracker DAT reads RTMW3D's layout directly, the Script DAT goes |

@@ -114,17 +114,22 @@ def _begin():
 	source.par.playmode = 'specify'
 	source.par.indexunit = 'indices'
 	source.par.index = session.get('start', 0)
+	state['step'] = {'frame': -WARMUP, 'path': comp.path, 'last': {}}
+	run('args[0]()', _step, delayFrames=1)
+
+
+def _reset(comp):
+	"""A known starting state: no tracks, ids from 1, no skip memory. Done in the first step,
+	after the session's image and motion are set: a cook in between would otherwise run on the
+	previous session's image, unrecorded."""
 	tracker = comp.op('tracker')
 	tables, objects = _modules(comp)
-	# A known starting state: no tracks, ids from 1, no skip memory.
 	tables.reset(tracker)
 	objects.Track._next_id = 1
 	objects.KeypointTrack._next_id = 1
 	for key in [k for k in tables._written if k[1] == tracker.path]:
 		del tables._written[key]
-	state['step'] = {'frame': -WARMUP, 'path': comp.path, 'last': {},
-		'counts': [tracker.op('script_' + t).totalCooks for t in TABLES]}
-	run('args[0]()', _step, delayFrames=1)
+	return [tracker.op('script_' + t).totalCooks for t in TABLES]
 
 
 def _text(dat):
@@ -141,6 +146,8 @@ def _step():
 	frame = step['frame']
 	source.par.index = session.get('start', 0) + max(frame, 0)
 	_move(lab, session, frame)
+	if frame == -WARMUP:
+		step['counts'] = _reset(comp)
 	scripts = [tracker.op('script_' + t) for t in TABLES]
 	comp.op('debug').cook(force=True)
 	for t in TABLES:

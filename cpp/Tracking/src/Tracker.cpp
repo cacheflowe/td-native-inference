@@ -54,7 +54,22 @@ const ModeInfo kModes[] = {
 	{"mp_holistic", &MP_HOLISTIC, "Holistic"},
 	{"mp_facedet", &MP_FACE_DET, "Face Detector"},
 	{"rtmw", &RTMW_BODY, "Pose Crops (the RTMW3D wrapper)"},
+	// ByteTracker modes (no skeleton).
+	{"face", nullptr, nullptr},
+	{"detect", nullptr, nullptr},
+	{"segment", nullptr, nullptr},
 };
+
+const char* const kCocoClasses[80] = {"person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat",
+	"traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+	"elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee", "skis",
+	"snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+	"bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+	"carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table", "toilet", "tv",
+	"laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book",
+	"clock", "vase", "scissors", "teddy bear", "hair drier", "toothbrush"};
+
+bool isBoxMode(const std::string& mode) { return mode == "detect" || mode == "segment"; }
 
 const ModeInfo* findMode(const std::string& mode) {
 	for (auto& m : kModes)
@@ -62,7 +77,9 @@ const ModeInfo* findMode(const std::string& mode) {
 	return nullptr;
 }
 
-bool isMediaPipe(const std::string& mode) { return mode != "pose" && mode != "movenet"; }
+bool isMediaPipe(const std::string& mode) {
+	return mode != "pose" && mode != "movenet" && mode != "face" && mode != "detect" && mode != "segment";
+}
 
 bool matchesNotExtra(const std::string& h) {
 	// ^(kp\d+_[uvcz]|w\d+_[xyz]|m\d\d)$
@@ -99,7 +116,15 @@ Tracker::Tracker(std::string mode) : mode_(std::move(mode)) {}
 
 void Tracker::setMode(const std::string& mode) { mode_ = mode; }
 
-void Tracker::resetIds() { KeypointTrack::nextId = 1; }
+void Tracker::resetIds() {
+	KeypointTrack::nextId = 1;
+	BoxTrack::nextId = 1;
+}
+
+bool Tracker::isPoseMode() const {
+	const ModeInfo* m = findMode(mode_);
+	return m && m->skeleton;
+}
 
 void Tracker::setResultCounter(std::optional<double> results, std::optional<double> resultDelay) {
 	results_ = results;
@@ -110,6 +135,28 @@ double Tracker::par(const char* name) const {
 	auto it = pars_.find(name);
 	if (it != pars_.end()) return it->second;
 	const std::string n = name;
+	// box_tracker_pipeline.DETECT_DEFAULTS / SEGMENT_DEFAULTS, face_tracker_pipeline.PARAMETERS.
+	if (isBoxMode(mode_)) {
+		static const std::map<std::string, double> detect = {{"Confthreshold", 0.5}, {"Lowconfthreshold", 0.1},
+			{"Nmsiouthreshold", 0.45}, {"Minboxwidth", 0.02}, {"Minboxheight", 0.02}, {"Tracklossframes", 30},
+			{"Trackiouthreshold", 0.3}, {"Trackconfirmframes", 3}, {"Outputsmoothing", 0.5}};
+		static const std::map<std::string, double> segment = {{"Confthreshold", 0.35}, {"Lowconfthreshold", 0.1},
+			{"Nmsiouthreshold", 0.5}, {"Minboxwidth", 0.02}, {"Minboxheight", 0.02}, {"Minmaskarea", 0.15},
+			{"Tracklossframes", 30}, {"Trackiouthreshold", 0.3}, {"Trackconfirmframes", 3}, {"Outputsmoothing", 0.5},
+			{"Presencerise", 5}, {"Presencefall", 15}};
+		const auto& d = mode_ == "segment" ? segment : detect;
+		auto found = d.find(n);
+		return found != d.end() ? found->second : 0.0;
+	}
+	if (mode_ == "face") {
+		static const std::map<std::string, double> face = {{"Confthreshold", 0.7}, {"Lowconfthreshold", 0.3},
+			{"Minboxwidth", 0.02}, {"Minboxheight", 0.02}, {"Tracklossframes", 45}, {"Trackiouthreshold", 0.2},
+			{"Trackconfirmframes", 3}, {"Outputsmoothing", 0.3}, {"Posemethod", 0}, {"Poseyawscale", 340},
+			{"Posepitchscale", 100}, {"Posefocalscale", 1}, {"Posesmoothing", 0.5}, {"Framewidth", 1000},
+			{"Frameheight", 1000}};
+		auto found = face.find(n);
+		return found != face.end() ? found->second : 0.0;
+	}
 	// Per-mode defaults (onnxtop_tables.pose_defaults), then pose_tracker_pipeline's PARAMETERS.
 	if (mode_ == "movenet") {
 		if (n == "Confthreshold") return 0.1;
@@ -142,17 +189,58 @@ double Tracker::par(const char* name) const {
 const Skeleton& Tracker::skeleton() const {
 	if (mode_ == "mp_holistic" && !par("Facemesh")) return MP_HOLISTIC_BODY;
 	const ModeInfo* m = findMode(mode_);
-	return m ? *m->skeleton : COCO_17;
+	return m && m->skeleton ? *m->skeleton : COCO_17;
 }
 
 PoseTracker& Tracker::pipeline() {
 	const Skeleton& sk = skeleton();
 	std::string key = mode_ + "|" + sk.name;
 	if (!pose_ || pipelineKey_ != key) {
+		box_.reset();
+		face_.reset();
 		pose_ = std::make_unique<PoseTracker>(sk);
 		pipelineKey_ = key;
 	}
 	return *pose_;
+}
+
+void Tracker::cookBox(const InfoView* info, Table& out) {
+	const bool seg = mode_ == "segment";
+	auto dets = BoxPipeline::filter(readDetections(info, 0), par("Lowconfthreshold"), par("Minboxwidth"), par("Minboxheight"),
+		par("Nmsiouthreshold"), seg, par("Minmaskarea"));
+	BoxParams p;
+	p.confThreshold = par("Confthreshold");
+	p.lowConfThreshold = par("Lowconfthreshold");
+	p.trackIouThreshold = par("Trackiouthreshold");
+	p.trackBuffer = par("Tracklossframes");
+	p.minHits = int(par("Trackconfirmframes"));
+	p.smoothing = par("Outputsmoothing");
+	if (seg) {
+		p.presenceRise = par("Presencerise");
+		p.presenceFall = par("Presencefall");
+	}
+	box_->update(dets, p);
+	box_->writeTracks(out);
+}
+
+void Tracker::cookFace(const InfoView* info, Table& out) {
+	auto dets = FacePipeline::filter(readDetections(info, 0), par("Lowconfthreshold"), par("Minboxwidth"), par("Minboxheight"));
+	FaceParams p;
+	p.confThreshold = par("Confthreshold");
+	p.lowConfThreshold = par("Lowconfthreshold");
+	p.trackIouThreshold = par("Trackiouthreshold");
+	p.trackBuffer = par("Tracklossframes");
+	p.minHits = int(par("Trackconfirmframes"));
+	p.smoothing = par("Outputsmoothing");
+	p.solvePnP = par("Posemethod") == 1;
+	p.yawScale = par("Poseyawscale");
+	p.pitchScale = par("Posepitchscale");
+	p.focalScale = par("Posefocalscale");
+	p.poseSmoothing = par("Posesmoothing");
+	p.frameW = par("Framewidth");
+	p.frameH = par("Frameheight");
+	face_->update(dets, p);
+	face_->writeTracks(out);
 }
 
 const Tracker::Layout& Tracker::layout(const InfoView& info) {
@@ -192,6 +280,16 @@ std::string Tracker::modeError(const InfoView* info) {
 	const Layout& l = layout(*info);
 	const ModeInfo* m = findMode(mode_);
 	if (!m) return "Tracker Mode " + mode_ + " isn't supported by TrackerDAT yet";
+	if (!m->skeleton) {
+		if (mode_ == "segment" && !l.col.count("mask_fill"))
+			return "Tracker Mode is Segment but the Info DAT has no mask_fill column (not a seg model) -- set Tracker Mode "
+				"to Detect or Pose";
+		if (mode_ == "face" && l.numKp != FacePipeline::kKeypoints)
+			return "Tracker Mode is Face but the model reports " + std::to_string(l.numKp) +
+				" keypoints (needs 5) -- set the node's Output Mode to YuNet Faces";
+		if (isBoxMode(mode_) && l.numKp) return "This model has keypoints -- set Tracker Mode to Pose, MoveNet or Face";
+		return {};
+	}
 	const int expected = m->skeleton->count();
 	if (isMediaPipe(mode_) && l.numKp != expected)
 		return "Tracker Mode " + mode_ + " needs a MediaPipeTOP Info DAT with " + std::to_string(expected) + " keypoints, got " +
@@ -217,10 +315,32 @@ std::vector<std::shared_ptr<const Detection>> Tracker::readDetections(const Info
 	};
 	const int box[4] = {colOf("u1"), colOf("v1"), colOf("u2"), colOf("v2")};
 	const int conf = colOf("conf"), labelCol = colOf("label"), classCol = colOf("class");
+	const int fillCol = colOf("mask_fill"), idCol = colOf("id");
 	for (int r = 1; r < info->numRows(); ++r) {
 		auto det = std::make_shared<Detection>();
 		for (int i = 0; i < 4; ++i) det->box[i] = cellDouble(*info, r, box[i]);
 		det->score = cellDouble(*info, r, conf);
+		if (mode_ == "face") {
+			det->keypoints.resize(l.numKp);
+			for (int k = 0; k < l.numKp; ++k) {
+				det->keypoints[k].v[0] = cellDouble(*info, r, colOf(("kp" + std::to_string(k) + "_u").c_str()));
+				det->keypoints[k].v[1] = cellDouble(*info, r, colOf(("kp" + std::to_string(k) + "_v").c_str()));
+				det->keypoints[k].n = 2;
+			}
+			dets.push_back(std::move(det));
+			continue;
+		}
+		if (isBoxMode(mode_)) {
+			det->classId = int(cellDouble(*info, r, classCol));	// int(float(...)): toward zero
+			det->className = det->classId >= 0 && det->classId < 80 ? kCocoClasses[det->classId] : "unknown";
+			if (fillCol >= 0) {
+				det->hasMaskArea = true;
+				det->maskArea = cellDouble(*info, r, fillCol);
+				det->detIndex = idCol >= 0 ? int(cellDouble(*info, r, idCol)) : r - 1;
+			}
+			dets.push_back(std::move(det));
+			continue;
+		}
 		det->keypoints.resize(kpCount);
 		for (int k = 0; k < kpCount; ++k) {
 			Kp& kp = det->keypoints[k];
@@ -292,6 +412,33 @@ bool Tracker::cook(TableKind kind, const InfoView* info, Table& out) {
 		}
 	}
 	if (!fresh(kind, out)) return false;
+	if (!isPoseMode()) {
+		if (pipelineKey_ != mode_) {
+			pose_.reset();
+			box_.reset();
+			face_.reset();
+			if (mode_ == "face")
+				face_ = std::make_unique<FacePipeline>();
+			else
+				box_ = std::make_unique<BoxPipeline>(mode_ == "segment");
+			pipelineKey_ = mode_;
+		}
+		if (kind == TableKind::Tracks) {
+			if (face_)
+				cookFace(info, out);
+			else
+				cookBox(info, out);
+		} else if (kind == TableKind::Joints && face_) {
+			face_->writeJoints(out);
+		} else {
+			out.assign(1, Row());
+			if (kind == TableKind::Joints)
+				jointsHeader(out[0]);
+			else
+				bonesHeader(out[0]);
+		}
+		return true;
+	}
 	PoseTracker& pose = pipeline();
 	if (kind == TableKind::Joints) {
 		pose.writeJoints(out);

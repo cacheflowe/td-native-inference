@@ -29,6 +29,12 @@ struct Detection {
 	std::string label;
 	std::vector<std::pair<std::string, double>> extras;	// in column order (dict insertion order)
 	bool hasExtras = false;	// MediaPipe modes always carry an extras dict, possibly empty
+	// Box modes (detect / segment).
+	int classId = 0;
+	std::string className;
+	bool hasMaskArea = false;
+	double maskArea = 0;	// mask_fill: the mask's share of its own box
+	int detIndex = -1;	// the Info DAT id: the detection's value (+ 1) in an Instances matte
 };
 
 class KeypointTrack {
