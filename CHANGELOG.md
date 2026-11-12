@@ -2,6 +2,42 @@
 
 ## Unreleased
 
+New models:
+- **MediaPipe Holistic GPU** (`MediaPipeHolisticGPU.tox`): Holistic's own models converted to ONNX and
+  run on the GPU, with Holistic's cropping logic in the plugin. About 5.7 ms per frame for body, hands
+  and face (vs ~20 ms for the CPU wrapper waiting for its result), several people at once, and the
+  same table, so it drops in for the CPU wrapper (Mixamo Puppet included). Agrees with CPU Holistic to
+  a few pixels. Finds people with a nested YOLO26 detector (AGPL-3.0, `fetch_models.cmd`).
+- **DAViD** (Microsoft, MIT): `DAViDNormals.tox` (a person's surface normals as a normal map, for
+  relighting), `DAViDMatte.tox` (a soft matte with hair detail), about 10 ms each, and
+  `DAViDHuman.tox` (depth, normals and matte from one model in one pass, about 21 ms). 2.3 GB, so
+  `fetch_models.cmd` downloads them (it asks first).
+- **MODNet** (`MODNet.tox`): portrait matting, about 2 ms.
+- **Robust Video Matting** (`RVM.tox`): a matte that stays steady under fast motion (it carries the
+  previous frames). GPL-3.0, so `fetch_models.cmd` downloads it (it asks first).
+
+New toxes:
+- **Mixamo Puppet** (`MixamoPuppet.tox`): poses a Mixamo character from Holistic or Pose tracking,
+  over the video or on its own. You supply the character (FBX).
+- **Hands Geometry** (`HandsGeometry.tox`): tracked hands as 3D spheres and cylinders, with a render
+  rig. Needs TouchDesigner 2025 or later.
+
+Plugins:
+- OnnxTOP Output Modes **MediaPipe Holistic**, **Pose Crops** (keypoint models on person boxes) and
+  **Landmark Crops** (any model on rotated crops, raw outputs to the Info DAT).
+- OnnxTOP Raw: **All Outputs** writes a multi-output model's other outputs to extra color buffers
+  (Render Select TOP), so one inference serves several images.
+- OnnxTOP: **Letterbox Padding** can repeat the image's edge pixels instead of gray bars.
+- OnnxTOP: recurrent models (state carried between frames on the GPU), **Scalar Input** and
+  **Reset State** (for RVM).
+- OnnxTOP and MediaPipeTOP no longer cook twice in frames where a result is pending; OnnxTOP has a
+  `run_ms` info channel (CPU time of the inference launch).
+
+Docs and scripts:
+- A user manual (`docs/MANUAL.md`), and a guide in `docs/MODELS.md` for choosing between similar
+  models (bodies, hands, faces, objects, mattes, depth) with times and licenses.
+- `fetch_models.cmd` downloads RVM and DAViD (both ask first) as well as YOLO26 and Kokoro.
+
 ## v0.2.5 (2026-11-10)
 
 - ONNX models (YOLO, MoveNet, YuNet, HSEmotion): **Wait for Result** on the Model page. On (the
