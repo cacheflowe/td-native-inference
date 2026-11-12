@@ -279,6 +279,10 @@ Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
 
 ## Tracking (area of interest)
 
+- [ ] **Port the tracker to C++** (planned Nov 12, 2026): a `TrackerDAT` plugin replacing the
+      tracker COMP's three Script DATs, ~4.5 ms -> ~0.5 ms per frame for Holistic. Plan, behavior
+      inventory and phases: [docs/TODO-tracking-cpp.md](docs/TODO-tracking-cpp.md).
+
 - [ ] The Python tracker (`python/object_tracker.py`, `*_tracker_pipeline.py`) is ByteTrack-based
       with our own changes (keypoint-distance matching, scale-relative matching, coast, presence,
       gesture debounce). Revisit after real-world testing of the scale-relative default; open
