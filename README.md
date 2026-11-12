@@ -27,7 +27,7 @@ image, tables with stable track ids, and CHOP channels. More detail on each:
    [Releases](https://github.com/cacheflowe/td-native-inference/releases) and extract it.
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
-   `OnnxTOP.dll`, `MediaPipeTOP.dll` and `MediaPipeCHOP.dll`.
+   `OnnxTOP.dll`, `MediaPipeTOP.dll`, `MediaPipeCHOP.dll` and `TrackerDAT.dll`.
 3. **Optional, for YOLO26, Robust Video Matting, DAViD and text to speech:** in the installed folder, double-click
    `fetch_models.cmd`. It downloads, checksum-verified, into the folder's `models\`:
    - **YOLO26** (about 90 MB). It's AGPL-3.0, so it isn't in the zip, and the script asks first.

@@ -1,5 +1,5 @@
 @echo off
-rem Builds the tracking core and tracker_replay.dll (the replay tests' C++ engine) with Ninja.
+rem Builds the tracking core, TrackerDAT.dll (copied to plugins) and tracker_replay.dll (the replay tests' engine).
 rem Same toolchain as the other plugins (MSVC v142); no CUDA. Override VCVARS / CMAKE_NINJA_ROOT.
 setlocal
 if "%VCVARS%"=="" set "VCVARS=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat"

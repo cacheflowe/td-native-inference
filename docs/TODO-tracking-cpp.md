@@ -6,12 +6,25 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status (Nov 12, 2026):** phases 0 and 1 done. 16 sessions recorded in TD
+**Status (Nov 12, 2026):** phases 0, 1 and 2 done. 16 sessions recorded in TD
 (`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
 recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
 skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
 mp_facedet, pose, movenet, rtmw). Trimmed fixtures in `tests/data/tracking/`;
-`tests/test_tracking_replay.py` replays them through both engines. Next: phase 2 (the TD plugin).
+`tests/test_tracking_replay.py` replays them through both engines.
+
+Phase 2 done (Nov 12): the Tracker DAT (`TrackerDAT.dll`, `cpp/Tracking/README.md`) runs MediaPipe
+Holistic GPU (`"tracker_engine": "cpp"` in its spec; `wrapper_builder.build(..., tracker_engine=)`
+overrides). The wrapper's tracker COMP keeps its Tracking page; its three Tracker DATs are bound to
+it. Before TD has registered the custom OP (a restart after the first build) the builder falls back
+to CPlusPlus DATs loading the DLL by path, which `export` refuses. `tests/td_tracker_dat_lab.py`
+runs both trackers on the same Info DAT in TD (the Python ids start at the DLL's `next_track_id`):
+Holistic GPU on dancer.mp4, 300 frames, every table identical. Per frame, all three tables pulled,
+one person: Face Mesh on (2,456-column tracks table) Python 4.5 ms, Tracker DAT 1.3 ms (tracks 0.7,
+joints 0.4, bones 0.2); Face Mesh off Python 2.7 ms, Tracker DAT 0.4 ms. Inside the plugin roughly a
+third is reading the input DAT and writing cells (only changed cells are written; the output table
+persists between cooks), and TD adds 0.05-0.2 ms per node. Lesson: measure with the other demos
+paused; a second Holistic GPU running alongside doubled every number. Next: phase 3.
 
 Run: `cpp\Tracking\build.cmd`, then `python tests/tracking_replay.py build/tracking/*.jsonl.gz
 --engine cpp` (full recordings) or `python -m unittest tests.test_tracking_replay` (committed ones).

@@ -265,7 +265,7 @@ columns. Choosing between similar ones:
 - **"The plugin required for this Custom OP was not found"**, or the node is blank: the plugins
   are not loaded. Check that `Documents\Derivative\Plugins\td-native-inference\` holds the `.dll`
   and `.exe` files and restart TouchDesigner. On the first launch TouchDesigner asks permission
-  to load `OnnxTOP.dll`, `MediaPipeTOP.dll` and `MediaPipeCHOP.dll`; click **Allow**. If you
+  to load `OnnxTOP.dll`, `MediaPipeTOP.dll`, `MediaPipeCHOP.dll` and `TrackerDAT.dll`; click **Allow**. If you
   declined, delete nothing, just restart and allow.
 - **A warning that plugins were found twice:** two installs are visible, for example one in
   `Documents\Derivative\Plugins\` and one in a `Plugins` folder next to your `.toe`. Keep one and

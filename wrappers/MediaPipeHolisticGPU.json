@@ -4,6 +4,7 @@
 	"plugin": "OnnxTOP",
 	"kind": "landmarks",
 	"tracker": "mp_holistic",
+	"tracker_engine": "cpp",
 	"detector": "Yolo26Detect",
 	"preset": {
 		"Model": "models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",

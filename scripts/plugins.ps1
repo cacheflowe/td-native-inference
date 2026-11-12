@@ -19,7 +19,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Same binaries as the release zip (scripts/release.py).
-$binaries = @('OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'MediaPipeCHOP.dll', 'libmediapipe.dll')
+$binaries = @('OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'MediaPipeCHOP.dll', 'TrackerDAT.dll', 'libmediapipe.dll')
 
 $build = Join-Path (Split-Path $PSScriptRoot -Parent) 'plugins'
 $derivative = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Derivative'

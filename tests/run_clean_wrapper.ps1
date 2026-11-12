@@ -47,7 +47,7 @@ try {
 			Copy-Item -Recurse (Join-Path $Package 'td-native-inference') $install
 		} else {
 			New-Item -ItemType Directory -Force $install | Out-Null
-			foreach ($file in 'OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'MediaPipeCHOP.dll', 'libmediapipe.dll') {
+			foreach ($file in 'OnnxTOP.dll', 'onnxtop_tool.exe', 'MediaPipeTOP.dll', 'MediaPipeCHOP.dll', 'TrackerDAT.dll', 'libmediapipe.dll') {
 				Copy-Item "$repo\plugins\$file" $install
 			}
 			foreach ($model in $Models) {

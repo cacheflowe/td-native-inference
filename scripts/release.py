@@ -20,11 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION_PATTERN = r'(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)'
 BINARY_FILES = {
 	'plugins/OnnxTOP.dll', 'plugins/onnxtop_tool.exe',
-	'plugins/MediaPipeTOP.dll', 'plugins/libmediapipe.dll', 'plugins/MediaPipeCHOP.dll',
+	'plugins/MediaPipeTOP.dll', 'plugins/libmediapipe.dll', 'plugins/MediaPipeCHOP.dll', 'plugins/TrackerDAT.dll',
 }
 # Our plugins compile in "td-native-inference <VERSION>" (CMake reads VERSION); packaging refuses
 # a plugin built for another version.
-VERSIONED_PLUGINS = {'plugins/OnnxTOP.dll', 'plugins/MediaPipeTOP.dll', 'plugins/MediaPipeCHOP.dll'}
+VERSIONED_PLUGINS = {'plugins/OnnxTOP.dll', 'plugins/MediaPipeTOP.dll', 'plugins/MediaPipeCHOP.dll', 'plugins/TrackerDAT.dll'}
 MODEL_SUFFIXES = ('.onnx', '.task', '.tflite', '.litertlm')
 # Licenses that don't allow bundling in this Apache-2.0 package (fetch_models.ps1 gets them).
 BLOCKED_MODELS = ('yolo', 'rvm')

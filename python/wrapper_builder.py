@@ -218,19 +218,53 @@ def _add_code(comp, module_names=MODULES):
 		_synced_dat(modules, module_name, f'python/{module_name}.py')
 
 
-def _build_tracker(comp, mode, source='detections'):
+# Tracker modes the C++ Tracker DAT runs (cpp/Tracking); the others stay on the Python tracker.
+TRACKER_DAT_MODES = ('pose', 'movenet', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic', 'mp_facedet', 'rtmw')
+TRACKER_DAT_PLUGIN = 'plugins/TrackerDAT.dll'
+
+
+def _tracker_dat(tracker, name, table):
+	"""A Tracker DAT: the registered custom OP, or (before TD has registered it, i.e. until the next
+	restart after the first build) a CPlusPlus DAT loading plugins/TrackerDAT.dll."""
+	try:
+		node = tracker.create('TrackerDAT', name)
+	except Exception:
+		node = tracker.create('cplusplusDAT', name)
+		node.par.plugin = (root() / TRACKER_DAT_PLUGIN).as_posix()
+		node.cook(force=True)	# loads the plugin, which adds its parameters
+	node.par.Table = table
+	return node
+
+
+def _build_tracker(comp, mode, source='detections', engine='python'):
+	"""The tracker COMP: its Setup / Tracking pages (onnxtop_tables.setup_parameters) and three
+	nodes writing tracks, joints and bones. engine 'python': Script DATs calling onnxtop_tables;
+	'cpp': Tracker DATs, their parameters bound to the COMP's."""
 	tracker = comp.create('baseCOMP', 'tracker')
 	tables = comp.op('local/modules/onnxtop_tables').module
 	tables.setup_parameters(tracker)
 	tracker.par.Trackermode = mode
 	tables.setup_parameters(tracker)
 	info = tracker.create('inDAT', 'in_info')
+	cpp = engine == 'cpp'
+	assert not cpp or mode in TRACKER_DAT_MODES, f'[WrapperBuilder] the Tracker DAT does not run {mode} yet'
 	tracks = None
 	for index, suffix in enumerate(('tracks', 'joints', 'bones'), 1):
-		script = tracker.create('scriptDAT', 'script_' + suffix)
-		arguments = 'scriptOp, parent(), scriptOp.inputs[0]' if suffix == 'tracks' else 'scriptOp, parent()'
-		tracker.op('script_' + suffix + '_callbacks').text = (
-			f'import onnxtop_tables\ndef onCook(scriptOp):\n\tonnxtop_tables.write_{suffix}({arguments})\n')
+		if cpp:
+			script = _tracker_dat(tracker, 'script_' + suffix, suffix)
+			if suffix == 'tracks':
+				for par in script.pars():
+					if par.page is None or par.page.name not in ('Tracker', 'Tracking'):
+						continue
+					if par.name == 'Trackermode' or (par.page.name == 'Tracking' and hasattr(tracker.par, par.name)):
+						par.expr = f'parent().par.{par.name}'
+				if comp.op('inference_stats') is not None:
+					script.par.Resultschop = '../inference_stats'
+		else:
+			script = tracker.create('scriptDAT', 'script_' + suffix)
+			arguments = 'scriptOp, parent(), scriptOp.inputs[0]' if suffix == 'tracks' else 'scriptOp, parent()'
+			tracker.op('script_' + suffix + '_callbacks').text = (
+				f'import onnxtop_tables\ndef onCook(scriptOp):\n\tonnxtop_tables.write_{suffix}({arguments})\n')
 		_connect(script, info if suffix == 'tracks' else tracks)
 		if suffix == 'tracks':
 			tracks = script
@@ -539,8 +573,10 @@ def _restore_wires(comp, inputs, outputs):
 			comp.outputConnectors[index].connect(owner.inputConnectors[input_index])
 
 
-def build(spec, parent_comp, name=None):
-	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires."""
+def build(spec, parent_comp, name=None, tracker_engine=None):
+	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires.
+	tracker_engine: 'python' or 'cpp' (the Tracker DAT), else the spec's "tracker_engine" (default
+	python). Only the wrapper's own tracker; a nested detector keeps its spec's."""
 	name = name or spec['name']
 	position, inputs, outputs = _take_place(parent_comp, name)
 	comp = parent_comp.create('baseCOMP', name)
@@ -568,7 +604,8 @@ def build(spec, parent_comp, name=None):
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
 	detector = _build_classifier(comp, spec) if kind == 'classifier' else _build_posecrops(comp, spec) if posecrops else None
-	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections') if spec.get('tracker') else None
+	engine = tracker_engine or spec.get('tracker_engine', 'python')
+	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine) if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
 		for suffix in ('tracks', 'joints', 'bones'):
@@ -1089,6 +1126,9 @@ def export_demo(demo, destination):
 def export(comp, destination):
 	"""Save comp as a self-contained tox: DAT file syncs and external-tox links are cleared in
 	the saved copy, then restored, so the development COMP keeps its links."""
+	fallbacks = [node.path for node in comp.findChildren() if node.OPType == 'cplusplusDAT']
+	assert not fallbacks, (f'[WrapperBuilder] {fallbacks}: CPlusPlus DATs loading a DLL by path (the Tracker DAT '
+		'before TD registered it). Restart TD, rebuild, then export.')
 	changed = []
 	try:
 		for node in [comp, *comp.findChildren()]:
