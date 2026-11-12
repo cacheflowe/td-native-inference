@@ -194,7 +194,9 @@ where faces are, not their shape. MediaPipe (BlazeFace short range), Apache-2.0.
 
 ### MediaPipe Holistic (`MediaPipeHolistic.tox`)
 One person: body, both hands and the face mesh in one model (75 tracked joints plus face).
-**Blendshapes** adds the face expression scores. Heavier than Pose. MediaPipe, Apache-2.0.
+**Blendshapes** adds the face expression scores. Heavier than Pose. **Face Mesh** (Tracking page)
+off leaves the face out of the tables: MediaPipe still runs it, but the tracker's Python drops from
+about 4.5 ms to 1.2 ms. MediaPipe, Apache-2.0.
 
 ### MediaPipe Holistic GPU (`MediaPipeHolisticGPU.tox`)
 The same models as MediaPipe Holistic, converted to ONNX and run on the GPU by OnnxTOP, with
@@ -205,7 +207,8 @@ of Python, the same as the CPU wrapper's), with results one frame late, where th
 or more frames behind and skips frames. With Wait for Result on, results match the frame exactly
 for 5.7 ms (RTX 4090 Laptop GPU, one person). It can track several people (**Max Detections**): a
 nested YOLO26 detector finds them, then each is tracked from its own landmarks, and the detector only
-runs while someone is missing. **Hands** and **Face Mesh** switch those parts off to save time. No blendshapes. It
+runs while someone is missing. **Hands** and **Face Mesh** switch those parts off to save time;
+Face Mesh off also leaves the face out of the tables, which cuts the tracker to about 1.2 ms. No blendshapes. It
 agrees with CPU Holistic to a few pixels (face mesh under 1 px on a still photo). It doesn't smooth
 the landmarks itself the way MediaPipe does; the tracker's Output Smoothing does. Needs YOLO26
 (**AGPL-3.0**: `fetch_models.cmd`) for the detector; the converted models are Apache-2.0.

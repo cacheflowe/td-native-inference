@@ -102,10 +102,20 @@ def pose_defaults(mode):
 	return None
 
 
+# Holistic: the face mesh is 478 of its 553 points, most of the tracker's work and table size.
+FACE_MESH_PARAMETERS = [
+	('Facemesh', 'Face Mesh', True, 0.0, 1.0, False,
+		"Track and output Holistic's 478 face mesh points. Off: pose and hands only (75 points, the "
+		"face columns and joints are left out), much cheaper; the Mixamo Puppet doesn't need the face."),
+]
+
+
 def pose_extra_parameters(mode):
 	"""Par lists added to PoseTrackerPipeline's Tracking page for this mode."""
 	if mode == 'mp_hands':
 		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *pose_tracker_pipeline.LABEL_PARAMETERS)
+	if mode == 'mp_holistic':
+		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *FACE_MESH_PARAMETERS)
 	if mode in MP_SKELETONS:
 		return tuple(pose_tracker_pipeline.PERSISTENCE_PARAMETERS)
 	return ()
@@ -127,17 +137,28 @@ def get_mode(comp):
 	return par.eval() if par is not None else 'pose'
 
 
+def get_skeleton(comp, mode):
+	"""The mode's skeleton (None = COCO 17); Holistic drops its face mesh with Face Mesh off."""
+	if mode == 'mp_holistic':
+		par = getattr(comp.par, 'Facemesh', None)
+		if par is not None and not par.eval():
+			return mediapipe_skeletons.MP_HOLISTIC_BODY
+	return MP_SKELETONS.get(mode)
+
+
 def get_pipeline(comp):
 	mode = get_mode(comp)
+	skeleton = get_skeleton(comp, mode)
+	key = (mode, skeleton.name if skeleton else None)
 	entry = _pipelines.get(comp.path)
-	if entry is None or entry[0] != mode:
+	if entry is None or entry[0] != key:
 		if mode in POSE_MODES:
-			pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=MP_SKELETONS.get(mode))
+			pipeline = pose_tracker_pipeline.PoseTrackerPipeline(skeleton=skeleton)
 		elif mode == 'face':
 			pipeline = face_tracker_pipeline.FaceTrackerPipeline()
 		else:
 			pipeline = box_tracker_pipeline.BoxTrackerPipeline(segmentation=mode == 'segment')
-		entry = (mode, pipeline)
+		entry = (key, pipeline)
 		_pipelines[comp.path] = entry
 	return entry[1]
 
@@ -243,13 +264,15 @@ def _layout(info_dat):
 	return cached[1]
 
 
-def read_detections(info_dat, mode):
-	"""Info DAT rows -> pipeline detection dicts (box = [x_left, y_bottom, x_right, y_top])."""
+def read_detections(info_dat, mode, max_keypoints=None):
+	"""Info DAT rows -> pipeline detection dicts (box = [x_left, y_bottom, x_right, y_top]).
+	`max_keypoints` reads only the first keypoints (Holistic without its face mesh)."""
 	if info_dat is None or info_dat.numRows < 2:
 		return []
 	col, header = _columns(info_dat)
 	layout = _layout(info_dat)
 	num_kp = layout['num_kp']
+	kp_cols = layout['kp'][:max_keypoints] if max_keypoints else layout['kp']
 	has_fill = 'mask_fill' in col
 	mp = mode in MP_SKELETONS
 	kp_z = layout['kp_z'] if mp else None
@@ -270,7 +293,7 @@ def read_detections(info_dat, mode):
 		}
 		if mode in POSE_MODES:
 			kps = []
-			for k, base in enumerate(layout['kp']):
+			for k, base in enumerate(kp_cols):
 				kp = [float(row[base]), float(row[base + 1]), float(row[base + 2])]
 				if kp_z is not None:
 					kp.append(float(row[kp_z[k]]))
@@ -383,7 +406,7 @@ def write_tracks(out, comp, info_dat):
 	if not _fresh(out, comp, (mode, _result_number(comp))):
 		return
 	pipeline = get_pipeline(comp)
-	dets = read_detections(info_dat, mode)
+	dets = read_detections(info_dat, mode, pipeline.skeleton.count if mode in POSE_MODES else None)
 	if mode in POSE_MODES:
 		extra = pose_extra_parameters(mode)
 		p = pose_tracker_pipeline.read_parameters(comp, defaults=pose_defaults(mode), extra=extra)

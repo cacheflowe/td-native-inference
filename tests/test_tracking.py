@@ -312,6 +312,52 @@ class ReadWorldTests(unittest.TestCase):
 		self.assertEqual(det['world'][2], [0.2, -0.2, -0.3])
 		self.assertNotIn('w0_x', det['extras'])
 
+	def test_holistic_without_face_mesh(self):
+		class Par:
+			def __init__(self, value):
+				self.value = value
+
+			def eval(self):
+				return self.value
+
+		class Comp:
+			def __init__(self, path, face_mesh):
+				self.path = path
+				self.par = type('Pars', (), {'Trackermode': Par('mp_holistic'), 'Facemesh': Par(face_mesh)})()
+
+			def op(self, name):
+				return None
+
+			def parent(self):
+				return None
+
+		class Table:
+			def __init__(self):
+				self.rows, self.path = [], '/fake/out'
+
+			@property
+			def numRows(self):
+				return len(self.rows)
+
+			def clear(self):
+				self.rows = []
+
+			def appendRow(self, row):
+				self.rows.append(row)
+
+		skeleton = mediapipe_skeletons.MP_HOLISTIC
+		header = ['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label']
+		header += [f'kp{k}_{s}' for k in range(skeleton.count) for s in 'uvc']
+		row = [0, 0, 0.9, 0.3, 0.2, 0.7, 0.9, ''] + [0.5, 0.5, 1.0] * skeleton.count
+		info = FakeDat([header, row], path='/fake/holistic')
+		for face_mesh, joints in ((True, 553), (False, 75)):
+			out = Table()
+			onnxtop_tables.write_tracks(out, Comp(f'/fake/tracker_{face_mesh}', face_mesh), info)
+			columns = out.rows[0]
+			self.assertEqual(sum(1 for h in columns if h.endswith('_conf')), joints)
+			self.assertEqual(len(out.rows), 2)
+			self.assertEqual(any(h.startswith('face_') for h in columns), face_mesh)
+
 	def test_header_cache_follows_a_changed_header(self):
 		a = FakeDat([['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2', 'label']], path='/fake/cache')
 		self.assertEqual(onnxtop_tables._columns(a)[1][-1], 'label')

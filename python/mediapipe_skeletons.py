@@ -141,6 +141,12 @@ MP_HOLISTIC = Skeleton(
 	POSE_EDGES + _offset(HAND_EDGES, HOLISTIC_LEFT_HAND) + _offset(HAND_EDGES, HOLISTIC_RIGHT_HAND) +
 		_offset(FACE_EDGES, HOLISTIC_FACE),
 	_stable(POSE_NAMES), 0.5 * 15 / 9, hide_missing=True, world_count=HOLISTIC_FACE)
+# Holistic without its face mesh (the tracker's Face Mesh off): the first 75 keypoints only.
+MP_HOLISTIC_BODY = Skeleton(
+	'mp_holistic_body',
+	MP_HOLISTIC.names[:HOLISTIC_FACE],
+	POSE_EDGES + _offset(HAND_EDGES, HOLISTIC_LEFT_HAND) + _offset(HAND_EDGES, HOLISTIC_RIGHT_HAND),
+	_stable(POSE_NAMES), 0.5 * 15 / 9, hide_missing=True, world_count=HOLISTIC_FACE)
 # RTMW3D (OnnxTOP Pose Crops, converted by rtmw_convert.py): Holistic's pose and both hands, no face mesh.
 RTMW_BODY = Skeleton(
 	'rtmw_body',

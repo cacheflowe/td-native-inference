@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- MediaPipe Holistic: **Face Mesh** on the Tracking page. Off, the tables carry the body and hands
+  only (75 joints instead of 553) and the tracker costs about a quarter as much (4.7 to 1.2 ms per
+  person). The Mixamo Puppet doesn't use the face. On Holistic GPU the Model page's **Face Mesh**
+  does both: it skips the face model and leaves the face out of the tables.
+
 ## v0.3.0 (2026-11-12)
 
 New models:

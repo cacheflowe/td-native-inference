@@ -93,19 +93,19 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 2 | `TrackerDAT` plugin (build, Plugins.json, release manifest), wrapper builder option to use it, Holistic GPU first; measure; Python stays the default until proven | 1 session |
 | 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric; solvePnP decision) | 2 sessions |
 | 4 | `write_scores` (HSEmotion class scores) and `write_channels` (the per-track CHOP, thousands of channels for Holistic) in C++ | 1 session |
-| 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; keep the Python modules as the reference implementation for prototyping and for the replay tests | 1 session |
+| 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
 
 Later, separately: hand the decoded detections from the TOP to the tracker in binary (in-process
 registry) to skip the Info DAT strings entirely; CHOP outputs for tracks.
 
-## Decisions for the user
+## Decisions (Nov 12, 2026)
 
-- **A new DLL:** `TrackerDAT.dll` means a fourth Allow prompt for users on first load.
-- **Exact first, improvements after:** the port reproduces today's behavior, quirks included (e.g.
-  OnnxTOP trackers never skip repeated results; ids shared across wrappers). Improvements land as
-  separate, visible changes once the port is proven.
-- **Python stays as the reference:** prototype tracking ideas in Python, then port. The replay
-  tests keep the two honest.
-- **Quick win meanwhile (optional):** a "Face Mesh" toggle on the Holistic tracker to skip the 478
-  face points when only body and hands are used (the puppet): a large cut in Python cost now,
-  and the same option in C++ later.
+- **A new DLL:** yes, `TrackerDAT.dll` (a fourth Allow prompt on first load).
+- **Port today's behavior first;** fixing things along the way is fine. Each fix is a deliberate,
+  recorded difference in the replay test (an expected-diff note), not a silent one.
+- **Python is the test oracle only until the port is proven,** not a long-term reference: once
+  every wrapper runs TrackerDAT (phase 5) and the replay tests pass, the recorded C++ tables become
+  the fixtures and the Python tracker modules can be removed.
+- **Face Mesh toggle:** done in Python (Nov 12): `Facemesh` on the `mp_holistic` tracker
+  (`MP_HOLISTIC_BODY`, 75 points); Holistic GPU ties it to the plugin's Face Mesh. 4.7 -> 1.2 ms in
+  TD for one person. The C++ op needs the same parameter.

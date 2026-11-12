@@ -466,6 +466,9 @@ def _build_pages(comp, spec, plugin, tracker):
 		for name in spec['tracking']:
 			assert _tuplet(tracker, name)[0].page.name == 'Tracking', f'[WrapperBuilder] {name} is not a tracking parameter'
 			_expose(tracking_page, tracker, name, 'Track' + name.lower())
+	if tracker is not None and hasattr(comp.par, 'Holisticface') and hasattr(tracker.par, 'Facemesh'):
+		# Holistic GPU: one switch. Without face inference there's no mesh to track.
+		tracker.par.Facemesh.expr = 'parent().par.Holisticface.eval()'
 	debug_page = comp.appendCustomPage('Debug')
 	label = 'Show Result' if spec['kind'] == 'image' or spec.get('result') == 'inference' else 'Debug Overlay'
 	overlay = debug_page.appendToggle('Debugoverlay', label=label)[0]
