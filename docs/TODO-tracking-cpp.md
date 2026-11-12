@@ -111,15 +111,37 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 
 | Phase | What | Size |
 |---|---|---|
-| 0 | Fixture recorder, Python replay harness, fix the test file's mid-file `unittest.main()` | 1 session |
-| 1 | Core: KeypointTracker + pose pipeline + skeletons + formatting; replay tool; exact diff on every skeleton mode (mp_holistic, mp_pose, mp_hands, mp_face, mp_facedet, pose, movenet, rtmw) | 2 sessions |
-| 2 | `TrackerDAT` plugin (build, Plugins.json, release manifest), wrapper builder option to use it, Holistic GPU first; measure; Python stays the default until proven | 1 session |
-| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric; solvePnP decision) | 2 sessions |
-| 4 | `write_scores` (HSEmotion class scores) and `write_channels` (the per-track CHOP, thousands of channels for Holistic) in C++ | 1 session |
+| 0 | Fixture recorder, Python replay harness, fix the test file's mid-file `unittest.main()` | done |
+| 1 | Core: KeypointTracker + pose pipeline + skeletons + formatting; replay tool; exact diff on every skeleton mode | done |
+| 2 | `TrackerDAT` plugin, wrapper builder option, Holistic GPU on it, measured | done |
+| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | 2 sessions |
+| 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert`, `write_instance_colors` (see below) | 1-2 sessions |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
+| 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++ | 2 sessions |
 
 Later, separately: hand the decoded detections from the TOP to the tracker in binary (in-process
-registry) to skip the Info DAT strings entirely; CHOP outputs for tracks.
+registry) to skip the Info DAT strings entirely.
+
+## Everything else in Python, per frame (inventory, Nov 12)
+
+Measured in TD, one person, on this machine. Per-frame work that grows with keypoints or tracks
+moves to C++; event-driven or once-per-build code stays Python.
+
+| Code | Where | Cost | Plan |
+|---|---|---|---|
+| Box tracker (`box_tracker_pipeline`) | Detect / Seg wrappers, and the nested detector in Holistic GPU, RTMW3D, HSEmotion | 0.16-0.22 ms every frame even for Holistic GPU's mostly idle detector | Phase 3 |
+| Face tracker (`face_tracker_pipeline`) | YuNet, HSEmotion's detector | not measured (one row per face, plus head pose) | Phase 3 |
+| `write_channels` (`wrapper_runtime`) | Every tracking wrapper's `out_channels` CHOP: `t{id}_{column}` per numeric cell | **7.3 ms** for Holistic with the face mesh (2,481 channels), 1.8 ms without (569); only when something reads `out_channels` | Phase 4: a C++ CHOP reading the tracks table |
+| `write_scores` (`onnxtop_tables`) | HSEmotion: class scores joined onto the face tracks | small (a row per face) | Phase 4, in the Tracker DAT (a Scores table mode) |
+| `rtmw_convert` | RTMW3D: reshapes the Pose Crops Info DAT for the tracker | not measured (75 points a person, a full table pass in Python) | Phase 4: the Tracker DAT reads RTMW3D's layout directly, the Script DAT goes |
+| `write_instance_colors` (`wrapper_runtime`) | Seg wrappers, Matte Encoding = Instances: one color per object | small | Phase 4, with the box tracker's outputs |
+| Puppet solver (`puppet_solver` + `mixamo_retarget`) | `MixamoPuppet.tox` | **2.7 ms** per body solve | Phase 6: a C++ CHOP; capturing the rig from the FBX COMP stays Python (once per character) and hands the rest pose over as a table |
+| Hand puppet (`hand_retarget`) | `HandsGeometry.tox` | small per solve | Phase 6 |
+| Stays Python | `wrapper_builder`, `puppet_builder` (build time), `wrapper_runtime` model controls and pulses, `puppet_runtime` (character loading), the demos' `model_controls`, Holistic GPU's `detector_gate` (one comparison per frame), the audio wrappers' caption / event / top-results scripts (per new line of text, a few rows) | - | - |
+
+Not Python, but now the largest per-frame costs after inference in the Holistic GPU wrapper: the
+debug overlay (DebugBB's Render TOP ~1.3 ms, a Select DAT 0.26 ms), drawn only with Debug
+Overlay on. Worth a look separately.
 
 ## Decisions (Nov 12, 2026)
 
@@ -129,6 +151,9 @@ registry) to skip the Info DAT strings entirely; CHOP outputs for tracks.
 - **Python is the test oracle only until the port is proven,** not a long-term reference: once
   every wrapper runs TrackerDAT (phase 5) and the replay tests pass, the recorded C++ tables become
   the fixtures and the Python tracker modules can be removed.
+- **More plugins:** each custom operator is its own DLL (one more Allow prompt each). Phase 4's
+  channels CHOP and phase 6's puppet CHOP add two, unless they can share one CHOP DLL (to check:
+  a CHOP DLL with a mode menu, like MediaPipeCHOP's Task).
 - **Face Mesh toggle:** done in Python (Nov 12): `Facemesh` on the `mp_holistic` tracker
   (`MP_HOLISTIC_BODY`, 75 points); Holistic GPU ties it to the plugin's Face Mesh. 4.7 -> 1.2 ms in
   TD for one person. The C++ op needs the same parameter.
