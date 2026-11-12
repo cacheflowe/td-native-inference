@@ -5,6 +5,8 @@
 	"kind": "landmarks",
 	"tracker": "rtmw",
 	"detector": "Yolo26Detect",
+	"converter": "rtmw_convert",
+	"demo": false,
 	"preset": {
 		"Model": "models/onnx/rtmw3d/rtmw3d-x.onnx",
 		"Mode": "posecrops",

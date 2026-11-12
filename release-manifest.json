@@ -17,6 +17,7 @@
 		"tox/MediaPipeFaceDetector.tox",
 		"tox/MediaPipeHands.tox",
 		"tox/MediaPipeHolistic.tox",
+		"tox/MediaPipeHolisticGPU.tox",
 		"tox/MediaPipePose.tox",
 		"tox/MediaPipeSegment.tox",
 		"tox/MediaPipeSoundClassifier.tox",
@@ -52,6 +53,10 @@
 		"models/onnx/movenet/movenet-multipose-lightning.onnx": "td-native-inference/models/onnx/movenet/movenet-multipose-lightning.onnx",
 		"models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx": "td-native-inference/models/onnx/depth-anything/depth_anything_v2_vits_dynamic.onnx",
 		"models/onnx/hsemotion/emotion.onnx": "td-native-inference/models/onnx/hsemotion/emotion.onnx",
-		"models/onnx/modnet/modnet.onnx": "td-native-inference/models/onnx/modnet/modnet.onnx"
+		"models/onnx/modnet/modnet.onnx": "td-native-inference/models/onnx/modnet/modnet.onnx",
+		"models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",
+		"models/onnx/mediapipe_holistic/hand_roi_refinement.onnx": "td-native-inference/models/onnx/mediapipe_holistic/hand_roi_refinement.onnx",
+		"models/onnx/mediapipe_holistic/hand_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/hand_landmarks_detector.onnx",
+		"models/onnx/mediapipe_holistic/face_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/face_landmarks_detector.onnx"
 	}
 }

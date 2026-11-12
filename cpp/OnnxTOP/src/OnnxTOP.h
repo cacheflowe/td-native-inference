@@ -11,7 +11,9 @@
 #include "Kernels.h"
 #include "OnnxEngine.h"
 #include "YoloDecoder.h"
+#include "Holistic.h"
 
+#include <array>
 #include <atomic>
 #include <memory>
 #include <mutex>
@@ -55,11 +57,14 @@ private:
 		bool	mono = false;			// single-channel tensor -> Mono32Float output
 	};
 
-	void		manageLoading(const EngineConfig& desired);
+	// companions: extra models loaded (and upgraded to TensorRT) with the main one, e.g. Holistic's
+	// hand and face models; they land in myCompanions in the same order.
+	void		manageLoading(const EngineConfig& desired, const std::vector<std::string>& companions);
 	bool		sameModelConfig(const EngineConfig& a, const EngineConfig& b);
-	void		loadEngines(EngineConfig cfg);		// loader thread
+	void		loadEngines(EngineConfig cfg, std::vector<std::string> companions);		// loader thread
 	int			buildTrtEngine(const EngineConfig& cfg, bool background, std::string& message);
-	bool		publishEngine(std::unique_ptr<OnnxEngine> engine, const std::string& warning);
+	bool		publishEngine(std::unique_ptr<OnnxEngine> engine, const std::string& warning,
+					std::vector<std::unique_ptr<OnnxEngine>> companions = {});
 	void		failLoad(const std::string& err);
 	void		setLoadStatus(const std::string& s);
 	void		setLoadWarning(const std::string& s);
@@ -86,6 +91,9 @@ private:
 	bool						myHasRequested = false;
 	bool						myForceReload = false;
 	std::unique_ptr<OnnxEngine>	myEngine;		// main thread only
+	std::vector<std::unique_ptr<OnnxEngine>>	myCompanions;		// main thread only
+	std::vector<std::unique_ptr<OnnxEngine>>	myNextCompanions;	// with myNextEngine
+	std::vector<std::string>	myRequestedCompanions;
 
 	YoloDecoder					myYolo;
 	bool						myYoloMode = false;	// whether myYolo's detections are current
@@ -109,6 +117,37 @@ private:
 	int							myCropClasses = 0;
 	bool						myCropMode = false;	// whether myCrops is what the Info DAT shows
 	int64_t						myCropCounter = 0;	// Classify Interval phase
+
+	// Landmark Crops mode: per ROI, the small outputs (<= kLandmarkMaxValues per crop) flattened in
+	// output order; myLmOutputs lists (output index, values per crop) for the Info DAT header.
+	struct LandmarkRow
+	{
+		std::string				id;
+		std::array<float, 5>	roi = {};	// roi_x, roi_y, roi_w, roi_h, roi_angle as given
+		std::vector<float>		values;
+	};
+	std::vector<std::array<float, 5>>		myRois;
+	std::vector<LandmarkRow>				myLandmarks;
+	std::vector<std::pair<int, int>>		myLmOutputs;
+	bool									myLandmarkMode = false;
+	bool		runLandmarkCrops(OnnxEngine& engine, int start, int count, std::string& err);
+
+	// Holistic mode: the pose model (myEngine) plus myCompanions = hand ROI refinement, hand
+	// landmarks, face landmarks; MediaPipe's ROI logic and decoding in holistic::Tracker.
+	struct HolisticOptions
+	{
+		int		maxPeople = 1;
+		bool	hands = true;
+		bool	face = true;
+	};
+	bool		runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const HolisticOptions& opt,
+					cudaSurfaceObject_t outSurf, int outW, int outH, std::string& err);
+	holistic::Tracker			myHolistic;
+	bool						myHolisticMode = false;	// whether the Info DAT shows myHolistic's people
+	float*						myHostStage = nullptr;	// pinned: model outputs read back per crop
+	size_t						myHostStageBytes = 0;
+	CropBox*					myDevSheetBoxes = nullptr;	// kMaxBatch: every crop of the frame, for the debug sheet
+	int							myHolisticCrops = 0;	// crops run this frame (debug sheet cells)
 
 	TensorRange*				myRawRange = nullptr;	// device; Raw mode min/max normalization
 	bool						myRawRangeReset = true;	// forget the smoothed range (new engine/output)

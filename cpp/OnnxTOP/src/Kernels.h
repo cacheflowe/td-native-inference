@@ -55,10 +55,15 @@ struct InputLayout
 cudaError_t launchPreprocess(cudaSurfaceObject_t src, TexFormat fmt, const Letterbox& lb,
 	const InputNorm& norm, const InputLayout& layout, void* dst, float padValue, cudaStream_t stream);
 
-// A crop of the source image, in source pixels, top-down (row 0 = top of the image).
+// A crop of the source image, in source pixels, top-down (row 0 = top of the image). Optionally
+// rotated about its center by the angle whose cos / sin are given (MediaPipe's NormalizedRect
+// convention in y-down pixels: crop offset (dx, dy) samples center + (c dx - s dy, s dx + c dy)).
+// Outside the image: black, or the nearest edge pixel when `replicate` (MediaPipe's default).
 struct CropBox
 {
 	float	x1, y1, x2, y2;
+	float	cosA = 1.f, sinA = 0.f;
+	int		replicate = 0;
 };
 
 // Crop-and-classify input: batch item k (< numBoxes) is boxes[k] resized to dstW x dstH

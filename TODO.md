@@ -114,6 +114,58 @@ Nov 11 on the new DLLs and the double-cook fix verified (below).
       are coarse (full-body crop): plan MediaPipe Hands for fingers. (4) The world scale is per frame
       (bone-length median): smooth it. (5) Before shipping: fetch_models entries for RTMW3D-X (Apache-2.0,
       369 MB), demos, docs, a clean-process test.
+      **Nov 12 review of the clip comparison:** RTMW3D's 3D is clearly worse than Holistic's world landmarks:
+      out-of-frame feet land inverted at the crop edge (SimCC can only place a point inside the crop; gate
+      by score), and arms go through or behind the torso where Holistic has them in front. Its 2D is
+      strong; its z head is weak. Puppets stay on Holistic; next step is Holistic's own models as ONNX on
+      the GPU (below). RTMW3D stays useful for multi-person 2D whole-body.
+      **Keep the RTMPose family as an alternate pose model** next to YOLO pose / MediaPipe Pose (user, Nov
+      12): ship the RTMW3D wrapper (2D whole-body, multi-person) and consider RTMPose-m (17 points, 2.4 ms)
+      and RTMW-l as wrappers too; Pose Crops already runs all three.
+      **Holistic on the GPU, stage 1 done Nov 12.** Qualcomm AI Hub's Hugging Face exports are a dead end
+      (zmurez MediaPipePyTorch port: 25-point upper-body pose, no world landmarks). Instead
+      `scripts/convert_holistic_onnx.py` converts the landmark models inside `holistic_landmarker.task`
+      (tf2onnx, NCHW `image` input, segmentation output dropped) into `models/onnx/mediapipe_holistic/`:
+      outputs match TFLite to float32 rounding (world landmarks within 5e-6). The pose detector won't
+      convert (sparse DENSIFY weights): use YOLO26. TensorRT fp16 p50, batch 1: pose landmarks 0.66 ms
+      (195 = 39 x [x, y, z, visibility, presence] in 256 px crop space; world `Identity_4` 39 x 3 m;
+      heatmap 64x64x39), hand ROI refinement 0.51 ms, hand landmarks 0.50 ms (224 px; world `Identity_3`),
+      face landmarks 0.65 ms (192 px, 468 x 3). One person with both hands and a face is about 3.3 ms of
+      inference vs CPU Holistic's 18 ms. Engine builds 70-115 s each. Still to check: fp16 vs fp32 output
+      drift. Next (stage 2): rotated crops in the crop kernel, a "crop then regress" OnnxTOP output mode,
+      MediaPipe's ROI logic (previous-frame tracking, alignment points, world rotation) in Python, output
+      in the Holistic table format so the tracker and MixamoPuppet run unchanged.
+      **Stage 2 working Nov 12 (uncommitted, lab only).** OnnxTOP mode `landmarkcrops` (rotated MediaPipe
+      NormalizedRects from the Crop DAT, edge-replicated like ImageToTensor; every output <= 4096 values per
+      crop goes to the Info DAT raw as `o{k}_{i}`). `python/holistic_onnx.py` reimplements Holistic's ROI
+      logic (pose tracking from the alignment points, hand ROI from pose + recrop model + RoiTracking, face
+      ROI from pose points + mesh tracking) and outputs MediaPipeTOP's Holistic table (553 points, world for
+      75; hand world moved onto the pose wrist, as Holistic does). Test network: `/project1/HolisticLab`
+      (CPlusPlus TOPs on a renamed copy of the new DLL, `cpp/OnnxTOP/build/OnnxTOP_dev1.dll`; a reference
+      MediapipeTOP `mp`). vs CPU Holistic: warrior photo pose 6 px / world 1.7 cm, hands 2.4-2.9 px / world
+      1.6-2.6 cm; face photo mesh 0.7 px. Dancer clip (150 frames): pose 12.5 px median (MediaPipe smooths,
+      we don't), hands 3.2-3.4 px, face 2.1 px; presence agrees except at the threshold. Main-thread cost
+      10.9 ms (4 sync OnnxTOPs ~1.5-1.9 ms each, Python ~4.5 ms: `merge` 2.2, pose decode 1.1) vs 20 ms for
+      MediapipeTOP with Wait for Result. Deviations: no heatmap refinement (feet up to ~14 px), no BlazeFace
+      face detector in the face recrop (pose face points instead), no MediaPipe landmark smoothing. Next:
+      move decode + ROI logic into C++ (one "Holistic" OnnxTOP mode running all models: no Info DAT
+      round trips, the Python cost goes away), heatmap refinement, a wrapper + tracker wiring, MixamoPuppet
+      test, fetch_models entry (the converted models are Apache-2.0: ship or convert on install).
+      **Stage 3 (C++ Holistic mode) working Nov 12.** OnnxTOP Output Mode `holistic`: Model = the pose model,
+      the other three load from its folder as companion engines (the loader now handles a main engine plus
+      companions, built / upgraded together); `Holistic.cpp` ports the Python ROI logic plus the heatmap
+      refinement; three stages with one GPU sync each. vs CPU Holistic: photo pose 2.3-2.6 px, hands 2-4 px,
+      face 0.6-0.7 px; dancer clip pose 9.7 px median, hands 3.1-3.6, face 2.3. **5.7 ms** per frame (p90 7.2)
+      vs 20.6 ms for MediapipeTOP with Wait for Result. Wrapper spec `MediaPipeHolisticGPU` (nested
+      Yolo26Detect, tracker `mp_holistic`); builder's detector path now takes an optional "converter"
+      (RTMW3D: rtmw_convert). To do: build the wrapper after a TD restart, MixamoPuppet test, demos,
+      README thumbnail, clean-process test. `python/holistic_onnx.py` (the Landmark Crops prototype) can go
+      once the C++ path is proven.
+      **Pinned: dedicated head-pose models**, for a face crop, if landmark-based head pose falls short:
+      6DRepNet (rotation matrix out, about 4 deg MAE on AFLW2000, comparable to landmark fitting, not
+      clearly better than face mesh) and WHENet (full 360 deg yaw, works on the back of the head: the
+      real win for installations where people turn away). Both would need a "crop then regress" OnnxTOP
+      mode. Licenses unchecked.
       **2D benchmark done Nov 11** (the RTMW3D export is still to do). TensorRT fp16, models in
       `models/onnx/rtmpose/` (OpenMMLab `onnx_sdk` zips, gitignored): 256x192 crops, dynamic batch,
       SimCC outputs `simcc_x` [N, K, 384] / `simcc_y` [N, K, 512].

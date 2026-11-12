@@ -72,7 +72,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | Reset State | Recurrent models: forget the previous frames (after a cut). Only enabled when the model has state |
 | ONNX | Active | Off = skip inference, clear the output |
 | ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
-| ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, or **Raw Output Tensor**. A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
+| ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, **Raw Output Tensor**, **Pose Crops** (RTMPose / RTMW / RTMW3D on person boxes), **Landmark Crops** or **MediaPipe Holistic** (both below). A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
 | ONNX | Letterbox | Keep aspect with gray padding, like Ultralytics. Off = stretch |
 | ONNX | Input Normalize | **0 to 1** (YOLO), **ImageNet mean/std** (Depth Anything, most ViTs), **−1 to 1**, **0 to 255** (MoveNet, YuNet), **Custom** (tensor = rgb01 · Custom Scale + Custom Offset, per channel) |
 | ONNX | Channel Order | RGB, or BGR for OpenCV-trained models (YuNet). Applied before Input Normalize's per-channel values |
@@ -90,6 +90,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | Crops | Classify Interval (Frames) | Run the classifier every Nth frame and hold the results in between (default 1; 3 = `onnx_hsemotion.py`'s Emotioninterval). Cost drops proportionally |
 | Crops | Softmax | Logits → probabilities (default on) |
 | Crops | Class Names | Info DAT column names in output order (empty = `c0, c1, …`) |
+| Holistic | Hands / Face Mesh | MediaPipe Holistic mode: run the hand models (two per person) and the face mesh. Max Detections (Detection page) is the number of people |
 | Raw | Raw Output Index | Which output to show. `[N, H, W]` / `[.., 1, H, W]` → Mono32Float, `[.., C, H, W]` → RGBA32Float (C ≤ 4) |
 | Raw | Normalize | **Min / Max** (default) maps the frame's value range (letterbox padding excluded) to 0–1 on the GPU; **None** passes raw values |
 | Raw | Range Smoothing | Temporal smoothing of that range (0 = per frame, default 0.9) so brightness doesn't pump |
@@ -159,6 +160,36 @@ recurrent state: it starts as a 1×1×1×1 zero tensor and each run's output bec
 input, on the GPU, with no readback. **Reset State** returns it to zero. State advances once per run,
 so a still input converges rather than flickers. A lone `[1]` float input gets Scalar Input. Neither
 appears in the Info DAT's input list, which names the image input only.
+
+#### MediaPipe Holistic on the GPU
+
+`models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx`: Output Mode **MediaPipe Holistic**,
+**Crop DAT** = a person detector's tracks (e.g. a nested Yolo26Detect's `tracker/script_tracks`),
+**Max Detections** = people. The hand ROI refinement, hand and face models load from the same
+folder (`scripts/convert_holistic_onnx.py` makes all four from `holistic_landmarker.task`); all four
+build TensorRT engines and upgrade together. Input normalization is fixed (0 to 1).
+
+Per frame, in three stages with one GPU wait each: pose on each person's crop (a new detector box,
+or the crop from last frame's alignment points, as MediaPipe tracks); then the hand ROI refinement
+model on crops from the pose's wrist / index / pinky, and the face mesh on a crop from the pose's
+face points (or last frame's mesh while it agrees); then the hand model. `Holistic.cpp` has the
+ROI logic and decoding, after MediaPipe's calculators (projection through the rotated crop, heatmap
+refinement of the pose, hand ROI tracking, world landmarks rotated back, hands moved onto the pose
+wrist). Differences from MediaPipe: people come from the detector instead of BlazePose's detector,
+the face crop from the pose's face points instead of BlazeFace, and there's no landmark smoothing.
+The Info DAT is MediaPipeTOP's Holistic table (553 points, `kp{i}_z`, `w{i}_x/y/z` for the first 75),
+so `OnnxTopTables` mode **MediaPipe Holistic** reads it unchanged. The image output is a contact
+sheet of every crop. Against CPU Holistic (a still photo): pose 2.5 px, hands 2–4 px, face mesh
+0.7 px; world landmarks within a few cm. 5.7 ms per frame for one person (RTX 4090 Laptop GPU).
+
+#### Landmark Crops
+
+Runs any single-image model on rotated crops: the Crop DAT holds MediaPipe NormalizedRects
+(`id, roi_x, roi_y, roi_w, roi_h, roi_angle`: center and size as fractions of the image, top-down,
+radians); outside the image the edge pixels repeat, like MediaPipe's ImageToTensor. Every output
+with at most 4096 values per crop goes to the Info DAT raw (`o{k}_{i}`: value i of output k), one row
+per crop, for Python to decode. `python/holistic_onnx.py` drives Holistic's models this way; the
+Holistic mode above replaced it for speed.
 
 ### Outputs
 

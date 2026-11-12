@@ -52,6 +52,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/MediaPipeFace.jpg" width="200"> | **MediaPipe Face Landmarks** | A detailed 478-point face mesh, plus optional expression scores (smile, jaw open, blink, ...). |
 | <img src="docs/images/models/MediaPipeFaceDetector.jpg" width="200"> | **MediaPipe Face Detector** | Fast boxes around faces with 6 reference points. Use it when you need where faces are, not their shape. |
 | <img src="docs/images/models/MediaPipeHolistic.jpg" width="200"> | **MediaPipe Holistic** | Body, both hands and the face of one person from a single model. |
+|  | **MediaPipe Holistic GPU** | The same models on the GPU through ONNX: about 3.5× cheaper per frame, several people, same output. Needs YOLO26 (`fetch_models.cmd`) to find people. |
 | <img src="docs/images/models/MediaPipeSegment.jpg" width="200"> | **MediaPipe Segmentation** | A mask separating people from the background, like a green screen without the green. |
 | <img src="docs/images/models/Yolo26Detect.jpg" width="200"> | **YOLO26 Object Detection** | Boxes around 80 kinds of everyday objects (people, cars, dogs, cups, ...), each labelled. |
 | <img src="docs/images/models/Yolo26Seg.jpg" width="200"> | **YOLO26 Segmentation** | Object detection plus a mask of each object's exact shape; optionally each tracked person or object in their own color, even where they overlap. |

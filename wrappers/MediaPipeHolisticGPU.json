@@ -1,0 +1,24 @@
+{
+	"name": "MediaPipeHolisticGPU",
+	"label": "MediaPipe Holistic GPU",
+	"plugin": "OnnxTOP",
+	"kind": "landmarks",
+	"tracker": "mp_holistic",
+	"detector": "Yolo26Detect",
+	"preset": {
+		"Model": "models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",
+		"Mode": "holistic",
+		"Cropdat": "crop_boxes",
+		"Maxdetections": 1
+	},
+	"model": [
+		"Maxdetections",
+		"Holistichands",
+		"Holisticface"
+	],
+	"tracking": [
+		"Tracklossframes",
+		"Relmatchdist",
+		"Outputsmoothing"
+	]
+}

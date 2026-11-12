@@ -30,7 +30,8 @@ import td	# imported modules don't get TD's globals (project, op)
 
 MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
-POSE_CROPS_MODULES = ('rtmw_convert',)	# a landmarks spec with a "detector": OnnxTOP Pose Crops after a nested detector
+# A landmarks spec with a "detector" nests a person detector before OnnxTOP (Pose Crops, Holistic);
+# its optional "converter" module (e.g. rtmw_convert) reshapes the Info DAT for the tracker.
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
 KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript', 'scores', 'speech')
@@ -257,8 +258,10 @@ def _build_classifier(comp, spec):
 
 
 def _build_posecrops(comp, spec):
-	"""Pose Crops wrapper: a nested detector finds and tracks the people, `inference` runs the pose model
-	on their crops, and `rtmw_info` reshapes its keypoints into the tracker's Holistic-like table."""
+	"""A landmarks wrapper with a nested person detector: the detector finds and tracks the people,
+	`inference` (OnnxTOP Pose Crops / Holistic) takes their boxes from `crop_boxes`. With a
+	"converter" (RTMW3D: rtmw_convert), `rtmw_info` reshapes the keypoints into the tracker's
+	Holistic-like table; without one the tracker reads the Info DAT directly."""
 	detector = build(load_spec(spec['detector']), comp, name='detector')
 	detector.par.Active.expr = 'parent().par.Active.eval()'
 	detector.par.Debugoverlay = False
@@ -266,10 +269,12 @@ def _build_posecrops(comp, spec):
 	_connect(detector, comp.op('input'))
 	# script_tracks, not out_tracks: the crops must not depend on the pose table.
 	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
-	convert = comp.create('scriptDAT', 'rtmw_info')
-	comp.op('rtmw_info_callbacks').text = ('import rtmw_convert\ndef onCook(scriptOp):\n'
-		"\trtmw_convert.convert(scriptOp, scriptOp.inputs[0], parent().op('input'))\n")
-	_connect(convert, comp.op('detections'))
+	converter = spec.get('converter')
+	if converter:
+		convert = comp.create('scriptDAT', 'rtmw_info')
+		comp.op('rtmw_info_callbacks').text = (f'import {converter}\ndef onCook(scriptOp):\n'
+			f"\t{converter}.convert(scriptOp, scriptOp.inputs[0], parent().op('input'))\n")
+		_connect(convert, comp.op('detections'))
 	return detector
 
 
@@ -497,7 +502,8 @@ def build(spec, parent_comp, name=None):
 		_restore_wires(comp, inputs, outputs)
 		return comp
 	posecrops = spec['kind'] == 'landmarks' and bool(spec.get('detector'))
-	_add_code(comp, MODULES + (POSE_CROPS_MODULES if posecrops else ()))
+	converter = spec.get('converter') if posecrops else None
+	_add_code(comp, MODULES + ((converter,) if converter else ()))
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
@@ -511,7 +517,7 @@ def build(spec, parent_comp, name=None):
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
 	detector = _build_classifier(comp, spec) if kind == 'classifier' else _build_posecrops(comp, spec) if posecrops else None
-	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if posecrops else 'detections') if spec.get('tracker') else None
+	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections') if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
 		for suffix in ('tracks', 'joints', 'bones'):
@@ -840,8 +846,9 @@ def _build_scores(comp, spec):
 
 def build_demo(parent_comp, names, name='VisionDemo'):
 	"""(Re)build the workbench: one wrapper per spec, each enabled from the Models page. A disabled
-	wrapper doesn't cook at all (allowCooking, set from outside it: a COMP can't wake itself)."""
-	specs = [load_spec(spec_name) for spec_name in names]
+	wrapper doesn't cook at all (allowCooking, set from outside it: a COMP can't wake itself).
+	A spec with "demo": false (an experimental wrapper whose model doesn't ship yet) is left out."""
+	specs = [spec for spec in (load_spec(spec_name) for spec_name in names) if spec.get('demo', True)]
 	# Over puts earlier inputs on top: box/joint overlays first, opaque image results last.
 	specs.sort(key=lambda spec: spec['kind'] == 'image' or spec.get('result') == 'inference')
 	position, inputs, outputs = _take_place(parent_comp, name)

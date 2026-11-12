@@ -1,6 +1,7 @@
 #include "OnnxTOP.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cassert>
 #include <chrono>
@@ -78,11 +79,74 @@ namespace
 	const char* kProviderLabels[] = { "Auto (CUDA now, TensorRT once built)", "TensorRT", "CUDA" };
 	const OrtProvider kProviders[] = { OrtProvider::Auto, OrtProvider::TensorRT, OrtProvider::CUDA };
 	// Menu values are saved by name, so existing nodes keep "yolo" / "raw".
-	const char* kModeNames[] = { "yolo", "movenet", "yunet", "crops", "raw", "posecrops" };
+	const char* kModeNames[] = { "yolo", "movenet", "yunet", "crops", "raw", "posecrops", "landmarkcrops", "holistic" };
 	const char* kModeLabels[] = { "YOLO End2End (det / seg / pose)", "MoveNet Multipose", "YuNet Faces",
-		"Classify Crops (boxes from a DAT)", "Raw Output Tensor", "Pose Crops (RTMPose / RTMW SimCC)" };
-	enum Mode { ModeYolo = 0, ModeMoveNet = 1, ModeYuNet = 2, ModeCrops = 3, ModeRaw = 4, ModePoseCrops = 5 };
+		"Classify Crops (boxes from a DAT)", "Raw Output Tensor", "Pose Crops (RTMPose / RTMW SimCC)",
+		"Landmark Crops (rotated ROIs, raw outputs)", "MediaPipe Holistic (pose, hands, face)" };
+	enum Mode { ModeYolo = 0, ModeMoveNet = 1, ModeYuNet = 2, ModeCrops = 3, ModeRaw = 4, ModePoseCrops = 5,
+		ModeLandmarkCrops = 6, ModeHolistic = 7 };
+	// Holistic: the models loaded next to the pose model (Model), in OnnxTOP::myCompanions order.
+	const char* kHolisticCompanions[] = { "hand_roi_refinement.onnx", "hand_landmarks_detector.onnx",
+		"face_landmarks_detector.onnx" };
 	constexpr int kCropSheetCell = 128;	// px per tile of the Classify Crops debug image
+	// Landmark Crops: outputs with at most this many values per crop go to the Info DAT (landmarks,
+	// scores, world points); bigger ones (heatmaps, masks) are left on the GPU.
+	constexpr int64_t kLandmarkMaxValues = 4096;
+	const char* kRoiCols[] = { "roi_x", "roi_y", "roi_w", "roi_h", "roi_angle" };
+
+	// Landmark Crops' DAT: MediaPipe NormalizedRects, one per row: roi_x, roi_y (center), roi_w,
+	// roi_h (fractions of the image width / height, so a square ROI has roi_w * W == roi_h * H),
+	// roi_angle (radians), all top-down like MediaPipe; plus an optional id.
+	bool parseRoiDat(const OP_DATInput* dat, int srcW, int srcH, int maxN, std::vector<CropBox>& boxes,
+		std::vector<std::string>& ids, std::vector<std::array<float, 5>>& rois, std::string& err)
+	{
+		boxes.clear();
+		ids.clear();
+		rois.clear();
+		if (!dat)
+		{
+			err = "Set Crop DAT to a table of ROIs (roi_x, roi_y, roi_w, roi_h, roi_angle)";
+			return false;
+		}
+		if (!dat->isTable || dat->numRows < 1 || dat->numCols < 1)
+			return true;
+		int c[5], idc = -1;
+		for (int k = 0; k < 5; k++)
+			c[k] = -1;
+		for (int col = 0; col < dat->numCols; col++)
+		{
+			const char* h = dat->getCell(0, col);
+			if (!h)
+				continue;
+			if (!strcmp(h, "id"))
+				idc = col;
+			for (int k = 0; k < 5; k++)
+				if (!strcmp(h, kRoiCols[k]))
+					c[k] = col;
+		}
+		if (c[0] < 0 || c[1] < 0 || c[2] < 0 || c[3] < 0)
+		{
+			err = "Crop DAT needs columns roi_x, roi_y, roi_w, roi_h (and roi_angle) for Landmark Crops";
+			return false;
+		}
+		auto num = [&](int r, int cc) { const char* v = cc >= 0 ? dat->getCell(r, cc) : nullptr; return v ? (float)atof(v) : 0.f; };
+		for (int r = 1; r < dat->numRows && (int)boxes.size() < maxN; r++)
+		{
+			std::array<float, 5> roi = { num(r, c[0]), num(r, c[1]), num(r, c[2]), num(r, c[3]), num(r, c[4]) };
+			float cx = roi[0] * srcW, cy = roi[1] * srcH, w = roi[2] * srcW, h = roi[3] * srcH;
+			if (w < 2.f || h < 2.f)
+				continue;
+			CropBox b{ cx - w * 0.5f, cy - h * 0.5f, cx + w * 0.5f, cy + h * 0.5f };
+			b.cosA = std::cos(roi[4]);
+			b.sinA = std::sin(roi[4]);
+			b.replicate = 1;
+			boxes.push_back(b);
+			rois.push_back(roi);
+			const char* id = idc >= 0 ? dat->getCell(r, idc) : nullptr;
+			ids.push_back(id ? id : std::to_string(r - 1));
+		}
+		return true;
+	}
 
 	// Crop DAT rows -> source-pixel boxes (top-down) + ids. Accepts a tracks table
 	// (track_id, x_left, y_bottom, x_right, y_top) or an OnnxTOP Info DAT (id, u1, v1, u2, v2),
@@ -305,6 +369,12 @@ OnnxTOP::~OnnxTOP()
 		cudaEventDestroy(myRunDone);
 	myEngine.reset();
 	myNextEngine.reset();
+	myCompanions.clear();
+	myNextCompanions.clear();
+	if (myHostStage)
+		cudaFreeHost(myHostStage);
+	if (myDevSheetBoxes)
+		cudaFree(myDevSheetBoxes);
 	if (myRawRange)
 		cudaFree(myRawRange);
 	if (myDevCropBoxes)
@@ -323,7 +393,7 @@ void OnnxTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
 	ginfo->cookEveryFrameIfAsked = true;
 }
 
-void OnnxTOP::manageLoading(const EngineConfig& desired)
+void OnnxTOP::manageLoading(const EngineConfig& desired, const std::vector<std::string>& companions)
 {
 	// Hand over a finished load (main thread only touches myEngine).
 	{
@@ -334,6 +404,7 @@ void OnnxTOP::manageLoading(const EngineConfig& desired)
 			if (myStream)
 				cudaStreamSynchronize(myStream);
 			myEngine = std::move(myNextEngine);
+			myCompanions = std::move(myNextCompanions);
 			myRawRangeReset = true;
 		}
 	}
@@ -341,7 +412,7 @@ void OnnxTOP::manageLoading(const EngineConfig& desired)
 	if (myLoadState == LoadState::Loading)
 		return;
 
-	bool changed = !myHasRequested || !sameModelConfig(desired, myRequestedConfig);
+	bool changed = !myHasRequested || !sameModelConfig(desired, myRequestedConfig) || companions != myRequestedCompanions;
 	if (!changed && !myForceReload)
 		return;	// Ready (possibly still upgrading to TensorRT), or Failed with the same config
 	myForceReload = false;
@@ -357,14 +428,17 @@ void OnnxTOP::manageLoading(const EngineConfig& desired)
 	if (myStream)
 		cudaStreamSynchronize(myStream);
 	myEngine.reset();
+	myCompanions.clear();
 	{
 		std::lock_guard<std::mutex> lock(myLoadMutex);
 		myNextEngine.reset();
+		myNextCompanions.clear();
 		myLoadError.clear();
 		myLoadWarning.clear();
 	}
 
 	myRequestedConfig = desired;
+	myRequestedCompanions = companions;
 	myHasRequested = true;
 
 	if (desired.modelPath.empty())
@@ -376,7 +450,7 @@ void OnnxTOP::manageLoading(const EngineConfig& desired)
 	myLoadState = LoadState::Loading;
 	myCancelLoad = false;
 	setLoadStatus("Loading model...");
-	myLoader = std::thread([this, desired]() { loadEngines(desired); });
+	myLoader = std::thread([this, desired, companions]() { loadEngines(desired, companions); });
 }
 
 bool OnnxTOP::sameModelConfig(const EngineConfig& a, const EngineConfig& b)
@@ -396,7 +470,7 @@ bool OnnxTOP::sameModelConfig(const EngineConfig& a, const EngineConfig& b)
 	return a == b;
 }
 
-void OnnxTOP::loadEngines(EngineConfig cfg)
+void OnnxTOP::loadEngines(EngineConfig cfg, std::vector<std::string> companions)
 {
 	std::string err;
 	bool dynamic = false;
@@ -417,28 +491,71 @@ void OnnxTOP::loadEngines(EngineConfig cfg)
 		return;
 	}
 
+	// The main model, then its companions (Holistic: the hand and face models next to the pose
+	// model), each a fixed-size engine of its own. All load and upgrade together.
+	std::vector<EngineConfig> cfgs{ cfg };
+	for (const std::string& path : companions)
+	{
+		std::error_code ec;
+		if (!fs::exists(path, ec))
+		{
+			failLoad("Missing " + path + " (Holistic needs the hand and face models next to the pose model; "
+				"run scripts/convert_holistic_onnx.py)");
+			return;
+		}
+		EngineConfig c = cfg;
+		c.modelPath = path;
+		c.inputW = c.inputH = 0;
+		c.batch = 0;
+		cfgs.push_back(c);
+	}
+	auto loadAll = [&](OrtProvider provider, std::vector<std::unique_ptr<OnnxEngine>>& out) -> bool
+	{
+		out.clear();
+		for (EngineConfig c : cfgs)
+		{
+			c.provider = provider;
+			auto engine = std::make_unique<OnnxEngine>();
+			if (!engine->load(c, err))
+			{
+				if (cfgs.size() > 1)
+					err = fs::path(c.modelPath).filename().string() + ": " + err;
+				return false;
+			}
+			out.push_back(std::move(engine));
+		}
+		return true;
+	};
+	auto publishAll = [&](std::vector<std::unique_ptr<OnnxEngine>>& set, const std::string& warning) -> bool
+	{
+		auto main = std::move(set[0]);
+		set.erase(set.begin());
+		return publishEngine(std::move(main), warning, std::move(set));
+	};
+
 	// TensorRT engine builds run in onnxtop_tool.exe, never in TD's process (see
 	// TrtBuilder.h). Once the marker exists, loading is a pure cache hit.
 	// claimTensorRT() also pins TD's TensorRT DLLs before anything else can load another
 	// build; if a foreign one is already loaded, OnnxEngine::load() falls back to CUDA.
 	bool trtUsable = cfg.provider != OrtProvider::CUDA && ortload::claimTensorRT().empty();
-	bool trtCached = trtUsable && fs::exists(trtBuildMarkerPath(cfg));
+	std::vector<bool> cached;
+	for (const EngineConfig& c : cfgs)
+		cached.push_back(trtUsable && fs::exists(trtBuildMarkerPath(c)));
+	const bool allCached = std::all_of(cached.begin(), cached.end(), [](bool b) { return b; });
+	std::vector<std::unique_ptr<OnnxEngine>> set;
 
-	if (cfg.provider == OrtProvider::Auto && trtUsable && !trtCached)
+	if (cfg.provider == OrtProvider::Auto && trtUsable && !allCached)
 	{
 		// Auto, first run for this engine: run on CUDA now, build TensorRT in the background,
 		// then swap. Both engines are briefly resident, and the build competes for the GPU.
-		EngineConfig cudaCfg = cfg;
-		cudaCfg.provider = OrtProvider::CUDA;
 		setLoadStatus("Loading model on CUDA...");
-		auto engine = std::make_unique<OnnxEngine>();
-		if (!engine->load(cudaCfg, err))
+		if (!loadAll(OrtProvider::CUDA, set))
 		{
 			failLoad(err);
 			return;
 		}
 		myUpgrading = true;
-		if (!publishEngine(std::move(engine), "Running on CUDA while the TensorRT engine builds in the background "
+		if (!publishAll(set, "Running on CUDA while the TensorRT engine builds in the background "
 			"(first run for this model / size / precision: a few minutes, lower frame rate meanwhile)"))
 		{
 			myUpgrading = false;
@@ -446,52 +563,58 @@ void OnnxTOP::loadEngines(EngineConfig cfg)
 		}
 
 		std::string message;
-		int built = buildTrtEngine(cfg, true, message);
-		if (built < 0)
+		for (size_t i = 0; i < cfgs.size(); i++)
 		{
-			myUpgrading = false;
-			return;	// cancelled
+			if (cached[i])
+				continue;
+			int built = buildTrtEngine(cfgs[i], true, message);
+			if (built < 0)
+			{
+				myUpgrading = false;
+				return;	// cancelled
+			}
+			if (built == 0)
+			{
+				setLoadWarning("Running on CUDA -- TensorRT engine build failed: " + message);
+				myUpgrading = false;
+				return;
+			}
 		}
-		if (built == 0)
-		{
-			setLoadWarning("Running on CUDA -- TensorRT engine build failed: " + message);
-			myUpgrading = false;
-			return;
-		}
-		cfg.provider = OrtProvider::TensorRT;
-		auto trt = std::make_unique<OnnxEngine>();
-		if (!trt->load(cfg, err))
+		if (!loadAll(OrtProvider::TensorRT, set))
 			setLoadWarning("Running on CUDA -- TensorRT engine load failed: " + err);
 		else
-			publishEngine(std::move(trt), message);
+			publishAll(set, message);
 		myUpgrading = false;
 		return;
 	}
 
 	std::string warning;
-	if (cfg.provider == OrtProvider::Auto)
-		cfg.provider = OrtProvider::TensorRT;	// cached engine (or TensorRT unusable: load() picks CUDA)
-	if (cfg.provider == OrtProvider::TensorRT && trtUsable && !trtCached)
+	OrtProvider provider = cfg.provider == OrtProvider::Auto ? OrtProvider::TensorRT : cfg.provider;	// cached (or TensorRT unusable: load() picks CUDA)
+	if (provider == OrtProvider::TensorRT && trtUsable && !allCached)
 	{
-		int built = buildTrtEngine(cfg, false, warning);
-		if (built < 0)
-			return;
-		if (built == 0)
+		for (size_t i = 0; i < cfgs.size(); i++)
 		{
-			failLoad("TensorRT engine build failed: " + warning +
-				". Set Execution Provider to Auto or CUDA to run without it.");
-			return;
+			if (cached[i])
+				continue;
+			int built = buildTrtEngine(cfgs[i], false, warning);
+			if (built < 0)
+				return;
+			if (built == 0)
+			{
+				failLoad("TensorRT engine build failed: " + warning +
+					". Set Execution Provider to Auto or CUDA to run without it.");
+				return;
+			}
 		}
 		setLoadStatus("Loading cached TensorRT engine...");
 	}
 
-	auto engine = std::make_unique<OnnxEngine>();
-	if (!engine->load(cfg, err))
+	if (!loadAll(provider, set))
 	{
 		failLoad(err);
 		return;
 	}
-	publishEngine(std::move(engine), warning);
+	publishAll(set, warning);
 }
 
 int OnnxTOP::buildTrtEngine(const EngineConfig& cfg, bool background, std::string& message)
@@ -526,12 +649,14 @@ int OnnxTOP::buildTrtEngine(const EngineConfig& cfg, bool background, std::strin
 	return 1;
 }
 
-bool OnnxTOP::publishEngine(std::unique_ptr<OnnxEngine> engine, const std::string& warning)
+bool OnnxTOP::publishEngine(std::unique_ptr<OnnxEngine> engine, const std::string& warning,
+	std::vector<std::unique_ptr<OnnxEngine>> companions)
 {
 	std::lock_guard<std::mutex> lock(myLoadMutex);
 	if (myCancelLoad)
 		return false;
 	myNextEngine = std::move(engine);
+	myNextCompanions = std::move(companions);
 	myLoadWarning = warning;
 	myLoadState = LoadState::Ready;
 	return true;
@@ -601,7 +726,11 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	bool cropSquare = inputs->getParInt("Cropsquare") != 0;
 	bool cropSoftmax = inputs->getParInt("Softmax") != 0;
 	int cropInterval = std::max(1, inputs->getParInt("Classifyinterval"));
-	const OP_DATInput* cropDat = mode == ModeCrops || mode == ModePoseCrops ? inputs->getParDAT("Cropdat") : nullptr;
+	const bool cropDatMode = mode == ModeCrops || mode == ModePoseCrops || mode == ModeLandmarkCrops || mode == ModeHolistic;
+	HolisticOptions holisticOpt;
+	holisticOpt.hands = inputs->getParInt("Holistichands") != 0;
+	holisticOpt.face = inputs->getParInt("Holisticface") != 0;
+	const OP_DATInput* cropDat = cropDatMode ? inputs->getParDAT("Cropdat") : nullptr;
 	myClassNames = splitNames(inputs->getParString("Classnames"));
 	RawOptions rawOpt;
 	rawOpt.index = inputs->getParInt("Rawoutput");
@@ -621,12 +750,15 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Fp16", provider != OrtProvider::CUDA);
 	inputs->enablePar("Cachefolder", provider != OrtProvider::CUDA);
 	for (const char* p : { "Confthreshold", "Maxdetections" })
-		inputs->enablePar(p, mode != ModeRaw && mode != ModeCrops);
+		inputs->enablePar(p, mode != ModeRaw && mode != ModeCrops && mode != ModeLandmarkCrops);
 	for (const char* p : { "Batchsize", "Cropsquare", "Softmax", "Classnames", "Classifyinterval" })
 		inputs->enablePar(p, mode == ModeCrops);
-	for (const char* p : { "Cropdat", "Cropscale" })
-		inputs->enablePar(p, mode == ModeCrops || mode == ModePoseCrops);
-	inputs->enablePar("Letterbox", mode != ModeCrops && mode != ModePoseCrops);
+	inputs->enablePar("Cropdat", cropDatMode);
+	inputs->enablePar("Cropscale", mode == ModeCrops || mode == ModePoseCrops);
+	inputs->enablePar("Letterbox", !cropDatMode);
+	inputs->enablePar("Holistichands", mode == ModeHolistic);
+	inputs->enablePar("Holisticface", mode == ModeHolistic);
+	inputs->enablePar("Inputnorm", mode != ModeHolistic);
 	inputs->enablePar("Classfilter", mode == ModeYolo);
 	inputs->enablePar("Nmsthreshold", mode == ModeYuNet);
 	inputs->enablePar("Normscale", normKind == InputNormKind::Custom);
@@ -651,7 +783,12 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	desired.inputH = std::max(0, dynH);
 	desired.batch = mode == ModeCrops ? batchSize : 0;
 	desired.scalarInput = scalarInput;
-	manageLoading(desired);
+	std::vector<std::string> companions;
+	if (mode == ModeHolistic && !desired.modelPath.empty())
+		for (const char* name : kHolisticCompanions)
+			companions.push_back((fs::path(desired.modelPath).parent_path() / name).generic_string());
+	holisticOpt.maxPeople = maxDets;
+	manageLoading(desired, companions);
 	{
 		std::lock_guard<std::mutex> lock(myLoadMutex);
 		std::string staticPath = myStaticModelPath;
@@ -696,6 +833,17 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	if ((mode == ModeCrops || mode == ModePoseCrops) &&
 		!parseCropDat(cropDat, srcW, srcH, cropScale, cropSquare && mode == ModeCrops, kMaxBatch, myCropBoxes, myCropIds, err, poseAspect))
 		myWarning = err;
+	if (mode == ModeLandmarkCrops && !parseRoiDat(cropDat, srcW, srcH, kMaxBatch, myCropBoxes, myCropIds, myRois, err))
+		myWarning = err;
+	if (mode == ModeHolistic && cropDat && !parseCropDat(cropDat, srcW, srcH, 1.f, false, kMaxBatch, myCropBoxes, myCropIds, err))
+		myWarning = err;
+	if (mode == ModeHolistic && !cropDat)
+	{
+		myCropBoxes.clear();
+		myCropIds.clear();
+		if (myWarning.empty())
+			myWarning = "Set Crop DAT to a person detector's tracks (e.g. Yolo26Detect's), so new people are found";
+	}
 
 	OnnxEngine* engine = active ? myEngine.get() : nullptr;
 	const TensorSlot* in = nullptr;
@@ -729,10 +877,13 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	outInfo.textureDesc.depth = 1;
 	outInfo.textureDesc.pixelFormat = OP_PixelFormat::RGBA16Float;
 
-	if (engine && (mode == ModeCrops || mode == ModePoseCrops))
+	if (engine && cropDatMode)
 	{
-		// Debug image: a contact sheet of every batch slot's crop (Pose Crops: one cell per person).
-		int B = mode == ModePoseCrops ? std::max(1, (int)std::min<size_t>(myCropBoxes.size(), kMaxBatch)) : (int)in->shape[0];
+		// Debug image: a contact sheet of every batch slot's crop (Pose / Landmark Crops: one cell per crop;
+		// Holistic: a fixed grid with room for each person's pose, hand and face crops).
+		int B = mode != ModeCrops ? std::max(1, (int)std::min<size_t>(myCropBoxes.size(), kMaxBatch)) : (int)in->shape[0];
+		if (mode == ModeHolistic)
+			B = std::min(kMaxBatch, std::clamp(maxDets, 1, 8) * (1 + (holisticOpt.hands ? 2 : 0) + (holisticOpt.face ? 1 : 0)));
 		int cols = (int)std::ceil(std::sqrt((double)B));
 		outInfo.textureDesc.width = cols * kCropSheetCell;
 		outInfo.textureDesc.height = ((B + cols - 1) / cols) * kCropSheetCell;
@@ -927,6 +1078,60 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		if ((int)myCropBoxes.size() > kMaxBatch && myWarning.empty())
 			myWarning = std::to_string(myCropBoxes.size()) + " boxes but at most " + std::to_string(kMaxBatch) + " people are tracked";
 	}
+	else if (engine && inSurf && mode == ModeHolistic)
+	{
+		// Always synchronous: each stage's crops depend on the previous stage's landmarks.
+		if (runHolistic(inSurf, fmt, srcW, srcH, holisticOpt, outSurf, outW, outH, err))
+			wrote = true;
+		else
+		{
+			myError = err;
+			myHolistic.reset();
+		}
+		readInferMs();
+		myResultFrame = top->totalCooks;
+		myLaunchedFrame = top->totalCooks;
+	}
+	else if (engine && inSurf && mode == ModeLandmarkCrops)
+	{
+		// One run per batch of ROIs (MediaPipe's landmark models have batch 1); each run's small
+		// outputs are read back before the next reuses the buffers. Always synchronous.
+		if (!myDevCropBoxes)
+			cudaMalloc(&myDevCropBoxes, kMaxBatch * sizeof(CropBox));
+		const int B = std::max(1, (int)in->shape[0]);
+		const int n = (int)std::min<size_t>(myCropBoxes.size(), kMaxBatch);
+		if (n > 0)
+			cudaMemcpyAsync(myDevCropBoxes, myCropBoxes.data(), n * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
+		myLandmarks.clear();
+		bool ok = true;
+		for (int start = 0; start < n && ok; start += B)
+		{
+			const int m = std::min(B, n - start);
+			cudaError_t ce = launchCropPreprocess(inSurf, fmt, srcW, srcH, myDevCropBoxes + start, m, B, inputNorm, inLayout,
+				in->device, myModelW, myModelH, myStream);
+			if (ce != cudaSuccess)
+			{
+				myError = std::string("Crop kernel failed: ") + cudaGetErrorString(ce);
+				ok = false;
+			}
+			else if (!queueRun(true))
+				ok = false;
+			else if (!runLandmarkCrops(*engine, start, m, err))
+			{
+				myError = err;
+				ok = false;
+			}
+		}
+		readInferMs();
+		myResultFrame = top->totalCooks;
+		if (ok)
+		{
+			const int cells = std::max(1, n);
+			launchCropSheet(inSurf, fmt, srcW, srcH, myDevCropBoxes, n, (int)std::ceil(std::sqrt((double)cells)), kCropSheetCell,
+				outSurf, outW, outH, myStream);
+			wrote = true;
+		}
+	}
 	else if (engine && inSurf)
 	{
 		Letterbox lb = computeLetterbox((int)top->textureDesc.width, (int)top->textureDesc.height,
@@ -982,11 +1187,17 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			}
 		}
 	}
-	if (mode == ModeRaw || mode == ModeCrops || !wrote)
+	if (mode == ModeRaw || mode == ModeCrops || mode == ModeLandmarkCrops || mode == ModeHolistic || !wrote)
 	{
 		myYolo.clear();
 		myYoloMode = false;
 	}
+	myHolisticMode = mode == ModeHolistic && wrote;
+	if (mode != ModeHolistic)
+		myHolistic.reset();
+	myLandmarkMode = mode == ModeLandmarkCrops && wrote;
+	if (!myLandmarkMode)
+		myLandmarks.clear();
 	myCropMode = mode == ModeCrops && wrote;
 	if (!myCropMode)
 		myCrops.clear();
@@ -1097,6 +1308,286 @@ bool OnnxTOP::runCrops(OnnxEngine& engine, int n, bool softmax, std::string& err
 	return true;
 }
 
+bool OnnxTOP::runHolistic(cudaSurfaceObject_t inSurf, TexFormat fmt, int srcW, int srcH, const HolisticOptions& opt,
+	cudaSurfaceObject_t outSurf, int outW, int outH, std::string& err)
+{
+	using namespace holistic;
+	myHolisticCrops = 0;
+	if (myCompanions.size() < 3)
+	{
+		err = "Holistic: the hand and face models are not loaded";
+		return false;
+	}
+	// 0 pose, 1 hand ROI refinement, 2 hand landmarks, 3 face landmarks (Crop::part 0 / 1-2 recrop
+	// or hand / 3 face map onto these per stage).
+	OnnxEngine* engines[4] = { myEngine.get(), myCompanions[0].get(), myCompanions[1].get(), myCompanions[2].get() };
+	const int minOutputs[4] = { 4, 1, 4, 2 };
+	InputLayout layouts[4];
+	for (int e = 0; e < 4; e++)
+	{
+		const OnnxEngine& en = *engines[e];
+		const auto& sh = en.inputs().empty() ? std::vector<int64_t>() : en.inputs()[0].shape;
+		bool ok = en.inputs().size() == 1 && sh.size() == 4 && sh[0] == 1 && (sh[1] == 3 || sh[3] == 3) &&
+			tensorElem(en.inputs()[0].type, layouts[e].elem) && (int)en.outputs().size() >= minOutputs[e];
+		for (const TensorSlot& o : en.outputs())
+			ok &= o.type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT && o.device;
+		if (!ok)
+		{
+			err = "Holistic: " + fs::path(en.config().modelPath).filename().string() +
+				" is not one of the converted MediaPipe Holistic models (scripts/convert_holistic_onnx.py)";
+			return false;
+		}
+		layouts[e].nhwc = isNHWC(sh);
+	}
+	const InputNorm norm = makeInputNorm(InputNormKind::Unit);	// MediaPipe's 0-1 float input
+	if (!myDevCropBoxes)
+		cudaMalloc(&myDevCropBoxes, kMaxBatch * sizeof(CropBox));
+	if (!myDevSheetBoxes)
+		cudaMalloc(&myDevSheetBoxes, kMaxBatch * sizeof(CropBox));
+
+	auto toBox = [&](const Roi& r)
+	{
+		CropBox b{ (r.x - r.w * 0.5f) * srcW, (r.y - r.h * 0.5f) * srcH, (r.x + r.w * 0.5f) * srcW, (r.y + r.h * 0.5f) * srcH };
+		b.cosA = std::cos(r.angle);
+		b.sinA = std::sin(r.angle);
+		b.replicate = 1;
+		return b;
+	};
+	std::vector<CropBox> sheet;
+	// Runs each (engine, crop) back to back on the stream and reads every output back into pinned
+	// memory, then waits once. out[j][o] points at job j's output o.
+	struct Job
+	{
+		int		engine;
+		Crop	crop;
+	};
+	std::vector<std::vector<const float*>> out;
+	auto runStage = [&](const std::vector<Job>& jobs) -> bool
+	{
+		out.clear();
+		const int n = std::min((int)jobs.size(), kMaxBatch);
+		if (n == 0)
+			return true;
+		size_t floats = 0;
+		for (int j = 0; j < n; j++)
+			for (const TensorSlot& o : engines[jobs[(size_t)j].engine]->outputs())
+				floats += o.elementCount();
+		if (floats * sizeof(float) > myHostStageBytes)
+		{
+			if (myHostStage)
+				cudaFreeHost(myHostStage);
+			if (cudaMallocHost(&myHostStage, floats * sizeof(float)) != cudaSuccess)
+			{
+				myHostStage = nullptr;
+				myHostStageBytes = 0;
+				err = "cudaMallocHost failed for the Holistic outputs";
+				return false;
+			}
+			myHostStageBytes = floats * sizeof(float);
+		}
+		std::vector<CropBox> boxes;
+		for (int j = 0; j < n; j++)
+			boxes.push_back(toBox(jobs[(size_t)j].crop.roi));
+		cudaMemcpyAsync(myDevCropBoxes, boxes.data(), n * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
+		size_t at = 0;
+		for (int j = 0; j < n; j++)
+		{
+			OnnxEngine& en = *engines[jobs[(size_t)j].engine];
+			const TensorSlot& in = en.inputs()[0];
+			cudaError_t ce = launchCropPreprocess(inSurf, fmt, srcW, srcH, myDevCropBoxes + j, 1, 1, norm,
+				layouts[jobs[(size_t)j].engine], in.device, (int)in.shape[widthDim(in.shape)], (int)in.shape[heightDim(in.shape)], myStream);
+			if (ce != cudaSuccess)
+			{
+				err = std::string("Crop kernel failed: ") + cudaGetErrorString(ce);
+				return false;
+			}
+			if (!en.run(err, false))
+				return false;
+			std::vector<const float*> ptrs;
+			for (const TensorSlot& o : en.outputs())
+			{
+				cudaMemcpyAsync(myHostStage + at, o.device, o.elementCount() * sizeof(float), cudaMemcpyDeviceToHost, myStream);
+				ptrs.push_back(myHostStage + at);
+				at += o.elementCount();
+			}
+			out.push_back(std::move(ptrs));
+		}
+		sheet.insert(sheet.end(), boxes.begin(), boxes.end());
+		if (cudaStreamSynchronize(myStream) != cudaSuccess)
+		{
+			err = "Holistic: reading the model outputs failed";
+			return false;
+		}
+		return true;
+	};
+
+	cudaEventRecord(myRunStart, myStream);
+	myRunRecorded = true;
+	auto tRun = Clock::now();
+
+	// Stage 1: pose, per person (tracked ROI, or a new detector box).
+	std::vector<std::array<float, 4>> boxes;
+	for (const CropBox& b : myCropBoxes)
+		boxes.push_back({ b.x1, b.y1, b.x2, b.y2 });
+	std::vector<Job> jobs;
+	for (const Crop& c : myHolistic.poseCrops(srcW, srcH, boxes, myCropIds, std::clamp(opt.maxPeople, 1, 8)))
+		jobs.push_back({ 0, c });
+	if (!runStage(jobs))
+		return false;
+	for (size_t j = 0; j < out.size(); j++)
+	{
+		const auto& o = out[j];
+		// Outputs: landmarks [195], presence [1], heatmap [64 x 64 x 39], world [117].
+		myHolistic.decodePose(jobs[j].crop, o[0], o[1][0], engines[0]->outputs()[2].elementCount() == (size_t)kHeatmapValues ? o[2] : nullptr, o[3]);
+	}
+	myHolistic.endPose();
+
+	// Stage 2: hand ROI refinement (from the pose's wrist / index / pinky) and the face mesh.
+	jobs.clear();
+	if (opt.hands)
+		for (const Crop& c : myHolistic.handRecropCrops())
+			jobs.push_back({ 1, c });
+	if (opt.face)
+		for (const Crop& c : myHolistic.faceCrops())
+			jobs.push_back({ 3, c });
+	if (!runStage(jobs))
+		return false;
+	std::vector<Job> handJobs;
+	for (size_t j = 0; j < out.size(); j++)
+	{
+		if (jobs[j].engine == 1)
+			handJobs.push_back({ 2, myHolistic.handCrop(jobs[j].crop, out[j][0]) });
+		else
+			myHolistic.decodeFace(jobs[j].crop, out[j][0], out[j][1][0]);	// landmarks [1434], presence logit
+	}
+
+	// Stage 3: hand landmarks.
+	if (!runStage(handJobs))
+		return false;
+	for (size_t j = 0; j < out.size(); j++)
+		myHolistic.decodeHand(handJobs[j].crop, out[j][0], out[j][1][0], out[j][3]);	// landmarks, presence, (handedness), world
+	myHolistic.endFrame();
+
+	myRunMs = msSince(tRun);
+	cudaEventRecord(myRunDone, myStream);
+	myHolisticCrops = std::min((int)sheet.size(), kMaxBatch);
+	if (myHolisticCrops > 0)
+		cudaMemcpyAsync(myDevSheetBoxes, sheet.data(), myHolisticCrops * sizeof(CropBox), cudaMemcpyHostToDevice, myStream);
+	const int cells = std::max(1, (outW / kCropSheetCell) * (outH / kCropSheetCell));
+	launchCropSheet(inSurf, fmt, srcW, srcH, myDevSheetBoxes, std::min(myHolisticCrops, cells),
+		std::max(1, outW / kCropSheetCell), kCropSheetCell, outSurf, outW, outH, myStream);
+	return true;
+}
+
+bool OnnxTOP::runLandmarkCrops(OnnxEngine& engine, int start, int count, std::string& err)
+{
+	// Which outputs are small enough to report (fixed per engine, so the header stays put).
+	const auto& outs = engine.outputs();
+	const int B = (int)std::max<int64_t>(1, engine.inputs()[0].shape[0]);
+	std::vector<std::pair<int, int>> picked;
+	size_t perCrop = 0;
+	for (int o = 0; o < (int)outs.size(); o++)
+	{
+		const TensorSlot& s = outs[o];
+		int64_t total = 1;
+		for (int64_t d : s.shape)
+			total *= std::max<int64_t>(d, 1);
+		const bool isFloat = s.type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT || s.type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16;
+		if (!isFloat || !s.device || total % B != 0 || total / B > kLandmarkMaxValues)
+			continue;
+		picked.emplace_back(o, (int)(total / B));
+		perCrop += (size_t)(total / B);
+	}
+	myLmOutputs = picked;
+	size_t bytes = perCrop * (size_t)B * sizeof(float);
+	if (bytes > myHostLogitsBytes)
+	{
+		if (myHostLogits)
+			cudaFreeHost(myHostLogits);
+		if (cudaMallocHost(&myHostLogits, bytes) != cudaSuccess)
+		{
+			myHostLogits = nullptr;
+			myHostLogitsBytes = 0;
+			err = "cudaMallocHost failed for the landmark outputs";
+			return false;
+		}
+		myHostLogitsBytes = bytes;
+	}
+	// Copy every picked output (all B items) back, packed one after another.
+	size_t at = 0;
+	for (const auto& [o, per] : picked)
+	{
+		const TensorSlot& s = outs[o];
+		const size_t vals = (size_t)per * B;
+		if (s.type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
+		{
+			// Half: read the raw bits into the tail of the buffer region, widen after the sync.
+			cudaMemcpyAsync(reinterpret_cast<char*>(myHostLogits + at) + vals * 2, s.device, vals * 2, cudaMemcpyDeviceToHost, myStream);
+		}
+		else
+			cudaMemcpyAsync(myHostLogits + at, s.device, vals * sizeof(float), cudaMemcpyDeviceToHost, myStream);
+		at += vals;
+	}
+	if (cudaStreamSynchronize(myStream) != cudaSuccess)
+	{
+		err = "Reading the landmark outputs failed";
+		return false;
+	}
+	at = 0;
+	for (const auto& [o, per] : picked)
+	{
+		const size_t vals = (size_t)per * B;
+		if (outs[o].type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16)
+		{
+			const uint16_t* h = reinterpret_cast<const uint16_t*>(reinterpret_cast<char*>(myHostLogits + at) + vals * 2);
+			for (size_t i = 0; i < vals; i++)
+			{
+				// IEEE half -> float, in place front to back: float i ends at byte 4i + 4, at or before
+				// half i + 1 (byte 2 vals + 2i + 2), so no half is overwritten before it is read.
+				uint16_t v = h[i];
+				uint32_t sign = (uint32_t)(v & 0x8000) << 16, exp = (v >> 10) & 0x1f, man = v & 0x3ff, bits;
+				if (exp == 0)
+				{
+					if (man == 0)
+						bits = sign;
+					else
+					{
+						exp = 127 - 15 + 1;
+						while (!(man & 0x400))
+						{
+							man <<= 1;
+							exp--;
+						}
+						bits = sign | (exp << 23) | ((man & 0x3ff) << 13);
+					}
+				}
+				else if (exp == 31)
+					bits = sign | 0x7f800000 | (man << 13);
+				else
+					bits = sign | ((exp + 127 - 15) << 23) | (man << 13);
+				memcpy(myHostLogits + at + i, &bits, 4);
+			}
+		}
+		at += vals;
+	}
+	for (int k = 0; k < count; k++)
+	{
+		LandmarkRow row;
+		row.id = myCropIds[(size_t)(start + k)];
+		row.roi = myRois[(size_t)(start + k)];
+		row.values.reserve(perCrop);
+		size_t base = 0;
+		for (const auto& [o, per] : picked)
+		{
+			const float* p = myHostLogits + base + (size_t)k * per;
+			row.values.insert(row.values.end(), p, p + per);
+			base += (size_t)per * B;
+		}
+		myLandmarks.push_back(std::move(row));
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------- info outputs
 
 int32_t OnnxTOP::getNumInfoCHOPChans(void*)
@@ -1112,7 +1603,8 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 0: chan->name->setString("loaded");			chan->value = myEngine ? 1.f : 0.f; break;
 		case 1: chan->name->setString("loading");			chan->value = st == LoadState::Loading ? 1.f : 0.f; break;
 		case 2: chan->name->setString("tensorrt");			chan->value = myEngine && myEngine->providerDescription().rfind("TensorRT", 0) == 0 ? 1.f : 0.f; break;
-		case 3: chan->name->setString("num_detections");	chan->value = (float)(myCropMode ? myCrops.size() : myYolo.detections().size()); break;
+		case 3: chan->name->setString("num_detections");	chan->value = (float)(myHolisticMode ? myHolistic.people().size() : myLandmarkMode ? myLandmarks.size()
+			: myCropMode ? myCrops.size() : myYolo.detections().size()); break;
 		case 4: chan->name->setString("infer_ms");			chan->value = (float)myInferMs; break;
 		case 5: chan->name->setString("execute_ms");		chan->value = (float)myExecuteMs; break;
 		case 6: chan->name->setString("model_w");			chan->value = (float)myModelW; break;
@@ -1127,6 +1619,23 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 
 bool OnnxTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 {
+	if (myHolisticMode)
+	{
+		infoSize->rows = 1 + (int32_t)myHolistic.people().size();
+		infoSize->cols = 8 + holistic::kTotal * 4 + holistic::kWorld * 3;
+		infoSize->byColumn = false;
+		return true;
+	}
+	if (myLandmarkMode)
+	{
+		int cols = 6;
+		for (const auto& p : myLmOutputs)
+			cols += p.second;
+		infoSize->rows = 1 + (int32_t)myLandmarks.size();
+		infoSize->cols = cols;
+		infoSize->byColumn = false;
+		return true;
+	}
 	if (myCropMode)
 	{
 		infoSize->rows = 1 + (int32_t)myCrops.size();
@@ -1144,6 +1653,115 @@ void OnnxTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntri
 {
 	// Columns: id, class, conf, u1, v1, u2, v2, [mask_fill (seg)], [kp{i}_u/v/c (pose)]
 	char buf[64];
+	if (myHolisticMode)
+	{
+		// MediaPipeTOP's Holistic layout: id, class, conf, u1, v1, u2, v2, label, kp{i}_u/v/c (553:
+		// pose 0-32, left hand 33-53, right hand 54-74, face 75-552; TD UV), kp{i}_z, w{i}_x/y/z (75,
+		// metres, hip origin, MediaPipe axes). Parts not found are 0.
+		using namespace holistic;
+		const int kp0 = 8, z0 = kp0 + kTotal * 3, w0 = z0 + kTotal;
+		if (index == 0)
+		{
+			const char* base[] = { "id", "class", "conf", "u1", "v1", "u2", "v2", "label" };
+			const char* uvc[] = { "u", "v", "c" };
+			const char* xyz[] = { "x", "y", "z" };
+			for (int c = 0; c < nEntries; c++)
+			{
+				if (c < kp0)
+					snprintf(buf, sizeof(buf), "%s", base[c]);
+				else if (c < z0)
+					snprintf(buf, sizeof(buf), "kp%d_%s", (c - kp0) / 3, uvc[(c - kp0) % 3]);
+				else if (c < w0)
+					snprintf(buf, sizeof(buf), "kp%d_z", c - z0);
+				else
+					snprintf(buf, sizeof(buf), "w%d_%s", (c - w0) / 3, xyz[(c - w0) % 3]);
+				entries->values[c]->setString(buf);
+			}
+			return;
+		}
+		const auto& people = myHolistic.people();
+		if (index < 1 || index - 1 >= (int32_t)people.size())
+		{
+			for (int c = 0; c < nEntries; c++)
+				entries->values[c]->setString("0");
+			return;
+		}
+		const Person& p = people[(size_t)(index - 1)];
+		for (int c = 0; c < nEntries; c++)
+		{
+			float v = 0.f;
+			if (c == 0)
+			{
+				entries->values[c]->setString(p.id.c_str());
+				continue;
+			}
+			if (c == 7)
+			{
+				entries->values[c]->setString("");
+				continue;
+			}
+			if (c == 1)
+				v = 0.f;
+			else if (c == 2)
+				v = p.score;
+			else if (c < kp0)
+				v = std::clamp(p.box[c - 3], 0.f, 1.f);
+			else if (c < z0)
+			{
+				const Landmark& l = p.lm[(size_t)((c - kp0) / 3)];
+				int f = (c - kp0) % 3;
+				v = l.c <= 0.f ? 0.f : f == 0 ? l.x : f == 1 ? 1.f - l.y : l.c;
+			}
+			else if (c < w0)
+				v = p.lm[(size_t)(c - z0)].z;
+			else
+				v = p.world[(size_t)((c - w0) / 3)][(size_t)((c - w0) % 3)];
+			snprintf(buf, sizeof(buf), "%.5g", v);
+			entries->values[c]->setString(buf);
+		}
+		return;
+	}
+	if (myLandmarkMode)
+	{
+		// Columns: id, roi_x, roi_y, roi_w, roi_h, roi_angle (the Crop DAT's), then o{k}_{i}: value i
+		// of output k for this crop, raw (decoding is the consumer's, e.g. holistic_onnx.py).
+		if (index == 0)
+		{
+			int c = 0;
+			auto put = [&](const char* s) { if (c < nEntries) entries->values[c++]->setString(s); };
+			put("id");
+			for (const char* r : kRoiCols)
+				put(r);
+			for (const auto& [o, per] : myLmOutputs)
+				for (int i = 0; i < per && c < nEntries; i++)
+				{
+					snprintf(buf, sizeof(buf), "o%d_%d", o, i);
+					put(buf);
+				}
+			while (c < nEntries)
+				put("");
+			return;
+		}
+		const bool valid = index >= 1 && index - 1 < (int32_t)myLandmarks.size();
+		for (int c = 0; c < nEntries; c++)
+		{
+			if (!valid)
+			{
+				entries->values[c]->setString("0");
+				continue;
+			}
+			const LandmarkRow& r = myLandmarks[index - 1];
+			if (c == 0)
+			{
+				entries->values[c]->setString(r.id.c_str());
+				continue;
+			}
+			float v = c < 6 ? r.roi[c - 1] : (c - 6 < (int)r.values.size() ? r.values[c - 6] : 0.f);
+			snprintf(buf, sizeof(buf), "%.6g", v);
+			entries->values[c]->setString(buf);
+		}
+		return;
+	}
 	if (myCropMode)
 	{
 		// Columns: id (the Crop DAT's track_id / id), class (argmax), conf, then one per class.
@@ -1359,8 +1977,30 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 			"0 to 255 and Dynamic Size, e.g. 256 x 256). YuNet: OpenCV Zoo face detector (set Input Normalize "
 			"0 to 255 and Channel Order BGR). Raw: show an output tensor as an image (e.g. Depth Anything). "
 			"Pose Crops: person boxes from the Crop DAT, cropped to the model's aspect, run through an RTMPose / RTMW / RTMW3D "
-			"SimCC model (Input Normalize ImageNet); keypoints (and depth for RTMW3D) go to the Info DAT.";
-		check(manager->appendMenu(sp, 6, kModeNames, kModeLabels));
+			"SimCC model (Input Normalize ImageNet); keypoints (and depth for RTMW3D) go to the Info DAT. "
+			"Landmark Crops: rotated ROIs from the Crop DAT (MediaPipe NormalizedRects: roi_x, roi_y, roi_w, roi_h, "
+			"roi_angle) run through a landmark model (e.g. MediaPipe's, converted); every small output goes to the "
+			"Info DAT raw, one row per ROI, for Python to decode. "
+			"MediaPipe Holistic: Model = the converted pose_landmarks_detector.onnx (the hand and face models load from "
+			"the same folder); people from the Crop DAT (a detector's tracks), then tracked from their own landmarks; "
+			"the Info DAT matches MediaPipeTOP's Holistic table. Max Detections = people.";
+		check(manager->appendMenu(sp, 8, kModeNames, kModeLabels));
+	}
+	{
+		OP_NumericParameter np("Holistichands");
+		np.label = "Hands";
+		np.page = "Holistic";
+		np.defaultValues[0] = 1.0;
+		np.help = "Holistic: run the hand models (two per person). Off saves about 2 ms per person.";
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Holisticface");
+		np.label = "Face Mesh";
+		np.page = "Holistic";
+		np.defaultValues[0] = 1.0;
+		np.help = "Holistic: run the face mesh (478 points per person).";
+		check(manager->appendToggle(np));
 	}
 	{
 		OP_NumericParameter np("Letterbox");
@@ -1497,7 +2137,8 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		sp.label = "Crop DAT";
 		sp.page = "Crops";
 		sp.help = "Boxes to classify: a tracks table (track_id, x_left, y_bottom, x_right, y_top -- e.g. "
-			"OnnxTopTables' script_tracks) or an OnnxTOP Info DAT (id, u1, v1, u2, v2). The node's input must be "
+			"OnnxTopTables' script_tracks) or an OnnxTOP Info DAT (id, u1, v1, u2, v2). Landmark Crops: ROIs "
+			"(id, roi_x, roi_y, roi_w, roi_h, roi_angle; MediaPipe NormalizedRects, top-down). The node's input must be "
 			"the same image those boxes came from.";
 		check(manager->appendDAT(sp));
 	}

@@ -45,7 +45,7 @@ set_target_properties(onnx_core PROPERTIES
 	POSITION_INDEPENDENT_CODE ON
 	CUDA_RUNTIME_LIBRARY Shared)
 
-add_library(OnnxTOP SHARED src/OnnxTOP.cpp)
+add_library(OnnxTOP SHARED src/OnnxTOP.cpp src/Holistic.cpp)
 target_include_directories(OnnxTOP PRIVATE "${TD_SDK_DIR}")
 target_link_libraries(OnnxTOP PRIVATE onnx_core)
 target_compile_definitions(OnnxTOP PRIVATE TDNI_VERSION="${TDNI_VERSION}")

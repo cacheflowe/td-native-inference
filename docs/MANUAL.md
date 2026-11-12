@@ -178,6 +178,7 @@ the parameters on the model tox instead.
 | `MediaPipeFace` | video | 478-point face mesh, optional blendshapes and transform matrix | tracks, joints |
 | `MediaPipeFaceDetector` | video | Fast face boxes with 6 points | tracks |
 | `MediaPipeHolistic` | video | Body, both hands and face mesh of one person | tracks, joints, bones |
+| `MediaPipeHolisticGPU` | video | The same on the GPU (ONNX), one or more people; needs YOLO26 | tracks, joints, bones |
 | `MediaPipeSegment` | video | Person/background mask | TOP 1 mask |
 | `Yolo26Detect` | video | Boxes for 80 object classes. Class Filter keeps one class | tracks with `class_name` |
 | `Yolo26Seg` | video | Detection plus a mask per object; Matte Encoding Instances keeps who owns each pixel | TOP 1 matte, TOP 3 boxes, TOP 4 `instances` |
@@ -299,7 +300,8 @@ over the input image or on its own stage. It is single-person: it follows the fi
 **Setup**
 
 1. Put a **MediaPipe Holistic** (or **Pose**) tox on your video and turn on **World Landmark Columns**
-   on its Model page. Without them the puppet stays in its rest pose and warns.
+   on its Model page. Without them the puppet stays in its rest pose and warns. **MediaPipe Holistic
+   GPU** works too (it always outputs world landmarks) and is much cheaper per frame.
 2. Drop `MixamoPuppet.tox`. Wire the same video into its first input and the tracker's
    `out_tracks` DAT into its second.
 3. Set **FBX File** to a Mixamo character (FBX with skin). The tox ships without one: Mixamo's license

@@ -112,6 +112,17 @@ where faces are, not their shape. MediaPipe (BlazeFace short range), Apache-2.0.
 One person: body, both hands and the face mesh in one model (75 tracked joints plus face).
 **Blendshapes** adds the face expression scores. Heavier than Pose. MediaPipe, Apache-2.0.
 
+### MediaPipe Holistic GPU (`MediaPipeHolisticGPU.tox`)
+The same models as MediaPipe Holistic, converted to ONNX and run on the GPU by OnnxTOP, with
+Holistic's cropping logic reimplemented in the plugin. Same table, so it's a drop-in for the
+CPU wrapper, including for Mixamo Puppet. About 3.5× cheaper per frame than the CPU wrapper waiting for its result
+(5.7 ms vs 20 ms on an RTX 4090 Laptop GPU, one person), and it can track several people
+(**Max Detections**): a nested YOLO26 detector finds them, then each is tracked from its own
+landmarks. **Hands** and **Face Mesh** switch those parts off to save time. No blendshapes. It
+agrees with CPU Holistic to a few pixels (face mesh under 1 px on a still photo). It doesn't smooth
+the landmarks itself the way MediaPipe does; the tracker's Output Smoothing does. Needs YOLO26
+(**AGPL-3.0**: `fetch_models.cmd`) for the detector; the converted models are Apache-2.0.
+
 ### MediaPipe Segmentation (`MediaPipeSegment.tox`)
 A person/background matte. TOP 1 is the mask at the input's resolution. **Segmenter Model**,
 **Segment Output** and **Segment Class** let you load another MediaPipe segmenter (e.g. hair or multi-class).

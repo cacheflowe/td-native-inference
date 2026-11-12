@@ -149,6 +149,26 @@ namespace
 		}
 	}
 
+	// Source color at (u, v) in [0, 1] across a crop, top-down. Pose crops (a person box grown to
+	// the model's aspect) can reach past the image: black there, like the affine warp the models were
+	// trained with. Landmark crops replicate the edge, as MediaPipe's ImageToTensorCalculator does.
+	// Classify crops are clamped inside the image already.
+	__device__ float4 sampleCrop(cudaSurfaceObject_t src, TexFormat fmt, int srcW, int srcH, const CropBox& b,
+		float u, float v)
+	{
+		float dx = (u - 0.5f) * (b.x2 - b.x1), dy = (v - 0.5f) * (b.y2 - b.y1);
+		float sx = (b.x1 + b.x2) * 0.5f + b.cosA * dx - b.sinA * dy;
+		float sy = (b.y1 + b.y2) * 0.5f + b.sinA * dx + b.cosA * dy;
+		if (sx < 0.f || sy < 0.f || sx >= srcW || sy >= srcH)
+		{
+			if (!b.replicate)
+				return make_float4(0.f, 0.f, 0.f, 1.f);
+			sx = fminf(fmaxf(sx, 0.5f), srcW - 0.5f);
+			sy = fminf(fmaxf(sy, 0.5f), srcH - 0.5f);
+		}
+		return sampleBilinear(src, fmt, srcW, srcH, sx, srcH - sy);	// flip: TD rows are bottom-up
+	}
+
 	template <typename T>
 	__global__ void kCropPreprocess(cudaSurfaceObject_t src, TexFormat fmt, int srcW, int srcH,
 		const CropBox* boxes, int numBoxes, InputNorm norm, bool nhwc, bool bgr, T* dst, int w, int h)
@@ -167,13 +187,7 @@ namespace
 				item[nhwc ? i * 3 + c : c * plane + i] = toElem<T>(0.f);
 			return;
 		}
-		CropBox b = boxes[k];
-		float sx = b.x1 + (x + 0.5f) * (b.x2 - b.x1) / w;
-		float sy = b.y1 + (y + 0.5f) * (b.y2 - b.y1) / h;
-		// Pose crops (a person box grown to the model's aspect) can reach past the image: black there,
-		// like the affine warp the models were trained with. Classify crops are clamped inside.
-		float4 c = (sx < 0.f || sy < 0.f || sx >= srcW || sy >= srcH) ? make_float4(0.f, 0.f, 0.f, 1.f)
-			: sampleBilinear(src, fmt, srcW, srcH, sx, srcH - sy);	// flip: TD rows are bottom-up
+		float4 c = sampleCrop(src, fmt, srcW, srcH, boxes[k], (x + 0.5f) / w, (y + 0.5f) / h);
 		writePixel<T>(item, i, plane, nhwc, bgr, norm, c);
 	}
 
@@ -290,10 +304,7 @@ namespace
 		float4 c = make_float4(0.f, 0.f, 0.f, 1.f);
 		if (x / cell < cols && k < numBoxes)
 		{
-			CropBox b = boxes[k];
-			float sx = b.x1 + ((x % cell) + 0.5f) * (b.x2 - b.x1) / cell;
-			float sy = b.y1 + ((yt % cell) + 0.5f) * (b.y2 - b.y1) / cell;
-			c = sampleBilinear(src, fmt, srcW, srcH, sx, srcH - sy);
+			c = sampleCrop(src, fmt, srcW, srcH, boxes[k], ((x % cell) + 0.5f) / cell, ((yt % cell) + 0.5f) / cell);
 			c.w = 1.f;
 		}
 		writeHalf4(out, x, y, c);
