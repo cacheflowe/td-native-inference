@@ -2,27 +2,30 @@
 
 ## Unreleased
 
+## v0.4.0 (2026-11-12)
+
+- **Tracker DAT** (`TrackerDAT.dll`): tracking in C++, in every tox. It writes exactly the tables the
+  Python tracker wrote (and the HSEmotion scores, RTMW3D conversion and channels around it), several
+  times faster. Per frame, all three tables: Holistic GPU 4.3 to 1.4 ms (2.7 to 0.4 without the face
+  mesh), YOLO26 Detect 3.7 to 0.3, YOLO26 Segmentation 5.2 to 0.4, YuNet 1.5 to 0.2; the channels
+  output for Holistic 6-11 to 0.3 ms. The toxes no longer embed the Python tracker (Holistic GPU 145
+  to 52 KB, the Vision Demo 1.6 MB to 0.6 MB). **Upgrading:** replace the whole plugin folder;
+  TouchDesigner asks once to allow the new `TrackerDAT.dll`.
 - **Performance** page on every video tox: inference, the plugin's cook (model launch and decode
   for ONNX models), the Info DAT, the tracker, the nested detector, the debug overlay and the
   tox's main-thread total, live, in milliseconds. Computed only while shown. The plugins add
   `decode_ms` (OnnxTOP) and running averages (`infer_ms_avg`, `execute_ms_avg`, ...) to their Info
   CHOPs.
-- **Tracker DAT** (`TrackerDAT.dll`, a fourth plugin to allow): the tracker in C++, writing exactly
-  the tables the Python tracker wrote, now in every tox (and the scores, RTMW3D conversion and
-  channels around it). Per frame, all three tables: Holistic GPU 4.3 to 1.4 ms (2.7 to 0.4 without
-  the face mesh), YOLO26 Detect 3.7 to 0.3, YOLO26 Segmentation 5.2 to 0.4, YuNet 1.5 to 0.2; the
-  channels output for Holistic 6-11 to 0.3 ms. The toxes no longer embed the Python tracker (Holistic
-  GPU 145 to 52 KB, the Vision Demo 1.6 MB to 0.6 MB).
-- YOLO26 Detect / Segmentation: detections with equal scores now go through NMS in detection
-  order. Before, the order depended on numpy's sort internals, so which of two overlapping
-  equal-score boxes survived (and which new track got the lower id) could vary.
 - MediaPipe Holistic GPU: **Output Smoothing** now defaults to 0.4 (was 0). Unlike CPU Holistic it
   has no landmark filter of its own, so it was noticeably jittery; 0.4 is about as steady as CPU
   Holistic for two thirds of a frame of lag.
 - MediaPipe Holistic: **Face Mesh** on the Tracking page. Off, the tables carry the body and hands
-  only (75 joints instead of 553) and the tracker costs about a quarter as much (4.7 to 1.2 ms per
-  person). The Mixamo Puppet doesn't use the face. On Holistic GPU the Model page's **Face Mesh**
-  does both: it skips the face model and leaves the face out of the tables.
+  only (75 joints instead of 553), which makes tracking and every table smaller. The Mixamo Puppet
+  doesn't use the face. On Holistic GPU the Model page's **Face Mesh** does both: it skips the face
+  model and leaves the face out of the tables.
+- YOLO26 Detect / Segmentation: detections with equal scores now go through NMS in detection
+  order. Before, the order depended on numpy's sort internals, so which of two overlapping
+  equal-score boxes survived (and which new track got the lower id) could vary.
 
 ## v0.3.0 (2026-11-12)
 
