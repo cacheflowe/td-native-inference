@@ -110,6 +110,8 @@ bool probeDynamicInput(const std::string& modelPath, bool& dynamic, std::string&
 	{
 		Ort::SessionOptions so;
 		so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_DISABLE_ALL);
+		so.SetIntraOpNumThreads(1);	// only reads the inputs (see makeOptions)
+		so.SetInterOpNumThreads(1);
 		Ort::Session session(ortload::env(), model.wstring().c_str(), so);
 		dynamic = false;
 		if (session.GetInputCount() > 0)
@@ -176,6 +178,13 @@ Ort::SessionOptions OnnxEngine::makeOptions(OrtProvider provider, std::string& d
 	const OrtApi& api = Ort::GetApi();
 	Ort::SessionOptions so;
 	so.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
+	// No intra-op thread pool: the work is on the GPU, launched from the calling thread, so the pool
+	// (by default a thread per core, per session) only cost threads. And its threads exiting when a
+	// session is destroyed (a rebuild, the CUDA -> TensorRT swap) ran the CUDA provider's per-thread
+	// cleanup, which aborted TouchDesigner twice (an exception in a thread-exit destructor; crash dumps
+	// of Nov 13, 2026: only onnxruntime / CUDA frames on the dying thread).
+	so.SetIntraOpNumThreads(1);
+	so.SetInterOpNumThreads(1);
 
 	std::string dev = std::to_string(myConfig.deviceId);
 

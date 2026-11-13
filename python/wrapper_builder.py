@@ -452,7 +452,7 @@ def _build_flow(comp):
 	flow_color.par.vec0name = 'uScale'
 	flow_color.par.vec0valuex.expr = 'parent().par.Flowscale'
 	debug = next(page for page in comp.customPages if page.name == 'Debug')
-	_page_par(debug, 'Float', 'Flowscale', 'Flow Scale', 20.0,
+	_page_par(debug, 'Float', 'Flowscale', 'Flow Scale', 50.0,
 		'Show Result: the speed (in image widths / heights per frame) shown fully saturated is 1 / this.', 1.0, 100.0)
 	output = comp.create('outTOP', 'out_flow')
 	output.par.connectorder = 3
