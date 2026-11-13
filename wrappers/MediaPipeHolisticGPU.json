@@ -4,7 +4,6 @@
 	"plugin": "OnnxTOP",
 	"kind": "landmarks",
 	"tracker": "mp_holistic",
-	"tracker_engine": "cpp",
 	"tracker_defaults": {
 		"Outputsmoothing": 0.4
 	},

@@ -73,7 +73,8 @@ def _wrapper(lab, session):
 	comp = lab.op(name)
 	if comp is None:
 		builder = _builder()
-		comp = builder.build(builder.load_spec(session['wrapper']), lab, name=name)
+		# The Python tracker: the fixtures' reference while the C++ port is checked against it.
+		comp = builder.build(builder.load_spec(session['wrapper']), lab, name=name, tracker_engine='python')
 		index = len([c for c in lab.children if c.fetch('wrapper_spec', None)]) - 1
 		comp.nodeX, comp.nodeY = 300, -index * 200
 	if not comp.inputConnectors[0].connections or comp.inputConnectors[0].connections[0].owner != lab.op('motion'):

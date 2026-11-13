@@ -14,7 +14,8 @@ The spec decides what differs:
 	plugin, preset   the custom OP type and its fixed settings (member names like Dynamicsize1 ok)
 	kind             landmarks | boxes | image | classifier (second stage on a nested detector)
 	tracker          onnxtop_tables tracker mode (omit for image models)
-	tracker_engine   'cpp' runs it on the Tracker DAT (cpp/Tracking), else the Python tracker
+	tracker_engine   'python' runs the Python tracker (Script DATs, onnxtop_tables) instead of the
+	                 default Tracker DAT (cpp/Tracking)
 	tracker_defaults tracker parameter values that differ from the mode's defaults (e.g. smoothing
 	                 for Holistic GPU, which unlike MediaPipe's own Holistic has no landmark filter)
 	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
@@ -26,13 +27,16 @@ The spec decides what differs:
 Everything not exposed stays preset on the inner nodes.
 """
 
+import importlib
 import json
 from pathlib import Path
 
 import td	# imported modules don't get TD's globals (project, op)
 
+# The Python tracker, embedded only in wrappers built with tracker_engine 'python'.
 MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
 	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
+DEFAULT_TRACKER_ENGINE = 'cpp'	# the Tracker DAT
 # A landmarks spec with a "detector" nests a person detector before OnnxTOP (Pose Crops, Holistic);
 # its optional "converter" module (e.g. rtmw_convert) reshapes the Info DAT for the tracker.
 DEBUG_BB = 'tox/shared/DebugBB.tox'
@@ -246,7 +250,10 @@ def _build_tracker(comp, mode, source='detections', engine='python', defaults=No
 	nodes writing tracks, joints and bones. engine 'python': Script DATs calling onnxtop_tables;
 	'cpp': Tracker DATs, their parameters bound to the COMP's."""
 	tracker = comp.create('baseCOMP', 'tracker')
-	tables = comp.op('local/modules/onnxtop_tables').module
+	# The Tracking page is built by the Python tracker's setup code: the wrapper's own copy when it
+	# embeds the Python tracker, else the builder's import (python/ is on sys.path in the project).
+	embedded = comp.op('local/modules/onnxtop_tables')
+	tables = embedded.module if embedded is not None else importlib.import_module('onnxtop_tables')
 	tables.setup_parameters(tracker)
 	tracker.par.Trackermode = mode
 	tables.setup_parameters(tracker)
@@ -297,9 +304,8 @@ def _build_classifier(comp, spec, engine='python'):
 	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
 	if engine == 'cpp':
 		scores = _tracker_dat(comp, 'scores', 'scores')
-		for name in ('Classprefix', 'Classsmoothing'):
-			if hasattr(comp.par, name):
-				scores.par[name].expr = f'parent().par.{name}'
+		for name in ('Classprefix', 'Classsmoothing'):	# created with the pages, after this
+			scores.par[name].expr = f'parent().par.{name}'
 	else:
 		scores = comp.create('scriptDAT', 'scores')
 		comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
@@ -597,8 +603,9 @@ def _restore_wires(comp, inputs, outputs):
 
 def build(spec, parent_comp, name=None, tracker_engine=None):
 	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires.
-	tracker_engine: 'python' or 'cpp' (the Tracker DAT), else the spec's "tracker_engine" (default
-	python). Only the wrapper's own tracker; a nested detector keeps its spec's."""
+	tracker_engine: 'cpp' (the Tracker DAT) or 'python', else the spec's "tracker_engine", else
+	DEFAULT_TRACKER_ENGINE. Only the wrapper's own tracker; a nested detector keeps its spec's.
+	C++-engine wrappers don't embed the Python tracker modules."""
 	name = name or spec['name']
 	position, inputs, outputs = _take_place(parent_comp, name)
 	comp = parent_comp.create('baseCOMP', name)
@@ -612,7 +619,8 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 		return comp
 	posecrops = spec['kind'] == 'landmarks' and bool(spec.get('detector'))
 	converter = spec.get('converter') if posecrops else None
-	_add_code(comp, MODULES + ((converter,) if converter else ()))
+	engine = tracker_engine or spec.get('tracker_engine', DEFAULT_TRACKER_ENGINE)
+	_add_code(comp, MODULES + ((converter,) if converter else ()) if engine == 'python' else ())
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
@@ -625,7 +633,6 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 	passthrough = comp.create('nullTOP', 'null_passthrough')
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
-	engine = tracker_engine or spec.get('tracker_engine', 'python')
 	detector = (_build_classifier(comp, spec, engine) if kind == 'classifier'
 		else _build_posecrops(comp, spec, engine) if posecrops else None)
 	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine,
@@ -698,7 +705,12 @@ def _build_channels(comp, engine):
 	values on its Info CHOP (built only when asked; see track_channels); a Merge adds the plugin's
 	stats."""
 	track = _track_node(comp)
-	if engine == 'cpp' and track is not None and track.OPType != 'scriptDAT':
+	if engine == 'cpp' and track is None:
+		# Image models: no tracks, so the channels are the plugin's stats (all write_channels gave).
+		channels = comp.create('nullCHOP', 'channels')
+		_connect(channels, comp.op('inference_stats'))
+		return channels
+	if engine == 'cpp' and track.OPType != 'scriptDAT':
 		channels = comp.create('mergeCHOP', 'channels')
 		_connect(channels, track_channels(comp, track.path[len(comp.path) + 1:]), comp.op('inference_stats'))
 		return channels

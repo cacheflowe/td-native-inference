@@ -8,8 +8,11 @@
   `decode_ms` (OnnxTOP) and running averages (`infer_ms_avg`, `execute_ms_avg`, ...) to their Info
   CHOPs.
 - **Tracker DAT** (`TrackerDAT.dll`, a fourth plugin to allow): the tracker in C++, writing exactly
-  the tables the Python tracker wrote. MediaPipe Holistic GPU uses it: one person, all three tables,
-  4.5 to 1.3 ms per frame with Face Mesh on, 2.7 to 0.4 ms with it off. The other wrappers follow.
+  the tables the Python tracker wrote, now in every tox (and the scores, RTMW3D conversion and
+  channels around it). Per frame, all three tables: Holistic GPU 4.3 to 1.4 ms (2.7 to 0.4 without
+  the face mesh), YOLO26 Detect 3.7 to 0.3, YOLO26 Segmentation 5.2 to 0.4, YuNet 1.5 to 0.2; the
+  channels output for Holistic 6-11 to 0.3 ms. The toxes no longer embed the Python tracker (Holistic
+  GPU 145 to 52 KB, the Vision Demo 1.6 MB to 0.6 MB).
 - YOLO26 Detect / Segmentation: detections with equal scores now go through NMS in detection
   order. Before, the order depended on numpy's sort internals, so which of two overlapping
   equal-score boxes survived (and which new track got the lower id) could vary.

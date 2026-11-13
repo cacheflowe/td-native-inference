@@ -51,9 +51,9 @@ and `t<id>_<joint>_wx/_wy/_wz` channels.
 
 ## Tracking
 
-The plugins report raw detections each frame; Python inside each tox (`python/object_tracker.py`
-and the `*_tracker_pipeline.py` modules) turns them into tracks with stable ids. It's
-ByteTrack-style, with changes that have worked well for live installations:
+The plugins report raw detections each frame; the Tracker DAT inside each tox (`TrackerDAT.dll`,
+C++) turns them into tracks with stable ids, a fraction of a millisecond per frame for most models.
+It's ByteTrack-style, with changes that have worked well for live installations:
 
 - **Boxes** (YOLO Detection/Segmentation, YuNet): ByteTrack. A Kalman filter predicts each
   track's box, and detections are matched by box overlap in two passes: confident detections

@@ -68,10 +68,10 @@ def build(session):
 	wrapper.inputConnectors[0].connect(source)
 	if hasattr(wrapper.par, 'Debugoverlay'):
 		wrapper.par.Debugoverlay = False
-	modules = wrapper.op('local/modules')
-	tables = modules.op('onnxtop_tables').module
-	for cache in (tables._pipelines, tables._written, tables._header_cache, tables._layout_cache, tables._class_scores):
-		cache.clear()
+	if engine == 'python':
+		tables = wrapper.op('local/modules/onnxtop_tables').module
+		for cache in (tables._pipelines, tables._written, tables._header_cache, tables._layout_cache, tables._class_scores):
+			cache.clear()
 	if check == 'rtmw':
 		node = wrapper_builder._tracker_dat(wrapper, 'rtmw_info_cpp', 'convert_rtmw')
 		node.par.Frametop = 'input'
