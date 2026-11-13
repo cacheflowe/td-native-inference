@@ -249,7 +249,10 @@ landmarks.
 On its own that would leave undriven bones at the rig's rest pose, so the solver fills in instead:
 - hips missing but shoulders seen: hips go 0.5 m under the shoulders (a little narrower), so the
   torso still turns with the shoulder line;
-- elbows or wrists missing: they hang, the forearm slightly forward so the upper arm's roll is
+- an elbow missing with its wrist tracked: the elbow goes between the shoulder and the wrist, bent
+  a little down and back, so the hand stays where it was tracked (the tracker already keeps an
+  elbow whose hand is in view; this covers what's left);
+- elbow and wrist missing: they hang, the forearm slightly forward so the upper arm's roll is
   defined;
 - legs: left undriven, straight down from the hips.
 
@@ -303,11 +306,14 @@ by TD's Python on every change. That cost is outside the solver and hasn't been 
 **Goal:** the same rotations and placement from a C++ custom CHOP, then the features that are
 awkward in per-frame Python (rotation smoothing, joint limits).
 
-**Status (Nov 13):** steps 1-3 are done; `MixamoPuppet.tox` runs on the Puppet CHOP. Results:
-- **Offline** (`tests/test_puppet_cpp.py`, 24 combinations of rig, fixture and settings):
-  rotations within 4e-14, roots within 5e-12.
-- **In TD** (`tests/td_puppet_lab.py`, 300 frames each): every channel the same.
-- **Per frame:** body 2.19 → 0.34 ms, rigged hand 1.10 → 0.26 ms.
+**Status (Nov 13):** steps 1-4 are done; `MixamoPuppet.tox` runs on the Puppet CHOP.
+- **The port was proven exact** before anything new went in: rotations within 4e-14 and roots
+  within 5e-12 offline (24 combinations of rig, clip and settings), and every channel the same in
+  TD over 300 frames, body and hand.
+- **Speed, per frame:** body 2.19 → 0.34 ms, rigged hand 1.10 → 0.26 ms.
+- **The C++ output is now its own reference** (`tests/data/puppet/reference.json`, see
+  [cpp/Puppet/README.md](../cpp/Puppet/README.md#tests)); the Python solver is no longer
+  compared against.
 
 Plugin reference: [cpp/Puppet/README.md](../cpp/Puppet/README.md).
 
@@ -337,7 +343,7 @@ Placement Smoothing at 0.
   Performance page like the wrappers'.
 - **Same-row skip:** compare the row's text and the settings, as the Python does.
 
-**Proving it's the same.**
+**Proving it's the same** (how the port was checked; done):
 - Rotations in doubles won't match numpy bit for bit: numpy's matrix products sum in a different
   order. The test is agreement within 1e-6 degrees, and the same root translation within 1e-6 rig
   units.

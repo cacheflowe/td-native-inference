@@ -23,9 +23,11 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
       - Done (Nov 13, C++ only): landmark smoothing, hand-roll smoothing and knee limits
         ([docs/PUPPETS.md](docs/PUPPETS.md#smoothing-and-limits-c-solver-only)).
       - Next: side-on flip rejection (needs a recorded side-on clip first) and arm-twist limits.
-- [ ] Retire the Python tracker once v0.4.0 has been in use for a while: delete the modules, make the
-      recorded C++ tables the fixtures, and build the Tracking pages without importing
-      `onnxtop_tables`. Same for the Python puppet solver after its port.
+- [x] Python is no longer the reference (Nov 13): the fixtures hold the C++ tracker's and puppet's
+      own output (`--golden`), the Python comparison labs are gone.
+- [ ] Delete the Python tracker and puppet solver modules: build the Tracking pages without
+      importing `onnxtop_tables`, switch the recorder to the Tracker DAT, drop the lab's Python
+      solver switch.
 - [ ] Remove `python/holistic_onnx.py` (the Landmark Crops prototype; the C++ Holistic mode replaced it).
 
 ## Speed

@@ -270,12 +270,43 @@ ENGINES = {'python': PythonEngine, 'cpp': CppEngine}
 
 # ---------------------------------------------------------------- replay
 
-def replay(path, engine_name='python', show=5):
+def is_cpp_reference(meta):
+	"""Fixtures whose tables are the C++ tracker's own (golden()): replayed with its defaults, the
+	joint gate included. Older ones hold the Python tracker's tables (replayed with the gate off)."""
+	return meta.get('reference') == 'cpp'
+
+
+def golden(path, out=None):
+	"""Make a fixture the C++ tracker's reference: replay its recorded Info DATs through the C++
+	tracker with its per-mode defaults and store those tables in place of the recorded ones.
+	Re-run after a deliberate change to the tracker's output, and review the diff."""
+	meta, frames = load(path)
+	engine = CppEngine(meta, cpp_only={})
+	info = None
+	for frame in frames:
+		if frame['info'] is not None:
+			info = InfoDat(parse(frame['info']), '/replay/info')
+		for t, cooks in zip(TABLES, frame['cooked']):
+			got = None
+			for _ in range(int(cooks)):
+				got = engine.cook(t, info, frame['results'], frame['result_delay'])
+			frame[t] = '\r\n'.join('\t'.join(row) for row in got) if got is not None else None
+	meta = dict(meta, reference='cpp')
+	out = Path(out or path)
+	with gzip.open(out, 'wt', encoding='utf-8') as f:
+		f.write('\n'.join(json.dumps(x) for x in [{'meta': meta}, *frames]) + '\n')
+	return out
+
+
+def replay(path, engine_name='cpp', show=5):
 	meta, frames = load(path)
 	engine_class = ENGINES[engine_name]
 	if hasattr(engine_class, 'supports') and not engine_class.supports(meta):
 		return {'fixture': Path(path).name, 'mode': meta['mode'], 'skipped': True}
-	engine = engine_class(meta)
+	if engine_name == 'cpp':
+		engine = engine_class(meta, cpp_only={} if is_cpp_reference(meta) else None)
+	else:
+		engine = engine_class(meta)
 	expected = {t: [] for t in TABLES}
 	info_rows = []
 	info = None
@@ -284,7 +315,8 @@ def replay(path, engine_name='python', show=5):
 	# solvePnP head pose: the C++ solver follows OpenCV's steps but not its rounding, and on badly
 	# conditioned frames (5 near-planar points) either solver can wander to a different rotation, so
 	# the angles are counted, not required to match (everything else still must).
-	approximate = APPROXIMATE if engine_name == 'cpp' and meta['tracker_pars'].get('Posemethod') == 'solvepnp' else ()
+	approximate = APPROXIMATE if (engine_name == 'cpp' and not is_cpp_reference(meta)
+		and meta['tracker_pars'].get('Posemethod') == 'solvepnp') else ()
 	if approximate:
 		report['approximate_cells'] = 0
 	for frame in frames:
@@ -368,12 +400,18 @@ def trim(path, frames, out_dir):
 def main(argv=None):
 	parser = argparse.ArgumentParser()
 	parser.add_argument('fixtures', nargs='+')
-	parser.add_argument('--engine', default='python', choices=sorted(ENGINES))
+	parser.add_argument('--engine', default='cpp', choices=sorted(ENGINES))
 	parser.add_argument('--show', type=int, default=5, help='differences listed per fixture')
 	parser.add_argument('--trim', type=int, help='instead of replaying: copy the first N frames to --out')
+	parser.add_argument('--golden', action='store_true',
+		help="instead of replaying: store the C++ tracker's tables in the fixtures (in place); review the diff")
 	parser.add_argument('--out', default=str(ROOT / 'tests' / 'data' / 'tracking'))
 	args = parser.parse_args(argv)
 	paths = [p for pattern in args.fixtures for p in sorted(glob.glob(pattern))]
+	if args.golden:
+		for path in paths:
+			print(golden(path))
+		return 0
 	if args.trim:
 		for path in paths:
 			out = trim(path, args.trim, args.out)

@@ -15,6 +15,12 @@ skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp
 mp_facedet, pose, movenet, rtmw). Trimmed fixtures in `tests/data/tracking/`;
 `tests/test_tracking_replay.py` replays them through both engines.
 
+**Nov 13: the Python tracker is no longer the reference.** The fixtures in `tests/data/tracking/`
+hold the C++ tracker's own tables (`tracking_replay.py --golden`, with its per-mode defaults, the
+joint gate included), and the in-TD comparison labs are gone. The Python modules are still in the
+repo (the recorder runs them in TD to produce Info DATs; `--golden` replaces their tables); deleting
+them is the remaining step.
+
 Phase 2 done (Nov 12): the Tracker DAT (`TrackerDAT.dll`, `cpp/Tracking/README.md`) runs MediaPipe
 Holistic GPU (`"tracker_engine": "cpp"` in its spec; `wrapper_builder.build(..., tracker_engine=)`
 overrides). The wrapper's tracker COMP keeps its Tracking page; its three Tracker DATs are bound to

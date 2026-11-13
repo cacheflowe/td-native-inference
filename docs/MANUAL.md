@@ -97,8 +97,10 @@ What the tracker does between model results:
   - **Joint Confidence Threshold:** joints the model scores below this (0 = off).
   - **Hide Off-Image Joints:** joints outside the image or on its edge.
 
-  A joint whose parent is unseen is unseen too: no knee without a hip, no wrist without an elbow.
-  Tracking itself still uses every joint, so ids don't change.
+  On the legs, a joint whose parent is unseen is unseen too (no knee without a hip). On the arms, a
+  hand in view keeps its elbow, even one below the image or scored low (unless YOLO or MoveNet
+  squashed it onto the image's edge, where its position means nothing). Tracking itself still uses
+  every joint, so ids don't change.
 
 The `tracks` table always begins with `track_id, label, score, cx, cy, w, h, x_left, x_right,
 y_top, y_bottom, vx, vy, lost_frames, total_frames`. After those come model-specific columns

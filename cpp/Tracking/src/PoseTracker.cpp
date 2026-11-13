@@ -38,11 +38,15 @@ PoseTracker::PoseTracker(const Skeleton& skeleton)
 	static const char* kRoots[] = {"nose", "left_eye_inner", "left_eye", "left_eye_outer", "right_eye_inner", "right_eye",
 		"right_eye_outer", "left_ear", "right_ear", "mouth_left", "mouth_right", "left_shoulder", "right_shoulder", "left_hip",
 		"right_hip"};
-	static const char* kChains[][2] = {{"elbow", "shoulder"}, {"wrist", "elbow"}, {"pinky", "wrist"}, {"index", "wrist"},
-		{"thumb", "wrist"}, {"knee", "hip"}, {"ankle", "knee"}, {"heel", "ankle"}, {"foot_index", "ankle"}};
+	// {joint, parent, legs}: only the legs pass a gated parent on (no knee without a hip); an arm
+	// keeps a seen wrist whatever its elbow does (a hand raised in front of a desk webcam).
+	static const char* kChains[][3] = {{"elbow", "shoulder", ""}, {"wrist", "elbow", ""}, {"pinky", "wrist", ""},
+		{"index", "wrist", ""}, {"thumb", "wrist", ""}, {"knee", "hip", "1"}, {"ankle", "knee", "1"}, {"heel", "ankle", "1"},
+		{"foot_index", "ankle", "1"}};
 	const size_t n = skeleton_.names.size();
 	gateBody_.assign(n, 0);
 	gateParent_.assign(n, -1);
+	gateCascade_.assign(n, 0);
 	auto bodyName = [](const std::string& name) { return name.compare(0, 5, "pose_") == 0 ? name.substr(5) : name; };
 	std::map<std::string, int> index;
 	for (size_t k = 0; k < n; ++k) index[bodyName(skeleton_.names[k])] = int(k);
@@ -61,6 +65,7 @@ PoseTracker::PoseTracker(const Skeleton& skeleton)
 			if (k < 0) continue;
 			gateBody_[k] = 1;
 			gateParent_[k] = parent;
+			gateCascade_[k] = link[2][0] != '\0';
 			gateOrder_.push_back(k);
 		}
 }
@@ -70,15 +75,33 @@ void PoseTracker::gateJoints(Object& obj, const PoseParams& p) const {
 	// Models that can't place a point outside the image (YOLO, MoveNet) squash out-of-frame joints
 	// onto its edge; MediaPipe places them outside it.
 	constexpr double kEdge = 0.005;
-	std::vector<char> gated(obj.keypoints.size(), 0);
+	enum : char { Seen, Gated, OnEdge };
+	const int count = int(obj.keypoints.size());
+	std::vector<char> state(count, Seen);
+	// 1. Each joint on its own: confidence, outside the image, squashed onto its edge.
 	for (int k : gateOrder_) {
-		if (k >= int(obj.keypoints.size())) continue;
+		if (k >= count) continue;
 		const Kp& kp = obj.keypoints[k];
-		bool off = p.jointThreshold > 0.0 && kp.v[2] < p.jointThreshold;
-		if (p.hideOffImage && (kp.v[0] < kEdge || kp.v[0] > 1.0 - kEdge || kp.v[1] < kEdge || kp.v[1] > 1.0 - kEdge)) off = true;
-		if (gateParent_[k] >= 0 && gated[gateParent_[k]]) off = true;
-		if (!off) continue;
-		gated[k] = 1;
+		const double u = kp.v[0], v = kp.v[1];
+		if (p.hideOffImage && (u < -kEdge || u > 1.0 + kEdge || v < -kEdge || v > 1.0 + kEdge))
+			state[k] = Gated;	// placed outside the image (MediaPipe): a guess, but a plausible one
+		else if (p.hideOffImage && (u < kEdge || u > 1.0 - kEdge || v < kEdge || v > 1.0 - kEdge))
+			state[k] = OnEdge;	// squashed onto the edge (YOLO, MoveNet): the position means nothing
+		if (state[k] == Seen && p.jointThreshold > 0.0 && kp.v[2] < p.jointThreshold) state[k] = Gated;
+	}
+	// 2. A seen joint keeps its parent (children first): a hand in view keeps its elbow even when the
+	// elbow is below the image or scored low. Not one squashed onto the edge.
+	for (auto it = gateOrder_.rbegin(); it != gateOrder_.rend(); ++it) {
+		const int k = *it, parent = gateParent_[k];
+		if (k < count && parent >= 0 && parent < count && state[k] == Seen && state[parent] == Gated) state[parent] = Seen;
+	}
+	// 3. Legs: a gated parent gates its children (no knee without a hip).
+	for (int k : gateOrder_) {
+		const int parent = gateParent_[k];
+		if (k < count && gateCascade_[k] && parent >= 0 && state[parent] != Seen) state[k] = Gated;
+	}
+	for (int k : gateOrder_) {
+		if (k >= count || state[k] == Seen) continue;
 		obj.visible[k] = 0;
 		obj.keypoints[k].v[2] = 0.0;
 	}

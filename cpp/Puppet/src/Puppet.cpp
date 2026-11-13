@@ -266,14 +266,18 @@ void Solver::relaxUnseen(Landmarks& world) {
 			world[hip] = {mid[0] + 0.6 * (s[0] - mid[0]), mid[1] + 0.6 * (s[1] - mid[1]) - 0.5, mid[2] + 0.6 * (s[2] - mid[2])};
 		}
 	}
-	// Arms: hanging from the shoulder, the forearm a little forward (so the upper arm's roll is set
-	// by an elbow bending the way elbows bend).
+	// Arms: an elbow between the shoulder and a tracked wrist (bent a little down and back, the way
+	// elbows bend), so the hand stays where it was tracked; with no wrist either, hanging from the
+	// shoulder with the forearm a little forward (so the upper arm's roll is set).
 	for (const char* side : {"left", "right"}) {
 		const std::string s(side);
 		const Vec3* shoulder = get((s + "_shoulder").c_str());
 		if (!get((s + "_elbow").c_str())) {
 			const Vec3& p = *shoulder;
-			world[s + "_elbow"] = {p[0], p[1] - 0.27, p[2]};
+			if (const Vec3* w = get((s + "_wrist").c_str()))
+				world[s + "_elbow"] = {(p[0] + (*w)[0]) / 2, (p[1] + (*w)[1]) / 2 - 0.06, (p[2] + (*w)[2]) / 2 - 0.04};
+			else
+				world[s + "_elbow"] = {p[0], p[1] - 0.27, p[2]};
 		}
 		if (!get((s + "_wrist").c_str())) {
 			const Vec3& e = world[s + "_elbow"];

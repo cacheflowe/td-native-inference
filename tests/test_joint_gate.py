@@ -117,6 +117,31 @@ class JointGate(unittest.TestCase):
 			self.skipTest('recorded before the YOLO26 visibility fix (re-record after rebuilding OnnxTOP)')
 		self.check_chestup('yolopose_chestup')
 
+	def test_arms_keep_elbows_of_seen_wrists(self):
+		"""A hand in view keeps its elbow (scored low or below the image), unless the elbow is squashed
+		onto the image's edge (YOLO, MoveNet), where its position means nothing; the wrist stays seen."""
+		names = ['nose', 'left_eye', 'right_eye', 'left_ear', 'right_ear', 'left_shoulder', 'right_shoulder', 'left_elbow',
+			'right_elbow', 'left_wrist', 'right_wrist', 'left_hip', 'right_hip', 'left_knee', 'right_knee', 'left_ankle',
+			'right_ankle']
+		points = {n: (0.5 + (0.1 if n.startswith('left') else -0.1 if n.startswith('right') else 0.0), 0.5, 0.9) for n in names}
+		points['nose'] = (0.5, 0.8, 0.9)
+		points['left_elbow'] = (0.65, 0.4, 0.05)	# scored low, wrist seen: kept
+		points['right_elbow'] = (0.35, 0.002, 0.9)	# squashed onto the bottom edge: hidden
+		points['left_wrist'] = (0.62, 0.55, 0.9)
+		points['right_wrist'] = (0.38, 0.55, 0.9)
+		header = ['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2'] + [f'kp{i}_{c}' for i in range(17) for c in 'uvc']
+		row = ['0', '0', '0.9', '0.3', '0.0', '0.7', '0.9'] + [f'{x:.4f}' for n in names for x in points[n]]
+		info = tr.InfoDat([header, row], '/replay/info')
+		engine = tr.CppEngine({'mode': 'pose', 'tracker_pars': {}, 'frame_size': [1280, 720]}, cpp_only={})
+		for _ in range(5):
+			engine.cook('tracks', info, None, None)
+			joints = engine.cook('joints', info, None, None)
+		drawn = {r[1] for r in joints[1:]}
+		self.assertIn('left_elbow', drawn)
+		self.assertIn('left_wrist', drawn)
+		self.assertNotIn('right_elbow', drawn)
+		self.assertIn('right_wrist', drawn)
+
 	def test_full_body_clips_keep_their_legs(self):
 		for name in ('pose_twins', 'movenet_walking'):
 			with self.subTest(name):

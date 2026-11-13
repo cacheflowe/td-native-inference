@@ -14,7 +14,13 @@ The port of the Python tracker (`python/onnxtop_tables.py` and the pipelines) to
   text exactly).
 - `TrackerDAT.dll`: the custom DAT, copied into `plugins/`.
 - `tracker_replay.dll`: a C API for `tests/tracking_replay.py`, which replays recorded Info DATs and
-  diffs the tables against the Python tracker's.
+  diffs the tables against the ones stored in the fixtures: the C++ tracker's own output, the
+  reference since Nov 13 (it began as an exact port, checked against the Python tracker's
+  recorded tables; the Python tracker is no longer the reference). After a deliberate change to
+  the output: `python tests/tracking_replay.py tests/data/tracking/*.jsonl.gz --golden`, then
+  `python tests/test_tracking_extras.py --golden` for the channels, and review the diff.
+  New recordings (`tests/td_record_tracking.py`) still run the Python tracker in TD for the Info
+  DATs; `--golden` replaces their tables.
 
 Build: `build.cmd` (MSVC v142, Ninja; no CUDA). TouchDesigner loads `TrackerDAT.dll` at startup
 to register the operator and keeps it locked, so a rebuild takes effect after a restart (the build

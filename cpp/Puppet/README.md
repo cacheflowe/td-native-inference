@@ -61,15 +61,20 @@ A cook whose tracks row and settings are the same as last time keeps the channel
 
 ## Tests
 
-- **`tests/test_puppet_cpp.py`:** `puppet_replay.dll` against `puppet_solver.cook` on recorded
-  Holistic tables, every frame. Rotations are compared as matrices, within 1e-9; roots within 1e-7
-  relative. Rigs:
+- **`tests/test_puppet_cpp.py`:** `puppet_replay.dll` on the recorded Holistic GPU tracks tables
+  (dancer, dancer without the face mesh, chest-up), every frame. The output must match the stored
+  reference, `tests/data/puppet/reference.json`: a hash of every cook's channels to 1e-5, per rig,
+  clip and settings (the defaults, Center + Mirror, all additions off). Rigs:
   - the synthetic rig from `test_retarget`;
   - `build/ybot_rest.json` and `build/hand_rest.json` when present.
-- **`tests/td_puppet_lab.py`, in TD:** a Puppet CHOP next to each Script CHOP solver in
-  `/project1/PuppetLab`, diffed every frame and timed.
 
-**Nov 13 results.** Both tests agree to 1e-14 on rotations and exactly on roots. Per frame in TD:
+  After a deliberate change, `python tests/test_puppet_cpp.py --golden`, and review. The test also
+  checks that the default smoothing calms the forearms and hands.
+
+The C++ solver began as an exact port of the Python one (`puppet_solver.py`), checked offline and
+in TD to 1e-14 on rotations. Since Nov 13 the Python solver is no longer the reference.
+
+**Nov 13 timing** (before the additions), per frame in TD:
 
 | Solver | Python | C++ |
 |---|---|---|

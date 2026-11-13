@@ -20,7 +20,8 @@
   Settings:
   - **Joint Confidence Threshold** (per-model default);
   - **Hide Off-Image Joints**;
-  - a joint whose parent is unseen is unseen too.
+  - on the legs, a joint whose parent is unseen is unseen too; on the arms, a hand in view keeps
+    its elbow.
 
   Mixamo Puppet's **Relax Unseen Limbs** then keeps the torso turning and lets the arms hang and
   the legs stand.

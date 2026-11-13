@@ -1,0 +1,23 @@
+{
+	"detect_walking.jsonl.gz": "8651ff2acce7a4b1c7b514ede736350e1822a66d36e5fcef9fdea54c7a819951",
+	"face_moving.jsonl.gz": "e8bc67dc60501bceda05b1835a031765ac83b0388a47138f6f0d2c04617b344c",
+	"face_photo.jsonl.gz": "6e49ef4a93db01cf890da35a76100f2c695b5c7c461e5f619cb6dda4b1e5217d",
+	"facedet_moving.jsonl.gz": "fda46fb5ca92c1cd5864f94c561bb01cef575d3fcb8ab6420ea12f76b7f39d1a",
+	"hands_clip.jsonl.gz": "95787f9f03ef2ffb9508fee2a1751f70863f184d57563dc72672ded192f5ff52",
+	"holistic_cpu_dancer.jsonl.gz": "6a103ec3e5b3960c3187b61f12e3b269ad814c353cf57d6da305793e5509f4a1",
+	"holistic_gpu_chestup.jsonl.gz": "5607d98ed0cb520984f2bdfee5e7575674ec1921599c06c2f2268180f700907c",
+	"holistic_gpu_dancer.jsonl.gz": "14792b2f13a2161d3866450d577cd693e29efbe501ffb2842aea42fa91522363",
+	"holistic_gpu_noface_dancer.jsonl.gz": "74b04a4936e7058821c568d287e121ff083ee6cf30c7e6b86dfb8012cc2c0a52",
+	"movenet_chestup.jsonl.gz": "cd3b8d164622ccf1206cce6972343b5c8068e4b276498ab85d3f4d1e21153a0f",
+	"movenet_walking.jsonl.gz": "e917a1249dfb5e8104922726d15b682f2d44325bdfc31684b0da6be081259c62",
+	"pose_chestup.jsonl.gz": "dbee2398e00c548db00036ca12391b02a9dd3bfebbe233c72f852cb601407849",
+	"pose_twins.jsonl.gz": "19a422a8dc974276bfe567ac07ed495b2f4aca6e4f682724cfc603ca69b68a14",
+	"rtmw_dancer.jsonl.gz": "95fec28f833141cb4b6cc4e7fbdd406f8df4f37f286482f1149e93a546112b5e",
+	"segment_walking.jsonl.gz": "8b73a48cfc7cbc82915adba196f426c0994787c8e5d4bb9452ee2e7f91f759cc",
+	"yolopose_chestup.jsonl.gz": "c34aaf7f9dacec9c12f0f4d284fd208665baef9187f780dc90c54261e0bede62",
+	"yolopose_walking.jsonl.gz": "12beb304332f5488ab3a517a4f74e026aab8b11fa83242f9264f672f8f18db40",
+	"yunet_moving.jsonl.gz": "d6aefeea0fe4f5fc928b86e5cc5c1ca9686cee9a3cab36a0f839f252eafd8053",
+	"yunet_photo.jsonl.gz": "e40783cf98f6bd115a8b0c4a3584556668439bf60a92117d4251c5ccc19d49c7",
+	"yunet_solvepnp_moving.jsonl.gz": "a2f8f231dc5b5da06a7bb0a261e396a40cbdbebf3d0e5454eeb7f2fe61d10127",
+	"yunet_walking.jsonl.gz": "9bd5d0dbc6c328a9d551fd3a5ec1cce9c14c3bc3506f99bcaa840903e9c122a4"
+}

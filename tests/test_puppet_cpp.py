@@ -1,18 +1,18 @@
-"""The C++ puppet solver (cpp/Puppet, puppet_replay.dll) against the Python one (puppet_solver.cook),
-frame by frame on recorded Holistic tracks tables. Build first: cpp\\Puppet\\build.cmd.
+"""The C++ puppet solver (cpp/Puppet, puppet_replay.dll) on the recorded Holistic GPU tracks tables in
+tests/data/tracking, against its own stored output (tests/data/puppet/reference.json: per rig, clip and
+settings, a hash of every solve's channels to 1e-5). Build first: cpp\\Puppet\\build.cmd. After a
+deliberate change, regenerate and review:
 
+	python tests/test_puppet_cpp.py --golden
 	python -m unittest tests.test_puppet_cpp
 
-Rigs: the synthetic Mixamo rig from test_retarget (committed). When present (Mixamo / Blender files
-aren't committed): build/ybot_rest.json (Y Bot) and build/hand_rest.json (the rigged hand), and the
-full recordings in build/tracking/.
-
-Rotations agree to rounding, not bit for bit (numpy sums matrix products in another order), so each
-bone's rx/ry/rz is compared as a rotation matrix (an Euler split can jump near +-180 / gimbal lock
-while the rotation is the same); roots and the mirror flag by value.
+Rigs: the synthetic Mixamo rig from test_retarget (committed); build/ybot_rest.json (Y Bot) and
+build/hand_rest.json (the rigged hand) when present (Mixamo / Blender files aren't committed; their
+references are kept with the others and skipped without them).
 """
 import ctypes
 import gzip
+import hashlib
 import json
 import math
 import sys
@@ -25,17 +25,22 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
 sys.path.insert(0, str(ROOT / 'tests'))
 import mixamo_retarget as mr  # noqa: E402
-import puppet_solver  # noqa: E402
-from test_puppet_solver import Tracks  # noqa: E402
 from test_retarget import synthetic_rig  # noqa: E402
 
 DLL = ROOT / 'cpp' / 'Puppet' / 'build' / 'puppet_replay.dll'
 FIXTURES = ROOT / 'tests' / 'data' / 'tracking'
-FULL = ROOT / 'build' / 'tracking'
-HOLISTIC = ('holistic_gpu_dancer', 'holistic_gpu_noface_dancer')
-ROT_TOL = 1e-9		# rotation matrix elements
-ROOT_TOL = 1e-7		# root translation, relative to its size (rig units)
+REFERENCE = ROOT / 'tests' / 'data' / 'puppet' / 'reference.json'
+CLIPS = ('holistic_gpu_dancer', 'holistic_gpu_noface_dancer', 'holistic_gpu_chestup')
 IMAGE = (1280, 720)
+RATE = 60.0	# the recordings step one clip frame per TD frame at 60 fps
+
+# The CHOP's defaults, and everything off (the solve alone).
+DEFAULTS = {'placement': 'image', 'mirror': 0, 'hand': 'any', 'fov': 50.0, 'smoothing': 0.6, 'cutoff': 1.5,
+	'speed': 4.0, 'slope': 1.0, 'twist': 2.0, 'limits': 1, 'relax': 1}
+PLAIN = dict(DEFAULTS, cutoff=0.0, twist=0.0, limits=0, relax=0)
+BODY_SETTINGS = {'defaults': DEFAULTS, 'center_mirror': dict(DEFAULTS, placement='center', mirror=1), 'plain': PLAIN}
+HAND_SETTINGS = {f'{hand}_{placement}': dict(DEFAULTS, hand=hand, placement=placement)
+	for hand in ('any', 'right', 'left') for placement in ('image', 'center')}
 
 
 def load_rig(path):
@@ -53,18 +58,27 @@ def rest_text(bones):
 	return '\n'.join(lines)
 
 
+def rigs():
+	"""name -> bones, the committed synthetic rig first."""
+	out = {'synthetic': synthetic_rig()}
+	for name, file in (('ybot', 'ybot_rest.json'), ('hand', 'hand_rest.json')):
+		path = ROOT / 'build' / file
+		if path.exists():
+			out[name] = load_rig(path)
+	return out
+
+
 def frames(name):
-	"""Tracks tables per recorded frame (full recording if there is one), with a gap (None) every
-	ninth frame so holding the last pose is exercised too."""
-	path = FULL / f'{name}.jsonl.gz' if (FULL / f'{name}.jsonl.gz').exists() else FIXTURES / f'{name}.jsonl.gz'
-	rows = [json.loads(line) for line in gzip.open(path, 'rt')][1:]
+	"""(time, tracks text or None) per recorded frame, with a gap (None) every ninth frame so holding
+	the last pose is exercised too."""
+	rows = [json.loads(line) for line in gzip.open(FIXTURES / f'{name}.jsonl.gz', 'rt')][1:]
 	out = []
 	for i, r in enumerate(rows):
 		if 'tracks' not in r:
 			continue
-		out.append(r['tracks'])
+		out.append((r['f'] / RATE, r['tracks']))
 		if i % 9 == 8:
-			out.append(None)
+			out.append((r['f'] / RATE, None))
 	return out
 
 
@@ -84,6 +98,10 @@ class CppEngine:
 			lib.pup_channels.restype = ctypes.c_char_p
 			lib.pup_warning.argtypes = [ctypes.c_void_p]
 			lib.pup_warning.restype = ctypes.c_char_p
+			lib.pup_set_extra.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int,
+				ctypes.c_double]
+			lib.pup_set_twist.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double]
+			lib.pup_set_relax.argtypes = [ctypes.c_void_p, ctypes.c_int]
 			cls._lib = lib
 		return cls._lib
 
@@ -91,87 +109,45 @@ class CppEngine:
 		self.h = self.lib().pup_create()
 		self.kind = self.lib().pup_set_rest(self.h, rest_text(bones).encode())
 		self.s = settings
+		self.lib().pup_set_twist(self.h, settings['twist'], 0.0)
+		self.lib().pup_set_relax(self.h, settings['relax'])
 
 	def close(self):
 		self.lib().pup_destroy(self.h)
 
-	def cook(self, text):
-		s = self.s
-		self.lib().pup_cook(self.h, None if text is None else text.encode(), s['hand'].encode(), s['mirror'],
+	def cook(self, text, time=-1.0):
+		s, lib = self.s, self.lib()
+		lib.pup_set_extra(self.h, s['cutoff'], s['speed'], s['slope'], s['limits'], time)
+		lib.pup_cook(self.h, None if text is None else text.encode(), s['hand'].encode(), s['mirror'],
 			s['placement'] == 'image', s['fov'], s['smoothing'], *IMAGE)
 		out = []
-		for line in self.lib().pup_channels(self.h).decode().splitlines():
+		for line in lib.pup_channels(self.h).decode().splitlines():
 			name, value = line.split('\t')
 			out.append((name, float(value)))
-		return out, self.lib().pup_warning(self.h).decode()
+		return out, lib.pup_warning(self.h).decode()
 
 
-class PyEngine:
-	"""puppet_solver.cook on a fake Script CHOP."""
+def run(bones, clip, settings):
+	"""Hash of every cook's channels (names and values to 1e-5), and the number of cooks."""
+	engine = CppEngine(bones, settings)
+	digest = hashlib.sha256()
+	cooks = 0
+	try:
+		for time, text in frames(clip):
+			channels, warning = engine.cook(text, time)
+			digest.update((warning + '\n' + '\n'.join(f'{n}\t{v:.5f}' for n, v in channels) + '\n').encode())
+			cooks += 1
+	finally:
+		engine.close()
+	return digest.hexdigest(), cooks
 
-	class Par:
-		def __init__(self, value):
-			self.value = value
 
-		def eval(self):
-			return self.value
-
-	class Chan:
-		def __init__(self):
-			self.v = [0.0]
-
-		def __setitem__(self, i, value):
-			self.v[i] = value
-
-	class Image:
-		width, height = IMAGE
-
-	_count = 0
-
-	def __init__(self, bones, settings):
-		PyEngine._count += 1
-		self.path = f'/fake/solver{PyEngine._count}'
-		self.stored = {'rest_bones': bones}
-		self.tracks = None
-		self.chans, self.warnings = [], []
-		self.numSamples = 1
-		names = {'Placement': settings['placement'], 'Hand': settings['hand'], 'Mirror': bool(settings['mirror']),
-			'Fov': settings['fov'], 'Placesmoothing': settings['smoothing'], 'Image': self.Image(), 'Rig': None}
-		self.par = type('Pars', (), {})()
-		for name, value in names.items():
-			setattr(self.par, name, self.Par(value))
-		self.par.Tracks = self
-
-	def eval(self):	# par.Tracks.eval()
-		return self.tracks
-
-	def fetch(self, key, default=None):
-		return self.stored.get(key, default)
-
-	def store(self, key, value):
-		self.stored[key] = value
-
-	def clear(self):
-		self.chans = []
-
-	def appendChan(self, name):
-		chan = self.Chan()
-		self.chans.append((name, chan))
-		return chan
-
-	def addWarning(self, text):
-		self.warnings.append(text)
-
-	def close(self):
-		for cache in (puppet_solver._rigs, puppet_solver._roots, puppet_solver._last, puppet_solver._center,
-				puppet_solver._sides, puppet_solver._keys, puppet_solver._chans):
-			cache.pop(self.path, None)
-
-	def cook(self, text):
-		self.tracks = None if text is None else Tracks([line.split('\t') for line in text.splitlines()])
-		self.warnings = []
-		puppet_solver.cook(self)
-		return [(name, chan.v[0]) for name, chan in self.chans], self.warnings[0] if self.warnings else ''
+def cases():
+	"""(key, bones, clip, settings) for every rig present."""
+	for rig, bones in rigs().items():
+		for clip in CLIPS:
+			for label, settings in (HAND_SETTINGS if rig == 'hand' else BODY_SETTINGS).items():
+				yield f'{rig}/{clip}/{label}', bones, clip, settings
 
 
 def _bone_matrices(channels):
@@ -182,121 +158,65 @@ def _bone_matrices(channels):
 	return {bone: mr.euler_xyz(*r) for bone, r in out.items()}
 
 
-class Replay(unittest.TestCase):
-	def run_case(self, bones, fixture, settings):
-		texts = frames(fixture)
-		py, cpp = PyEngine(bones, settings), CppEngine(bones, settings)
-		worst_rot = worst_root = 0.0
-		try:
-			for i, text in enumerate(texts):
-				pc, pw = py.cook(text)
-				cc, cw = cpp.cook(text)
-				where = f'{fixture} {settings} frame {i}'
-				self.assertEqual([n for n, _ in pc], [n for n, _ in cc], where)
-				self.assertEqual(pw, cw, where)
-				pm, cm = _bone_matrices(pc), _bone_matrices(cc)
-				for bone in pm:
-					d = float(abs(pm[bone] - cm[bone]).max())
-					worst_rot = max(worst_rot, d)
-					self.assertLess(d, ROT_TOL, f'{where} {bone}')
-				for (name, a), (_, b) in zip(pc, cc):
-					if name.startswith('root_') or name == 'mirror':
-						d = abs(a - b) / max(1.0, abs(a))
-						worst_root = max(worst_root, d)
-						self.assertLess(d, ROOT_TOL, f'{where} {name}: {a} vs {b}')
-		finally:
-			py.close()
-			cpp.close()
-		return len(texts), worst_rot, worst_root
-
-	def body_cases(self, bones, label):
-		for fixture in HOLISTIC:
-			for placement, mirror in (('image', 0), ('center', 0), ('center', 1)):
-				settings = {'placement': placement, 'mirror': mirror, 'hand': 'any', 'fov': 50.0, 'smoothing': 0.6}
-				with self.subTest(rig=label, fixture=fixture, placement=placement, mirror=mirror):
-					n, rot, root = self.run_case(bones, fixture, settings)
-					print(f'  {label} {fixture} {placement} mirror={mirror}: {n} frames, worst rot {rot:.1e}, root {root:.1e}')
-
-	@classmethod
-	def setUpClass(cls):
-		if not DLL.exists():
-			raise unittest.SkipTest(f'{DLL} not built (cpp\\Puppet\\build.cmd)')
-
-	def test_synthetic_body(self):
-		self.body_cases(synthetic_rig(), 'synthetic')
-
-	def test_ybot_body(self):
-		path = ROOT / 'build' / 'ybot_rest.json'
-		if not path.exists():
-			self.skipTest('no build/ybot_rest.json')
-		self.body_cases(load_rig(path), 'ybot')
-
-	def test_hand_rig(self):
-		path = ROOT / 'build' / 'hand_rest.json'
-		if not path.exists():
-			self.skipTest('no build/hand_rest.json')
-		bones = load_rig(path)
-		for fixture in HOLISTIC:
-			for hand in ('any', 'right', 'left'):
-				for placement in ('image', 'center'):
-					settings = {'placement': placement, 'mirror': 0, 'hand': hand, 'fov': 50.0, 'smoothing': 0.6}
-					with self.subTest(fixture=fixture, hand=hand, placement=placement):
-						n, rot, root = self.run_case(bones, fixture, settings)
-						print(f'  hand {fixture} {hand} {placement}: {n} frames, worst rot {rot:.1e}, root {root:.1e}')
+@unittest.skipUnless(DLL.exists(), f'{DLL} not built (cpp\\Puppet\\build.cmd)')
+class Reference(unittest.TestCase):
+	def test_matches_reference(self):
+		reference = json.loads(REFERENCE.read_text())
+		checked = 0
+		for key, bones, clip, settings in cases():
+			with self.subTest(key):
+				self.assertIn(key, reference, 'no reference: --golden, and review')
+				digest, cooks = run(bones, clip, settings)
+				self.assertGreater(cooks, 0)
+				self.assertEqual(digest, reference[key], 'output changed: --golden, and review')
+				checked += 1
+		self.assertGreater(checked, 0)
 
 	def test_smoothing_calms_forearms_and_hands(self):
-		"""The C++ additions (not in the Python solver): with the CHOP's default smoothing, the
-		forearms' and hands' frame-to-frame jumps (mostly roll, from the noisy knuckle line) shrink."""
-		lib = CppEngine.lib()
-		lib.pup_set_extra.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int,
-			ctypes.c_double]
-		lib.pup_set_twist.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double]
-		path = FULL / 'holistic_gpu_dancer.jsonl.gz'
-		path = path if path.exists() else FIXTURES / 'holistic_gpu_dancer.jsonl.gz'
-		rows = [json.loads(line) for line in gzip.open(path, 'rt')][1:]
-		frames = [(r['f'], r['tracks']) for r in rows if r.get('tracks') and len(r['tracks'].splitlines()) > 1]
+		"""With the CHOP's default smoothing, the forearms' and hands' frame-to-frame jumps (mostly roll,
+		from the noisy knuckle line) shrink."""
 
-		def steps(smooth):
-			h = lib.pup_create()
-			lib.pup_set_rest(h, rest_text(synthetic_rig()).encode())
-			lib.pup_set_twist(h, 2.0 if smooth else 0.0, 0.0)
+		def steps(settings):
+			engine = CppEngine(synthetic_rig(), settings)
 			out, last, prev = [], None, None
-			for f, text in frames:
-				if text == last:
+			for time, text in frames('holistic_gpu_dancer'):
+				if text is None or text == last:
 					continue
 				last = text
-				lib.pup_set_extra(h, 1.5 if smooth else 0.0, 4.0, 1.0, 1 if smooth else 0, f / 60.0)
-				lib.pup_cook(h, text.encode(), b'any', 0, 0, 50.0, 0.6, *IMAGE)
-				chans = dict(line.split('\t') for line in lib.pup_channels(h).decode().splitlines())
-				m = _bone_matrices([(n, float(v)) for n, v in chans.items() if 'ForeArm' in n or n[:-3].endswith('Hand')])
+				channels, _ = engine.cook(text, time)
+				m = _bone_matrices([(n, v) for n, v in channels if 'ForeArm' in n or n[:-3].endswith('Hand')])
 				if prev is not None:
 					for bone in m:
 						c = (float(np.trace(prev[bone].T @ m[bone])) - 1) / 2
 						out.append(math.degrees(math.acos(max(-1.0, min(1.0, c)))))
 				prev = m
-			lib.pup_destroy(h)
+			engine.close()
 			return math.sqrt(sum(a * a for a in out) / len(out))
 
-		raw, smoothed = steps(False), steps(True)
+		raw, smoothed = steps(PLAIN), steps(DEFAULTS)
 		print(f'  forearm / hand RMS step: raw {raw:.1f} deg, smoothed {smoothed:.1f} deg')
 		self.assertLess(smoothed, raw * 0.6)
 
 	def test_no_world_columns_warns(self):
 		text = 'track_id\tlost_frames\ttotal_frames\tnose_x\tnose_y\n1\t0\t5\t0.5\t0.5'
-		settings = {'placement': 'image', 'mirror': 0, 'hand': 'any', 'fov': 50.0, 'smoothing': 0.6}
-		py, cpp = PyEngine(synthetic_rig(), settings), CppEngine(synthetic_rig(), settings)
+		bones = synthetic_rig()
+		engine = CppEngine(bones, DEFAULTS)
 		try:
-			pc, pw = py.cook(text)
-			cc, cw = cpp.cook(text)
-			self.assertTrue(pw)
-			self.assertEqual(pw, cw)
-			self.assertEqual([n for n, _ in pc], [n for n, _ in cc])
-			for (_, a), (_, b) in zip(pc, cc):
-				self.assertTrue(math.isclose(a, b, abs_tol=1e-12))	# the rest pose
+			channels, warning = engine.cook(text)
 		finally:
-			py.close()
-			cpp.close()
+			engine.close()
+		self.assertIn('World Landmark Columns', warning)
+		self.assertEqual(len(channels), 3 * len(bones) + 4)	# the rest pose, root and mirror
 
 
 if __name__ == '__main__':
-	unittest.main()
+	if '--golden' in sys.argv:
+		REFERENCE.parent.mkdir(parents=True, exist_ok=True)
+		reference = json.loads(REFERENCE.read_text()) if REFERENCE.exists() else {}
+		for key, bones, clip, settings in cases():
+			reference[key] = run(bones, clip, settings)[0]
+			print(key)
+		REFERENCE.write_text(json.dumps(reference, indent='\t', sort_keys=True) + '\n')
+		print(f'wrote {REFERENCE}')
+	else:
+		unittest.main()

@@ -29,8 +29,10 @@ struct PoseParams {
 	double labelMinScore = 0.0;
 	// Joint gate (C++ only; off reproduces the Python tracker): after tracking, a body joint whose
 	// confidence is under jointThreshold, or (hideOffImage) that lies outside or on the image's
-	// edge, or whose parent is gated (no knee without a hip), is output as unseen: confidence 0 in
-	// the tracks table, left out of the joints and bones tables. Matching is unaffected.
+	// edge, or (legs) whose parent is gated (no knee without a hip), is output as unseen: confidence
+	// 0 in the tracks table, left out of the joints and bones tables. A seen joint keeps its parent
+	// unless that one is squashed onto the edge (a hand in view keeps its elbow). Matching is
+	// unaffected.
 	double jointThreshold = 0.0;
 	bool hideOffImage = false;
 };
@@ -99,6 +101,7 @@ private:
 	// each one's parent keypoint (-1 for a root: shoulders, hips, the face points), parents first.
 	std::vector<char> gateBody_;
 	std::vector<int> gateParent_;
+	std::vector<char> gateCascade_;	// legs: a gated parent gates this joint
 	std::vector<int> gateOrder_;
 	KeypointTracker tracker_;
 	std::map<long long, State> state_;

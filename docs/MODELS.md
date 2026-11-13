@@ -88,7 +88,8 @@ the chest up, and each model fails differently:
 
 The tracker outputs them as unseen (`conf` 0, left out of the joints and bones tables) when they
 fall under **Joint Confidence Threshold** or lie outside or on the image's edge (**Hide Off-Image
-Joints**). A joint whose parent is unseen is unseen too.
+Joints**). On the legs, a joint whose parent is unseen is unseen too. On the arms, a seen wrist keeps
+its elbow, unless the elbow sits on the image's edge.
 
 Default thresholds, from the visible joints' scores:
 
