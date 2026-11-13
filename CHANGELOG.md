@@ -16,7 +16,8 @@
   its depth, normals or matte, and its depth is also TOP 3 of the demo.
 - **Relight Demo** (`RelightDemo.tox`): relights a person with two colored point lights (PBR: GGX
   highlights, Fresnel, roughness, distance falloff), using DAViD's normals, depth and matte. Each
-  light follows a hand (MediaPipe Hands) and eases back to its own position when there's none.
+  light follows a hand (MediaPipe Hands: the palm or the index fingertip) and eases back to its own
+  position when there's none. **Light Type** Spot aims each light along its index finger.
 
 ## v0.5.0 (2026-11-13)
 

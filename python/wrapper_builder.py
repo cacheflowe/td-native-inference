@@ -1281,14 +1281,17 @@ def _model_gate(demo, controls):
 	return gate, startup
 
 
-RELIGHT_SHADER = '''// Relight a person with two point lights: DAViD's normals (x right, y up, z toward the camera), its
-// depth (near = 1) to place each pixel in 3D, the matte to keep the background out. Cook-Torrance
-// (GGX, Smith, Schlick) in linear light; the camera image is the albedo.
+RELIGHT_SHADER = '''// Relight a person with two point or spot lights: DAViD's normals (x right, y up, z toward the
+// camera), its depth (near = 1) to place each pixel in 3D, the matte to keep the background out.
+// Cook-Torrance (GGX, Smith, Schlick) in linear light; the camera image is the albedo.
 // Inputs: 0 camera, 1 surface (normals 0..1 in RGB, the matte in A), 2 depth.
 uniform vec4 uLight1;		// xy: position (UV), z: distance in front of the person, w: on
 uniform vec4 uLight1Color;	// rgb * intensity
+uniform vec4 uLight1Dir;	// xy: the spot's aim in the image (UV units, any length)
 uniform vec4 uLight2;
 uniform vec4 uLight2Color;
+uniform vec4 uLight2Dir;
+uniform vec4 uSpot;			// x: 1 = spot lights, y: aim into the scene, z: cos(outer half angle), w: cos(inner)
 uniform vec4 uMaterial;		// x: roughness, y: metallic, z: specular, w: ambient
 uniform vec4 uScene;		// x: depth scale, y: light radius, z: background level, w: transparent background
 uniform vec4 uView;			// x: aspect (w / h), y: exposure, z: show lights
@@ -1300,12 +1303,21 @@ vec3 position(vec2 uv, float depth)
 	return vec3((uv.x - 0.5) * uView.x, uv.y - 0.5, depth * uScene.x);
 }
 
-vec3 pointLight(vec3 P, vec3 N, vec3 V, vec3 albedo, vec4 light, vec4 color)
+vec3 spotAxis(vec4 dir)
+{
+	vec2 d = dir.xy * vec2(uView.x, 1.0);
+	d = length(d) > 1e-5 ? normalize(d) : vec2(0.0);
+	return normalize(vec3(d, -uSpot.y));	// along the finger, tipped toward the person
+}
+
+vec3 pointLight(vec3 P, vec3 N, vec3 V, vec3 albedo, vec4 light, vec4 color, vec4 dir)
 {
 	vec3 toLight = vec3((light.x - 0.5) * uView.x, light.y - 0.5, uScene.x + light.z) - P;
 	float dist = length(toLight);
 	vec3 L = toLight / max(dist, 1e-4);
 	float falloff = 1.0 / (1.0 + dist * dist / max(uScene.y * uScene.y, 1e-4));
+	if (uSpot.x > 0.5)
+		falloff *= smoothstep(uSpot.z, uSpot.w, dot(-L, spotAxis(dir)));
 	vec3 H = normalize(L + V);
 	float NoL = max(dot(N, L), 0.0);
 	float NoV = max(dot(N, V), 1e-3);
@@ -1325,10 +1337,20 @@ vec3 pointLight(vec3 P, vec3 N, vec3 V, vec3 albedo, vec4 light, vec4 color)
 	return (diffuse + specular) * color.rgb * NoL * falloff * PI * light.w;
 }
 
-float marker(vec2 uv, vec2 at)
+float marker(vec2 uv, vec2 at, vec4 dir)
 {
-	float r = length((uv - at) * vec2(uView.x, 1.0));
-	return smoothstep(0.014, 0.010, r) - smoothstep(0.008, 0.005, r);
+	vec2 p = (uv - at) * vec2(uView.x, 1.0);
+	float r = length(p);
+	float ring = smoothstep(0.014, 0.010, r) - smoothstep(0.008, 0.005, r);
+	if (uSpot.x < 0.5)
+		return ring;
+	// spot: a short tick along the aim
+	vec2 d = dir.xy * vec2(uView.x, 1.0);
+	d = length(d) > 1e-5 ? normalize(d) : vec2(0.0);
+	float along = dot(p, d);
+	float across = abs(p.x * d.y - p.y * d.x);
+	float tick = step(0.014, along) * step(along, 0.045) * smoothstep(0.0035, 0.002, across);
+	return max(ring, tick);
 }
 
 void main()
@@ -1341,15 +1363,15 @@ void main()
 	float depth = texture(sTD2DInputs[2], uv).r;
 	vec3 P = position(uv, depth);
 	vec3 V = vec3(0.0, 0.0, 1.0);
-	vec3 lit = albedo * uMaterial.w + pointLight(P, N, V, albedo, uLight1, uLight1Color)
-		+ pointLight(P, N, V, albedo, uLight2, uLight2Color);
+	vec3 lit = albedo * uMaterial.w + pointLight(P, N, V, albedo, uLight1, uLight1Color, uLight1Dir)
+		+ pointLight(P, N, V, albedo, uLight2, uLight2Color, uLight2Dir);
 	vec3 color = mix(albedo * uScene.z, lit * uView.y, matte);
 	float alpha = uScene.w > 0.5 ? matte : 1.0;
 	color = pow(color, vec3(1.0 / 2.2));
 	if (uView.z > 0.5)
 	{
-		float m1 = marker(uv, uLight1.xy) * uLight1.w;
-		float m2 = marker(uv, uLight2.xy) * uLight2.w;
+		float m1 = marker(uv, uLight1.xy, uLight1Dir) * uLight1.w;
+		float m2 = marker(uv, uLight2.xy, uLight2Dir) * uLight2.w;
 		color = mix(color, vec3(1.0), max(m1, m2));
 		alpha = max(alpha, max(m1, m2));
 	}
@@ -1367,41 +1389,51 @@ void main()
 }
 '''
 
-# Light 1 follows the hand MediaPipe calls Right, light 2 the Left one (each palm's centre; the
-# tracks table's handedness, 1 = Right, only exists while a hand is tracked). Two hands always get
-# one light each, even when both are called the same. With no hand a light goes back to its default
-# position; a Lag CHOP after this eases both ways.
+# Light 1 follows the hand MediaPipe calls Right, light 2 the Left one (the tracks table's
+# handedness, 1 = Right, only exists while a hand is tracked). Two hands always get one light each,
+# even when both are called the same. Follow picks the palm's centre or the index fingertip; the aim
+# (dx, dy) is the index finger, knuckle to tip. With no hand a light goes back to its default
+# position, aimed at the image's centre; a Lag CHOP after this eases both ways.
 RELIGHT_FOLLOW = '''def onCook(scriptOp):
 	p = parent()
 	absTime.frame	# cook every frame
+	tip = p.par.Followpoint.eval() == 'index'
 	found = []
 	tracks = op('MediaPipeHands/out_tracks')
 	if p.par.Followhands and tracks is not None and tracks.numRows > 1:
 		has_side = tracks[0, 'handedness'] is not None
 		for row in range(1, tracks.numRows):
 			side = float(tracks[row, 'handedness']) if has_side else 0.5
-			found.append((side, float(tracks[row, 'middle_finger_mcp_x']), float(tracks[row, 'middle_finger_mcp_y'])))
-	found.sort(reverse=True)	# most "Right" first
+			def joint(name):
+				return float(tracks[row, name + '_x']), float(tracks[row, name + '_y'])
+			knuckle, end = joint('index_finger_mcp'), joint('index_finger_tip')
+			at = end if tip else joint('middle_finger_mcp')
+			found.append((side, at, (end[0] - knuckle[0], end[1] - knuckle[1])))
+	found.sort(key=lambda hand: -hand[0])	# most "Right" first
 	hands = {}
 	if len(found) >= 2:
-		hands = {1: found[0][1:], 2: found[-1][1:]}
+		hands = {1: found[0], 2: found[-1]}
 	elif found:
-		hands = {1 if found[0][0] >= 0.5 else 2: found[0][1:]}
+		hands = {1 if found[0][0] >= 0.5 else 2: found[0]}
 	scriptOp.clear()
 	scriptOp.numSamples = 1
 	for index in (1, 2):
 		hand = hands.get(index)
-		x, y = hand or (p.par[f'Light{index}posx'].eval(), p.par[f'Light{index}posy'].eval())
-		scriptOp.appendChan(f'light{index}_x')[0] = x
-		scriptOp.appendChan(f'light{index}_y')[0] = y
-		scriptOp.appendChan(f'light{index}_hand')[0] = 1.0 if hand else 0.0
+		if hand:
+			(x, y), (dx, dy) = hand[1], hand[2]
+		else:
+			x, y = p.par[f'Light{index}posx'].eval(), p.par[f'Light{index}posy'].eval()
+			dx, dy = 0.5 - x, 0.5 - y
+		length = max((dx * dx + dy * dy) ** 0.5, 1e-6)
+		for suffix, value in (('x', x), ('y', y), ('dx', dx / length), ('dy', dy / length), ('hand', 1.0 if hand else 0.0)):
+			scriptOp.appendChan(f'light{index}_{suffix}')[0] = value
 '''
 
 
 def build_relight_demo(parent_comp, name='RelightDemo'):
 	"""(Re)build the relighting demo: DAViD Depth + Normals + Matte lights the camera image with two
-	point lights (PBR: GGX specular, Fresnel, roughness), each following a MediaPipe hand when one is
-	seen. TOP 1 the relit image, TOP 2 the input, TOP 3 the normals, TOP 4 the matte; CHOP 1 the
+	point or spot lights (PBR: GGX specular, Fresnel, roughness), each following a MediaPipe hand (palm
+	or index fingertip; a spot aims along the index finger) when one is seen. TOP 1 the relit image, TOP 2 the input, TOP 3 the normals, TOP 4 the matte; CHOP 1 the
 	lights' positions."""
 	position, inputs, outputs = _take_place(parent_comp, name)
 	demo = parent_comp.create('baseCOMP', name)
@@ -1412,6 +1444,19 @@ def build_relight_demo(parent_comp, name='RelightDemo'):
 	follow.val = follow.default = True
 	follow.help = 'Light 1 follows the hand MediaPipe labels Right, light 2 the Left one. Off: MediaPipe Hands doesn\'t run.'
 	_page_par(lights, 'Float', 'Followlag', 'Follow Lag', 0.15, 'Seconds a light takes to ease to a hand, or back to its default.', 0.0, 1.0)
+	point = lights.appendMenu('Followpoint', label='Follow')[0]
+	point.menuNames, point.menuLabels = ['palm', 'index'], ['Palm', 'Index Fingertip']
+	point.val = point.default = 'palm'
+	point.help = 'Where on the hand a light sits.'
+	kind = lights.appendMenu('Lighttype', label='Light Type')[0]
+	kind.menuNames, kind.menuLabels = ['point', 'spot'], ['Point', 'Spot']
+	kind.val = kind.default = 'point'
+	kind.help = 'Spot: a cone aimed along the index finger (knuckle to tip); with no hand, at the image centre.'
+	_page_par(lights, 'Float', 'Spotangle', 'Spot Angle', 45.0, 'The cone\'s full width, in degrees.', 5.0, 120.0)
+	_page_par(lights, 'Float', 'Spotsoftness', 'Spot Softness', 0.4, 'How gradually the cone\'s edge fades (0 = hard edge).', 0.0, 1.0)
+	_page_par(lights, 'Float', 'Aimintoscene', 'Aim Into Scene', 0.6,
+		'Tips a spot from the image plane toward the person: a finger pointing at the camera can\'t be seen, so '
+		'0 aims exactly along the finger, higher aims more at the person.', 0.0, 3.0)
 	for index, (rgb, xy) in enumerate((((1.0, 0.55, 0.25), (0.2, 0.7)), ((0.25, 0.55, 1.0), (0.8, 0.7))), start=1):
 		on = lights.appendToggle(f'Light{index}', label=f'Light {index}')[0]
 		on.val = on.default = True
@@ -1475,17 +1520,22 @@ def build_relight_demo(parent_comp, name='RelightDemo'):
 	surface.inputConnectors[1].connect(maps['matte'])
 	relight.inputConnectors[1].connect(surface)
 	relight.inputConnectors[2].connect(maps['depth'])
-	relight.seq.vec.numBlocks = 7
 	follow_chan = "op('light_follow')['{}']"
+	half = 'math.radians(parent().par.Spotangle / 2)'
 	uniforms = [
 		('uLight1', (follow_chan.format('light1_x'), follow_chan.format('light1_y'), 'parent().par.Light1distance', 'float(parent().par.Light1)')),
 		('uLight1Color', tuple(f'parent().par.Light1color{c} * parent().par.Light1intensity' for c in 'rgb') + ('1',)),
+		('uLight1Dir', (follow_chan.format('light1_dx'), follow_chan.format('light1_dy'), '0', '0')),
 		('uLight2', (follow_chan.format('light2_x'), follow_chan.format('light2_y'), 'parent().par.Light2distance', 'float(parent().par.Light2)')),
 		('uLight2Color', tuple(f'parent().par.Light2color{c} * parent().par.Light2intensity' for c in 'rgb') + ('1',)),
+		('uLight2Dir', (follow_chan.format('light2_dx'), follow_chan.format('light2_dy'), '0', '0')),
+		('uSpot', ("float(parent().par.Lighttype == 'spot')", 'parent().par.Aimintoscene', f'math.cos({half})',
+			f'math.cos({half} * (0.98 - 0.97 * parent().par.Spotsoftness))')),	# inner edge; never equal to outer
 		('uMaterial', ('parent().par.Roughness', 'parent().par.Metallic', 'parent().par.Specular', 'parent().par.Ambient')),
 		('uScene', ('parent().par.Depthscale', 'parent().par.Lightradius', 'parent().par.Background', 'float(parent().par.Transparentbg)')),
 		('uView', ("op('input_frame').width / max(1, op('input_frame').height)", 'parent().par.Exposure', 'float(parent().par.Showlights)', '0')),
 	]
+	relight.seq.vec.numBlocks = len(uniforms)
 	for index, (uniform, exprs) in enumerate(uniforms):
 		relight.par[f'vec{index}name'] = uniform
 		for axis, expr in zip('xyzw', exprs):
