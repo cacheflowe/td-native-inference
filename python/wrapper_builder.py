@@ -20,8 +20,8 @@ The spec decides what differs:
 	instances        seg only: TOP 4 colors each tracked object's pixels (Matte Encoding = Instances)
 	extra_outputs    image only: the inference node's other color buffers as TOPs 3, 4, ...; the
 	                 VisionDemo then gets a Show menu, its first entry labelled "result_label"
-	flow             image only: an optical flow model (frame pair): TOP 1 the flow as color, TOP 3
-	                 the flow in UV (_build_flow)
+	flow             image only: an optical flow model (frame pair): TOP 1 the flow in the Optical
+	                 Flow TOP's format, TOP 3 the flow as color (_build_flow)
 	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
 	detector, classes  classifier only: the nested detector spec and the score column settings
 	input            'audio' builds an audio wrapper instead (_build_audio): audio CHOP in, the
@@ -401,18 +401,26 @@ def _build_visuals(comp, spec):
 
 
 # Optical flow (a spec's "flow": true; OnnxTOP Raw mode on a frame-pair model, Letterbox off): the raw
-# output is the flow in pixels of the model's input, x right, y down.
-FLOW_UV_SHADER = '''// Flow in pixels of the model's input (x right, y down) -> UV of the frame (u right, v up).
-uniform vec2 uModelSize;
+# output is the flow in pixels of the model's input, x right, y down. TOP 1 gets it in the Optical Flow
+# TOP's format, so the two are interchangeable: R and G in screen widths per second (G too is in
+# widths: a 16:9 frame's height is 0.5625 widths), x right, y up, times Gain X / Y.
+FLOW_SHADER = '''// Flow in pixels of the model's input (x right, y down) -> the Optical Flow TOP's format: screen
+// widths per second, x right, y up.
+uniform vec2 uModelSize;	// the model's input, pixels
+uniform vec2 uFrame;		// x: the frame's height / width, y: seconds between the pair's two frames
+uniform vec2 uGain;
 out vec4 fragColor;
 void main()
 {
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
-	fragColor = TDOutputSwizzle(vec4(f.x / uModelSize.x, -f.y / uModelSize.y, 0.0, 1.0));
+	float perSecond = 1.0 / max(uFrame.y, 1e-4);
+	float x = f.x / uModelSize.x * perSecond * uGain.x;
+	float y = -f.y / uModelSize.y * uFrame.x * perSecond * uGain.y;
+	fragColor = TDOutputSwizzle(vec4(x, y, 0.0, 1.0));
 }
 '''
-FLOW_COLOR_SHADER = '''// Flow (UV) as color: hue = direction, saturation = speed (white = still), the usual flow coding.
-uniform float uScale;
+FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, saturation = speed (white = still), the usual flow coding.
+uniform float uFullSpeed;	// screen widths per second shown fully saturated
 out vec4 fragColor;
 vec3 hsv2rgb(vec3 c)
 {
@@ -423,7 +431,7 @@ void main()
 {
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
 	float hue = atan(f.y, f.x) / 6.2831853 + 0.5;
-	float speed = clamp(length(f) * uScale, 0.0, 1.0);
+	float speed = clamp(length(f) / max(uFullSpeed, 1e-4), 0.0, 1.0);
 	fragColor = TDOutputSwizzle(vec4(hsv2rgb(vec3(hue, speed, 1.0)), 1.0));
 }
 '''
@@ -441,23 +449,35 @@ def _glsl(comp, name, shader, source):
 
 
 def _build_flow(comp):
-	"""`flow_uv` (TOP 3: the flow in UV per frame, R = u, G = v) and `flow_color`, the result shown
-	(direction as hue, speed as saturation; Flow Scale on the Debug page)."""
-	flow_uv = _glsl(comp, 'flow_uv', FLOW_UV_SHADER, comp.op('inference'))
-	flow_uv.par.vec0name = 'uModelSize'
-	flow_uv.par.vec0valuex.expr = "op('inference_stats')['model_w'] or 1"
-	flow_uv.par.vec0valuey.expr = "op('inference_stats')['model_h'] or 1"
-	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, flow_uv)
+	"""`flow`, the result (TOP 1): the flow in the Optical Flow TOP's format (Gain X / Y on the Model
+	page), using the plugin's pair_interval (the measured time between the pair's frames; a project
+	frame until known). `flow_color` (TOP 3): direction as hue, speed as saturation (Color Full Speed
+	on the Debug page)."""
+	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
+	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
+	flow.par.vec0name = 'uModelSize'
+	flow.par.vec0valuex.expr = f"max(1, {stat.format('model_w', 'model_w')})"
+	flow.par.vec0valuey.expr = f"max(1, {stat.format('model_h', 'model_h')})"
+	flow.par.vec1name = 'uFrame'
+	flow.par.vec1valuex.expr = "op('input').height / max(1, op('input').width)"
+	flow.par.vec1valuey.expr = f"({stat.format('pair_interval', 'pair_interval')}) or 1.0 / me.time.rate"
+	flow.par.vec2name = 'uGain'
+	flow.par.vec2valuex.expr = 'parent().par.Gainx'
+	flow.par.vec2valuey.expr = 'parent().par.Gainy'
+	model = next(page for page in comp.customPages if page.name == 'Model')
+	_page_par(model, 'Float', 'Gainx', 'Gain X', 1.0, 'Multiplies the horizontal flow (R), like the Optical Flow TOP.', 0.0, 4.0)
+	_page_par(model, 'Float', 'Gainy', 'Gain Y', 1.0, 'Multiplies the vertical flow (G), like the Optical Flow TOP.', 0.0, 4.0)
+	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, flow)
 	flow_color.par.format = 'rgba8fixed'
-	flow_color.par.vec0name = 'uScale'
-	flow_color.par.vec0valuex.expr = 'parent().par.Flowscale'
+	flow_color.par.vec0name = 'uFullSpeed'
+	flow_color.par.vec0valuex.expr = 'parent().par.Colorfullspeed'
 	debug = next(page for page in comp.customPages if page.name == 'Debug')
-	_page_par(debug, 'Float', 'Flowscale', 'Flow Scale', 50.0,
-		'Show Result: the speed (in image widths / heights per frame) shown fully saturated is 1 / this.', 1.0, 100.0)
-	output = comp.create('outTOP', 'out_flow')
+	_page_par(debug, 'Float', 'Colorfullspeed', 'Color Full Speed', 1.0,
+		'TOP 3 (the flow as color): the speed, in screen widths per second, shown fully saturated.', 0.05, 5.0)
+	output = comp.create('outTOP', 'out_color')
 	output.par.connectorder = 3
-	_connect(output, flow_uv)
-	return flow_color
+	_connect(output, flow_color)
+	return flow
 
 
 def _remapped(comp, source, remap, name):
@@ -592,8 +612,8 @@ def _layout(comp, spec):
 		if spec.get('remap'):
 			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
 		if spec.get('flow'):
-			positions.update({'flow_uv': (2, 320), 'flow_color': (3, 320), 'overlay': (4, 320), 'out_flow': (7, -700)})
-			docked = list(docked) + ['flow_uv_pixel', 'flow_color_pixel']
+			positions.update({'flow': (2, 320), 'flow_color': (3, 460), 'overlay': (3, 320), 'out_color': (7, -700)})
+			docked = list(docked) + ['flow_pixel', 'flow_color_pixel']
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:

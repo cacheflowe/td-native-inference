@@ -171,12 +171,15 @@ scratch tensor and compared with the current one on the GPU (no readback): only 
 advances the pair (previous = current, current = this frame). A repeated frame keeps the pair, so the
 model reports the last real motion: a 30 fps video or webcam in a 60 fps project delivers every image
 twice, and shifting on each cook made the flow strobe between motion and none. The very first frame
-goes into both (no motion). **Reset State** starts over.
+goes into both (no motion). **Reset State** starts over. Whether a cook advanced the pair is copied
+back to the CPU asynchronously (read on a later cook, never waited for), and the time between advances
+is the Info CHOP's `pair_interval`: what a flow per second needs (`NeuFlowV2.tox` converts to the
+Optical Flow TOP's screen widths per second with it).
 
 `models/onnx/neuflow/neuflow_mixed.onnx`: Input Normalize **0 to 1**, **Letterbox** off (the frame is
 stretched to 768x432, so a flow in model pixels divided by the model size is a flow in UV), Raw
 Output Index 0, Raw Normalize **None**, Raw Map To Input on. The output's R and G are the flow in
-pixels of the model's input (x right, y down); `NeuFlowV2.tox` converts it to UV.
+pixels of the model's input (x right, y down).
 
 #### DAViD (human depth, normals, matte)
 
@@ -242,7 +245,8 @@ the Holistic mode above replaced it.
   script's `mask_area_ratio`). Pose models add `kp{i}_u, kp{i}_v, kp{i}_c`.
 - **Info CHOP:** `loaded, loading, tensorrt, num_detections, infer_ms, execute_ms, model_w, model_h,
   trt_building, result_delay, run_ms, decode_ms` and the running averages `infer_ms_avg,
-  execute_ms_avg, run_ms_avg, decode_ms_avg` (about ten cooks; the wrappers' Performance page).
+  execute_ms_avg, run_ms_avg, decode_ms_avg` (about ten cooks; the wrappers' Performance page), then
+  `pair_interval` (frame pairs: seconds between the pair's two frames, 0 until known).
   `infer_ms` is the inference's GPU time (CUDA events); `result_delay` is how many input frames old
   the current detections are (0 with Wait for Result on); `run_ms` is the CPU time ONNX Runtime
   takes to launch the run (paid in the cook either way); `decode_ms` is reading back and decoding

@@ -402,6 +402,10 @@ OnnxTOP::~OnnxTOP()
 		cudaFree(myPairIncoming);
 	if (myPairFlag)
 		cudaFree(myPairFlag);
+	if (myPairFlagHost)
+		cudaFreeHost(myPairFlagHost);
+	if (myPairEvent)
+		cudaEventDestroy(myPairEvent);
 	if (myStream)
 		cudaStreamDestroy(myStream);
 }
@@ -1351,11 +1355,43 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			{
 				// Frame pair: this frame goes to a scratch tensor; the pair advances on the GPU only if
 				// it differs from the current one (a repeated frame keeps the last real motion).
+				const OP_TimeInfo* ti = inputs->getTimeInfo();
+				const double now = ti && ti->rate > 0 ? double(ti->absFrame) / ti->rate : 0.0;
+				if (!myPairFlagHost)
+				{
+					cudaMallocHost((void**)&myPairFlagHost, sizeof(int));
+					cudaEventCreateWithFlags(&myPairEvent, cudaEventDisableTiming);
+				}
+				// An earlier cook's flag, once it's on the host: did the pair advance then?
+				if (myPairPending && cudaEventQuery(myPairEvent) == cudaSuccess)
+				{
+					myPairPending = false;
+					if (*myPairFlagHost)
+					{
+						if (myPairLastAdvance >= 0.0 && myPairPendingTime > myPairLastAdvance)
+							myPairInterval = myPairPendingTime - myPairLastAdvance;
+						myPairLastAdvance = myPairPendingTime;
+					}
+				}
+				const bool first = !myPairPrimed;
 				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, myPairIncoming, letterboxPad, myStream);
 				if (ce == cudaSuccess)
-					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(), !myPairPrimed,
+					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(), first,
 						myPairFlag, myStream);
 				myPairPrimed = ce == cudaSuccess;
+				if (first)
+				{
+					myPairLastAdvance = now;
+					myPairInterval = 0.0;
+					myPairPending = false;
+				}
+				else if (ce == cudaSuccess && !myPairPending && myPairFlagHost)
+				{
+					cudaMemcpyAsync(myPairFlagHost, myPairFlag, sizeof(int), cudaMemcpyDeviceToHost, myStream);
+					cudaEventRecord(myPairEvent, myStream);
+					myPairPending = true;
+					myPairPendingTime = now;
+				}
 			}
 			else
 			{
@@ -1875,7 +1911,7 @@ bool OnnxTOP::runLandmarkCrops(OnnxEngine& engine, int start, int count, std::st
 
 int32_t OnnxTOP::getNumInfoCHOPChans(void*)
 {
-	return 16;
+	return 17;
 }
 
 void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -1903,6 +1939,8 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 13: chan->name->setString("execute_ms_avg");	chan->value = (float)std::max(myAvgMs[1], 0.0); break;
 		case 14: chan->name->setString("run_ms_avg");		chan->value = (float)std::max(myAvgMs[2], 0.0); break;
 		case 15: chan->name->setString("decode_ms_avg");	chan->value = (float)std::max(myAvgMs[3], 0.0); break;
+		// Frame pairs: seconds between the pair's two frames (0 = not known yet), for flow per second.
+		case 16: chan->name->setString("pair_interval");	chan->value = (float)myPairInterval; break;
 	}
 }
 

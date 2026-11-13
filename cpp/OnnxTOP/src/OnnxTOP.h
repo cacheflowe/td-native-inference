@@ -93,6 +93,14 @@ private:
 	void*						myPairIncoming = nullptr;	// each cook's frame, compared before the pair advances
 	size_t						myPairIncomingBytes = 0;
 	int*						myPairFlag = nullptr;
+	// The time between the pair's two frames (seconds; 0 = not known yet): when each advance happened,
+	// learned from the flag copied back asynchronously (read on a later cook, never waited for).
+	int*						myPairFlagHost = nullptr;
+	cudaEvent_t					myPairEvent = nullptr;
+	bool						myPairPending = false;
+	double						myPairPendingTime = 0.0;
+	double						myPairLastAdvance = -1.0;
+	double						myPairInterval = 0.0;
 	std::atomic<bool>			myUpgrading{ false };	// Auto: running on CUDA, TensorRT building
 	std::string					myStaticModelPath;		// last model probed as fixed-size (Dynamic Size ignored)
 	EngineConfig				myRequestedConfig;

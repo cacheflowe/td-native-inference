@@ -688,6 +688,7 @@ cudaError_t launchPairAdvance(const void* incoming, void* current, void* previou
 	{
 		if (!first)
 		{
+			cudaMemsetAsync(flag, 1, sizeof(int), stream);	// advanced (nonzero)
 			cudaMemcpyAsync(previous, current, bytes, cudaMemcpyDeviceToDevice, stream);
 			cudaMemcpyAsync(current, incoming, bytes, cudaMemcpyDeviceToDevice, stream);
 			return cudaGetLastError();

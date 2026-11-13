@@ -86,7 +86,7 @@ def _poll():
 	state = op(LAB).fetch('lab_test')
 	name = state['queue'][0]
 	comp = op(LAB).op(name)
-	for output in ('debug', 'out_channels', 'out_boxes', 'out_audio', 'out_flow'):
+	for output in ('debug', 'out_channels', 'out_boxes', 'out_audio', 'out_color'):
 		node = comp.op(output)
 		if node is not None:
 			node.cook(force=True)
@@ -133,7 +133,7 @@ def _detected(comp):
 	if spec.get('flow'):
 		# Motion found (on any cook so far: a repeated frame is no motion): the lab feeds it a clip, or
 		# a swaying photo (moving_source).
-		if float(abs(comp.op('out_flow').numpyArray()[..., :2]).max()) > 0.002:
+		if float(abs(comp.op('flow').numpyArray()[..., :2]).max()) > 0.05:	# screen widths per second
 			comp.store('lab_flow_seen', True)
 		return bool(comp.fetch('lab_flow_seen', False))
 	if spec['kind'] == 'image':
@@ -233,6 +233,8 @@ def _thumbnail(comp):
 			source = select('passthrough')
 		if spec.get('input') in ('audio', 'text'):
 			panels = [over(select('debug'), source)]
+		elif spec.get('flow'):
+			panels = [source, select('out_color')]	# TOP 1 is the flow as data (dark); its color view
 		elif spec['kind'] == 'image':
 			panels = [source, select('debug')]
 		elif spec.get('result') == 'inference':

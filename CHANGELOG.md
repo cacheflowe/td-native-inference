@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-- **NeuFlow v2 Optical Flow** (`NeuFlowV2.tox`): how every pixel moved since the previous frame, 5.7
-  ms on the GPU. TOP 1 the flow as color, TOP 3 the flow in UV. OnnxTOP runs models with two image
-  inputs as a frame pair (the previous frame and this one; **Reset State** starts over).
+- **NeuFlow v2 Optical Flow** (`NeuFlowV2.tox`): how every pixel moved since the previous frame, 5
+  ms on the GPU. TOP 1 is the flow in the Optical Flow TOP's format (R right, G up, in screen widths
+  per second; Gain X / Y), TOP 3 the flow as color. OnnxTOP runs models with two image inputs as a
+  frame pair: the previous distinct frame and this one (a repeated frame keeps the pair; Info CHOP
+  `pair_interval` is the time between them; **Reset State** starts over).
 - **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
   its depth, normals or matte.
 

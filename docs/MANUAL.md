@@ -222,7 +222,7 @@ the parameters on the model tox instead.
 | `HSEmotion` | video | Finds faces and scores 7 emotions each | tracks with `emotion_label`, `emotion_<name>` |
 | `DepthAnything` | video | Relative depth of the whole frame (near is bright) | TOP 1 depth |
 | `MODNet` | video | Person alpha matte, hair detail included | TOP 1 matte |
-| `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow as color, TOP 3 flow in UV (R across, G up) |
+| `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow in the Optical Flow TOP's format (R right, G up, screen widths per second), TOP 3 flow as color |
 | `HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |
 | `MixamoPuppet` | video + tracks | Poses a Mixamo character from Holistic / Pose tracking (see Puppets) | TOP 1 character, TOP 2 over the input, CHOP rotations |
 | `RVM` | video | Person alpha matte that stays steady across frames (recurrent); **Reset State** after a cut | TOP 1 matte |

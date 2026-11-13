@@ -303,15 +303,26 @@ the input's resolution; use it as a mask over the input. **Dynamic Size** sets t
 resolution (multiple of 32; 512 x 288 for 16:9 is about 2 ms with TensorRT). GPU. MODNet, Apache-2.0.
 
 ### NeuFlow v2 Optical Flow (`NeuFlowV2.tox`)
-How every pixel moved since the previous frame. TOP 1 shows it as color: the hue is the direction, the
-saturation the speed, white is still (**Flow Scale** on the Debug page sets which speed is fully
-saturated). TOP 3 is the flow itself, in UV per frame: R = across (right is positive), G = up and down
-(up is positive), at the input's resolution. Use it to displace or advect an image, drive particles,
-or measure motion in a region. The model works on a 768 x 432 version of each frame (5.7 ms with
-TensorRT, about 1.6 ms of TouchDesigner's main thread); **Reset State** forgets the previous frame,
-e.g. after a cut, so the next frame shows no motion. A still image shows no motion; a repeated frame
-(a 30 fps video or webcam in a 60 fps project) keeps showing the last motion. GPU. NeuFlow v2,
-Apache-2.0.
+How every pixel moved since the previous frame. TOP 1 is the flow in the same format as
+TouchDesigner's **Optical Flow TOP**, so it drops into networks built for that (a Displace TOP, the
+particlesGpu component's forces):
+- R is the horizontal motion and G the vertical, 32-bit float.
+- Both are in screen widths per second; G is in widths too, so on a 16:9 frame 1.0 is 1.78 frame
+  heights per second.
+- Right and up are positive.
+- **Gain X / Gain Y** (Model page) multiply them, like the Optical Flow TOP's Gain.
+
+Per second uses the measured time between the two frames compared (the plugin's `pair_interval`),
+so a 30 fps video or webcam in a 60 fps project gives true speeds. A repeated frame keeps showing the
+last motion; a still image shows none.
+
+TOP 3 shows the flow as color: the hue is the direction, the saturation the speed, white is still.
+**Color Full Speed** (Debug page) is the speed, in screen widths per second, shown fully
+saturated.
+
+Unlike the Optical Flow TOP, it isn't limited to newer NVIDIA cards' hardware flow. The model works
+on a 768 x 432 version of each frame: 5 ms with TensorRT, about 1.5 ms of TouchDesigner's main
+thread. **Reset State** forgets the previous frame, e.g. after a cut. GPU. NeuFlow v2, Apache-2.0.
 
 ### Robust Video Matting (`RVM.tox`)
 Alpha matte of the person in frame, built to stay steady from frame to frame: the model carries
