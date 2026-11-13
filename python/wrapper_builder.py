@@ -440,20 +440,15 @@ void main()
 	fragColor = TDOutputSwizzle(vec4(f.rg * keep, f.ba));
 }
 '''
-FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, brightness = speed (black = still).
+FLOW_COLOR_SHADER = '''// Flow as color, like viewing the Optical Flow TOP: R = rightward, G = upward, scaled so uFullSpeed is
+// full brightness. Left and down (negative) and still show black.
 uniform float uFullSpeed;	// screen widths per second shown at full brightness
 out vec4 fragColor;
-vec3 hsv2rgb(vec3 c)
-{
-	vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
-	return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
-}
 void main()
 {
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
-	float hue = fract(atan(f.y, f.x) / 6.2831853);	// right = red (like R), up = yellow-green, left = cyan, down = violet
-	float speed = clamp(length(f) / max(uFullSpeed, 1e-4), 0.0, 1.0);
-	fragColor = TDOutputSwizzle(vec4(hsv2rgb(vec3(hue, 1.0, speed)), 1.0));
+	vec2 c = clamp(f / max(uFullSpeed, 1e-4), 0.0, 1.0);
+	fragColor = TDOutputSwizzle(vec4(c, 0.0, 1.0));
 }
 '''
 
@@ -474,7 +469,7 @@ def _build_flow(comp):
 	plugin's pair_interval (the measured time between the pair's frames; a project frame until known).
 	`flow_smooth`: Flow Smoothing over it (a Feedback TOP). `flow_gate`, the result (TOP 1): the Noise
 	Floor (after the smoothing, which steadies the speeds it compares). `flow_color` (TOP 3):
-	direction as hue, speed as brightness (black = still; Color Full Speed on the Debug page)."""
+	R = rightward, G = upward, like viewing the Optical Flow TOP (Color Full Speed on the Debug page)."""
 	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
 	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
 	flow.par.vec0name = 'uModelSize'

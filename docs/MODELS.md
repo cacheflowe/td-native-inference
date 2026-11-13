@@ -325,8 +325,8 @@ showing the last motion; a still image shows none.
   the floor become zero, and above it the flow fades back in over the ease, so slow real motion
   doesn't pop on. 0 / 0 is the raw flow.
 
-TOP 3 shows the flow as color: the hue is the direction (right red, like R; up yellow-green; left
-cyan; down violet), the brightness the speed, black is still.
+TOP 3 shows the flow as color, like viewing the Optical Flow TOP: red is rightward motion, green
+upward; left, down and still are black.
 **Color Full Speed** (Debug page) is the speed, in screen widths per second, shown at full
 brightness.
 
