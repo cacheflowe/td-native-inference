@@ -404,8 +404,9 @@ OnnxTOP::~OnnxTOP()
 		cudaFree(myPairFlag);
 	if (myPairFlagHost)
 		cudaFreeHost(myPairFlagHost);
-	if (myPairEvent)
-		cudaEventDestroy(myPairEvent);
+	for (auto& e : myPairEvents)
+		if (e)
+			cudaEventDestroy(e);
 	if (myStream)
 		cudaStreamDestroy(myStream);
 }
@@ -1359,19 +1360,22 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				const double now = ti && ti->rate > 0 ? double(ti->absFrame) / ti->rate : 0.0;
 				if (!myPairFlagHost)
 				{
-					cudaMallocHost((void**)&myPairFlagHost, sizeof(int));
-					cudaEventCreateWithFlags(&myPairEvent, cudaEventDisableTiming);
+					cudaMallocHost((void**)&myPairFlagHost, kPairSlots * sizeof(int));
+					for (auto& e : myPairEvents)
+						cudaEventCreateWithFlags(&e, cudaEventDisableTiming);
 				}
-				// An earlier cook's flag, once it's on the host: did the pair advance then?
-				if (myPairPending && cudaEventQuery(myPairEvent) == cudaSuccess)
+				// Earlier cooks' flags, oldest first, as they land on the host: did the pair advance then?
+				while (myPairCount > 0 && cudaEventQuery(myPairEvents[myPairHead]) == cudaSuccess)
 				{
-					myPairPending = false;
-					if (*myPairFlagHost)
+					if (myPairFlagHost[myPairHead])
 					{
-						if (myPairLastAdvance >= 0.0 && myPairPendingTime > myPairLastAdvance)
-							myPairInterval = myPairPendingTime - myPairLastAdvance;
-						myPairLastAdvance = myPairPendingTime;
+						const double t = myPairSlotTime[myPairHead];
+						if (myPairLastAdvance >= 0.0 && t > myPairLastAdvance)
+							myPairInterval = t - myPairLastAdvance;
+						myPairLastAdvance = t;
 					}
+					myPairHead = (myPairHead + 1) % kPairSlots;
+					--myPairCount;
 				}
 				const bool first = !myPairPrimed;
 				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, myPairIncoming, letterboxPad, myStream);
@@ -1383,14 +1387,15 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				{
 					myPairLastAdvance = now;
 					myPairInterval = 0.0;
-					myPairPending = false;
+					myPairCount = 0;
 				}
-				else if (ce == cudaSuccess && !myPairPending && myPairFlagHost)
+				else if (ce == cudaSuccess && myPairFlagHost && myPairCount < kPairSlots)
 				{
-					cudaMemcpyAsync(myPairFlagHost, myPairFlag, sizeof(int), cudaMemcpyDeviceToHost, myStream);
-					cudaEventRecord(myPairEvent, myStream);
-					myPairPending = true;
-					myPairPendingTime = now;
+					const int slot = (myPairHead + myPairCount) % kPairSlots;
+					cudaMemcpyAsync(myPairFlagHost + slot, myPairFlag, sizeof(int), cudaMemcpyDeviceToHost, myStream);
+					cudaEventRecord(myPairEvents[slot], myStream);
+					myPairSlotTime[slot] = now;
+					++myPairCount;
 				}
 			}
 			else

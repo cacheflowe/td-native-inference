@@ -95,10 +95,13 @@ private:
 	int*						myPairFlag = nullptr;
 	// The time between the pair's two frames (seconds; 0 = not known yet): when each advance happened,
 	// learned from the flag copied back asynchronously (read on a later cook, never waited for).
-	int*						myPairFlagHost = nullptr;
-	cudaEvent_t					myPairEvent = nullptr;
-	bool						myPairPending = false;
-	double						myPairPendingTime = 0.0;
+	// A ring of read-backs, so every cook's flag is read (one at a time missed advances whenever the
+	// last copy hadn't landed yet, and an interval then spanned several).
+	static constexpr int		kPairSlots = 8;
+	int*						myPairFlagHost = nullptr;	// kPairSlots ints, pinned
+	cudaEvent_t					myPairEvents[kPairSlots] = {};
+	double						myPairSlotTime[kPairSlots] = {};
+	int							myPairHead = 0, myPairCount = 0;	// oldest pending slot, pending slots
 	double						myPairLastAdvance = -1.0;
 	double						myPairInterval = 0.0;
 	std::atomic<bool>			myUpgrading{ false };	// Auto: running on CUDA, TensorRT building
