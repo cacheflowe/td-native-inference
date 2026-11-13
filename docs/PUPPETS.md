@@ -222,6 +222,20 @@ by TD's Python on every change. That cost is outside the solver and hasn't been 
 **Goal:** the same rotations and placement from a C++ custom CHOP, then the features that are
 awkward in per-frame Python (rotation smoothing, joint limits).
 
+**Status (Nov 13):** steps 1-3 are done except the tox regeneration, which needs the registered
+custom OP (a TD restart). Results:
+- **Offline** (`tests/test_puppet_cpp.py`, 24 combinations of rig, fixture and settings):
+  rotations within 4e-14, roots within 5e-12.
+- **In TD** (`tests/td_puppet_lab.py`, 300 frames each): every channel the same.
+- **Per frame:** body 2.19 → 0.34 ms, rigged hand 1.10 → 0.26 ms.
+
+Plugin reference: [cpp/Puppet/README.md](../cpp/Puppet/README.md).
+
+One thing learned in the lab test: the Script CHOP solves whenever anything pulls it, at whatever
+moment in the frame that is. A smoothed root therefore depends on *when* the solver cooks, not
+only on which rows it saw. To compare two solvers, cook both from the same place, or compare with
+Placement Smoothing at 0.
+
 **Design:**
 - **`cpp/Puppet/`**, laid out like `cpp/Tracking`:
   - **`puppet_core`:** the rig, targets, solve, place and the hand spec. No TD dependency, doubles

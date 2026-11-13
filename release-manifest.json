@@ -40,6 +40,7 @@
 		"plugins/MediaPipeTOP.dll": "td-native-inference/MediaPipeTOP.dll",
 		"plugins/MediaPipeCHOP.dll": "td-native-inference/MediaPipeCHOP.dll",
 		"plugins/TrackerDAT.dll": "td-native-inference/TrackerDAT.dll",
+		"plugins/PuppetCHOP.dll": "td-native-inference/PuppetCHOP.dll",
 		"plugins/libmediapipe.dll": "td-native-inference/libmediapipe.dll",
 		"scripts/fetch_models.ps1": "td-native-inference/fetch_models.ps1",
 		"scripts/fetch_models.cmd": "td-native-inference/fetch_models.cmd",

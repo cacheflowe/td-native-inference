@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Puppet CHOP** (`PuppetCHOP.dll`, a fifth plugin to allow): Mixamo Puppet's solver in C++, with
+  the same rotations and placement as the Python solver. 2.2 to 0.34 ms per frame for a body (Y Bot
+  from Holistic GPU). The tox no longer embeds the Python solver; the character's rest pose is
+  captured into a table when it loads.
+- [docs/PUPPETS.md](docs/PUPPETS.md): how the puppet solver drives a rigged character.
+
 ## v0.4.0 (2026-11-12)
 
 - **Tracker DAT** (`TrackerDAT.dll`): tracking in C++, in every tox. It writes exactly the tables the

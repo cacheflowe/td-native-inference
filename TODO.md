@@ -15,9 +15,12 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 ## Now
 
 - [ ] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
-      [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd). `cpp/Puppet`:
-      core, replay library, offline equivalence test, then `PuppetCHOP.dll` and the tox switch. After
-      that, rotation smoothing, body joint limits and side-on flip rejection.
+      [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd).
+      - Done (Nov 13): `cpp/Puppet` and `PuppetCHOP.dll`, identical to the Python solver offline and
+        in the PuppetLab.
+      - Left: after a TD restart (which registers the CHOP), regenerate `tox/MixamoPuppet.tox`
+        (`scripts/build_puppet_tox.py`) and test it fresh.
+      - Then: rotation smoothing, body joint limits and side-on flip rejection.
 - [ ] Retire the Python tracker once v0.4.0 has been in use for a while: delete the modules, make the
       recorded C++ tables the fixtures, and build the Tracking pages without importing
       `onnxtop_tables`. Same for the Python puppet solver after its port.

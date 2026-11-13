@@ -27,7 +27,7 @@ image, tables with stable track ids, and CHOP channels. More detail on each:
    [Releases](https://github.com/cacheflowe/td-native-inference/releases) and extract it.
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
-   `OnnxTOP.dll`, `MediaPipeTOP.dll`, `MediaPipeCHOP.dll` and `TrackerDAT.dll`.
+   `OnnxTOP.dll`, `MediaPipeTOP.dll`, `MediaPipeCHOP.dll`, `TrackerDAT.dll` and `PuppetCHOP.dll`.
 3. **Optional, for YOLO26, Robust Video Matting, DAViD and text to speech:** in the installed folder, double-click
    `fetch_models.cmd`. It downloads, checksum-verified, into the folder's `models\`:
    - **YOLO26** (about 90 MB). It's AGPL-3.0, so it isn't in the zip, and the script asks first.
@@ -124,8 +124,8 @@ frame rate meanwhile); after that it loads in seconds.
 ## Development
 
 The repo holds the plugins' C++ sources (`cpp/OnnxTOP`, `cpp/MediaPipeTOP`, `cpp/MediaPipeCHOP`,
-and the tracker in `cpp/Tracking`), the builders and the puppet solver (`python/`; how the puppets
-work: [docs/PUPPETS.md](docs/PUPPETS.md)), the debug visualizers (`tox/shared/`) and the dev project
+the tracker in `cpp/Tracking` and the puppet solver in `cpp/Puppet`; how the puppets work:
+[docs/PUPPETS.md](docs/PUPPETS.md)), the builders (`python/`), the debug visualizers (`tox/shared/`) and the dev project
 `td-native-inference.toe`. Each model tox is generated from a spec in `wrappers/` by
 `python/wrapper_builder.py`, with a node icon from `scripts/build_icons.py`.
 [CLAUDE.md](CLAUDE.md) covers building, regenerating and testing; [docs/RELEASING.md](docs/RELEASING.md)
@@ -134,7 +134,7 @@ covers releases. Plugin parameters in depth: [cpp/OnnxTOP/README.md](cpp/OnnxTOP
 
 Building the plugins needs the CUDA Toolkit 12.x, CMake 3.24+, Ninja and an MSVC toolset your CUDA
 supports (CUDA before 12.4 needs MSVC v142): run `cpp\OnnxTOP\build.cmd`,
-`cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd` and `cpp\Tracking\build.cmd`. Models for a source checkout go in
+`cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd`, `cpp\Tracking\build.cmd` and `cpp\Puppet\build.cmd`. Models for a source checkout go in
 `models/` (see [models/README.md](models/README.md)).
 
 The build lands in `plugins/`, which TouchDesigner scans as the dev project's own Plugins folder. If a

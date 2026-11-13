@@ -11,7 +11,7 @@ One zip, `td-native-inference-vX.Y.Z.zip`, with a single top folder:
 ```
 td-native-inference-vX.Y.Z/
   td-native-inference/      <- users copy this into Documents/Derivative/Plugins/
-    OnnxTOP.dll  onnxtop_tool.exe  MediaPipeTOP.dll  MediaPipeCHOP.dll  TrackerDAT.dll  libmediapipe.dll
+    OnnxTOP.dll  onnxtop_tool.exe  MediaPipeTOP.dll  MediaPipeCHOP.dll  TrackerDAT.dll  PuppetCHOP.dll  libmediapipe.dll
     fetch_models.cmd        (double-click: runs fetch_models.ps1, which downloads YOLO26, RVM, Kokoro and DAViD)
     models/mediapipe/...  models/asr/...  models/tts/...  models/onnx/...
   tox/                      the model toxes + VisionDemo.tox, AudioDemo.tox

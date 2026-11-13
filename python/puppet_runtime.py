@@ -54,12 +54,42 @@ def _expr(par, text):
 	par.mode = type(par.mode).EXPRESSION
 
 
+REST_COLUMNS = ['name', 'parent', 'tx', 'ty', 'tz', 'rx', 'ry', 'rz', 's']
+
+
+def rest_rows(fbx):
+	"""The rig's rest pose from the bones' constant values (.val: binding them to the solver leaves
+	those), as the Puppet CHOP's Rest Pose table: a bone's parent is its wired input COMP, else the
+	bone COMP holding it (a Blender Armature); s is its uniform scale."""
+	rows = [REST_COLUMNS]
+	for bone in _bones(fbx) if fbx else ():
+		holder = bone.parent()
+		parent = bone.inputCOMPs[0] if bone.inputCOMPs else (holder if holder != fbx and holder.OPType == 'nullCOMP' else None)
+		p = bone.par
+		values = (p.tx.val, p.ty.val, p.tz.val, p.rx.val, p.ry.val, p.rz.val, p.sx.val * p.scale.val)
+		rows.append([bone.name, parent.name if parent else ''] + [repr(float(v)) for v in values])
+	return rows
+
+
+def capture_rest(comp):
+	"""Re-read the character's rest pose into `rest_pose` (the C++ solver), or the Script CHOP
+	solver's own storage (the Python one)."""
+	solver = comp.op('solver')
+	if solver.OPType == 'scriptCHOP':
+		solver.par.Capturerest.pulse()
+		return
+	table = comp.op('rest_pose')
+	table.clear()
+	for row in rest_rows(comp.op('fbx')):
+		table.appendRow(row)
+
+
 def bind(comp):
 	fbx, solver, render = comp.op('fbx'), comp.op('solver'), comp.op('render')
 	# The import exports the FBX's own animation onto some bones, which would override the binding.
 	for chop in fbx.findChildren(type=td.CHOP):
 		chop.export = False
-	solver.par.Capturerest.pulse()	# from the bones' constant values: before they're bound
+	capture_rest(comp)	# from the bones' constant values: before they're bound
 	solver.cook(force=True)
 	if not solver.numChans:
 		_status(comp, 'No Mixamo skeleton found in that FBX (needs mixamorig_ bones)')
