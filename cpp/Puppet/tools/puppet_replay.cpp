@@ -50,6 +50,7 @@ private:
 
 struct Handle {
 	puppet::Solver solver;
+	puppet::Settings extra;	// the settings beyond the Python solver's (default: off)
 	std::string out;
 };
 
@@ -71,7 +72,7 @@ EXPORT int pup_set_rest(void* h, const char* text) {
 EXPORT int pup_cook(void* h, const char* tracks, const char* hand, int mirror, int overImage, double fov, double smoothing,
 	int imageW, int imageH) {
 	auto* p = (Handle*)h;
-	puppet::Settings s;
+	puppet::Settings s = p->extra;
 	s.hand = hand ? hand : "any";
 	s.mirror = mirror != 0;
 	s.overImage = overImage != 0;
@@ -96,6 +97,22 @@ EXPORT const char* pup_channels(void* h) {
 		p->out += names[i] + '\t' + buf + '\n';
 	}
 	return p->out.c_str();
+}
+
+// The additions over the Python solver; time: the next cook's time in seconds (< 0: unknown).
+EXPORT void pup_set_extra(void* h, double cutoff, double speedCoefficient, double slopeCutoff, int limits, double time) {
+	auto& e = ((Handle*)h)->extra;
+	e.cutoff = cutoff;
+	e.speedCoefficient = speedCoefficient;
+	e.slopeCutoff = slopeCutoff;
+	e.limits = limits != 0;
+	e.time = time;
+}
+
+EXPORT void pup_set_twist(void* h, double cutoff, double speedCoefficient) {
+	auto& e = ((Handle*)h)->extra;
+	e.twistCutoff = cutoff;
+	e.twistSpeedCoefficient = speedCoefficient;
 }
 
 EXPORT const char* pup_warning(void* h) { return ((Handle*)h)->solver.warning().c_str(); }

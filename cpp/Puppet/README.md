@@ -20,6 +20,22 @@ copies the DLL into `plugins/` and also builds `puppet_replay.dll` for the tests
 | Image TOP | The tracked image, for its aspect |
 | Placement Smoothing | Exponential smoothing of the root; 0 = raw |
 
+## Parameters (Smoothing page)
+
+None of these are in the Python solver; with all of them off the CHOP matches it exactly.
+[docs/PUPPETS.md](../../docs/PUPPETS.md#smoothing-and-limits-c-solver-only) explains them and
+has the measurements.
+
+| Parameter | Default | What |
+|---|---|---|
+| Landmark Cutoff (Hz) | 1.5 | One Euro filter on the world landmarks (hand points relative to their wrist); 0 = off |
+| Speed Coefficient | 4 | How fast the cutoff rises with speed (m/s) |
+| Slope Cutoff (Hz) | 1 | Smooths that speed |
+| Hand Roll Cutoff (Hz) | 2 | The forearms', hands' and fingers' roll, filtered on its own and held while the knuckle line is unreliable; 0 = off |
+| Knee Limits | on | Knees as hinges: -5° to 150° bend, ±10° spread |
+
+The filters step with TD's frame time between solves.
+
 The rig type is chosen from the bone names. A root bone named `<prefix>Hips` makes a Mixamo body;
 `hand_R` / `pulse_R` (or `_L`) make a Blender-style hand rig.
 

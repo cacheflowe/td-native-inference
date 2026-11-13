@@ -2,8 +2,8 @@
 
 	curl -X POST --data-binary @tests/td_puppet_lab.py http://127.0.0.1:3031/run
 
-In /project1/PuppetLab, next to each Script CHOP solver (`solver`: Y Bot from Holistic GPU;
-`hand_solver`: the rigged hand from MediaPipe Hands) it builds a Puppet CHOP on the same tracks,
+In /project1/PuppetLab, next to each Python solver (`solver_py`: Y Bot; `hand_solver_py`: the
+rigged hand from MediaPipe Hands) it builds a Puppet CHOP ('_cmp_*', additions off) on the same tracks,
 image and settings, with a rest-pose table captured from the same FBX COMP
 (puppet_runtime.rest_rows). For FRAMES frames it pulls both and compares every bone's rotation (as a
 matrix: an Euler split can jump at +-180) and the root, and reads both cook times. Returns at once;
@@ -20,7 +20,7 @@ ROOT = Path(project.folder)
 LAB = '/project1/PuppetLab'
 REPORT = ROOT / 'build' / 'puppet-lab.json'
 FRAMES = 300
-PAIRS = [('solver', 'solver_cpp', 'rest_cpp'), ('hand_solver', 'hand_solver_cpp', 'hand_rest_cpp')]
+PAIRS = [('solver_py', '_cmp_solver', '_cmp_rest'), ('hand_solver_py', '_cmp_hand_solver', '_cmp_hand_rest')]
 ROT_TOL = 1e-4		# rotation matrix elements (channels are float32)
 ROOT_TOL = 1e-3		# root translation, rig units (centimetres)
 
@@ -61,6 +61,10 @@ def setup():
 		cpp.par.Image = py.par.Image.eval().path
 		for name in ('Hand', 'Mirror', 'Placement', 'Fov', 'Placesmoothing'):
 			cpp.par[name].expr = f"op('{py_name}').par.{name}"
+		# The C++ solver's additions (smoothing, knee limits) off: the Python solver has none.
+		for name in ('Smoothcutoff', 'Twistcutoff', 'Kneelimits'):
+			cpp.par[name].mode = ParMode.CONSTANT
+			cpp.par[name].val = 0
 		cpp.nodeX, cpp.nodeY = py.nodeX, py.nodeY - 150
 		rest.nodeX, rest.nodeY = py.nodeX - 150, py.nodeY - 150
 		state['pairs'][py_name] = {'cpp': cpp.path, 'type': cpp.OPType, 'frames': 0, 'compared': 0, 'differing': 0,

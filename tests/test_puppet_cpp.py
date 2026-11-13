@@ -19,6 +19,8 @@ import sys
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'python'))
 sys.path.insert(0, str(ROOT / 'tests'))
@@ -241,6 +243,43 @@ class Replay(unittest.TestCase):
 					with self.subTest(fixture=fixture, hand=hand, placement=placement):
 						n, rot, root = self.run_case(bones, fixture, settings)
 						print(f'  hand {fixture} {hand} {placement}: {n} frames, worst rot {rot:.1e}, root {root:.1e}')
+
+	def test_smoothing_calms_forearms_and_hands(self):
+		"""The C++ additions (not in the Python solver): with the CHOP's default smoothing, the
+		forearms' and hands' frame-to-frame jumps (mostly roll, from the noisy knuckle line) shrink."""
+		lib = CppEngine.lib()
+		lib.pup_set_extra.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_int,
+			ctypes.c_double]
+		lib.pup_set_twist.argtypes = [ctypes.c_void_p, ctypes.c_double, ctypes.c_double]
+		path = FULL / 'holistic_gpu_dancer.jsonl.gz'
+		path = path if path.exists() else FIXTURES / 'holistic_gpu_dancer.jsonl.gz'
+		rows = [json.loads(line) for line in gzip.open(path, 'rt')][1:]
+		frames = [(r['f'], r['tracks']) for r in rows if r.get('tracks') and len(r['tracks'].splitlines()) > 1]
+
+		def steps(smooth):
+			h = lib.pup_create()
+			lib.pup_set_rest(h, rest_text(synthetic_rig()).encode())
+			lib.pup_set_twist(h, 2.0 if smooth else 0.0, 0.0)
+			out, last, prev = [], None, None
+			for f, text in frames:
+				if text == last:
+					continue
+				last = text
+				lib.pup_set_extra(h, 1.5 if smooth else 0.0, 4.0, 1.0, 1 if smooth else 0, f / 60.0)
+				lib.pup_cook(h, text.encode(), b'any', 0, 0, 50.0, 0.6, *IMAGE)
+				chans = dict(line.split('\t') for line in lib.pup_channels(h).decode().splitlines())
+				m = _bone_matrices([(n, float(v)) for n, v in chans.items() if 'ForeArm' in n or n[:-3].endswith('Hand')])
+				if prev is not None:
+					for bone in m:
+						c = (float(np.trace(prev[bone].T @ m[bone])) - 1) / 2
+						out.append(math.degrees(math.acos(max(-1.0, min(1.0, c)))))
+				prev = m
+			lib.pup_destroy(h)
+			return math.sqrt(sum(a * a for a in out) / len(out))
+
+		raw, smoothed = steps(False), steps(True)
+		print(f'  forearm / hand RMS step: raw {raw:.1f} deg, smoothed {smoothed:.1f} deg')
+		self.assertLess(smoothed, raw * 0.6)
 
 	def test_no_world_columns_warns(self):
 		text = 'track_id\tlost_frames\ttotal_frames\tnose_x\tnose_y\n1\t0\t5\t0.5\t0.5'

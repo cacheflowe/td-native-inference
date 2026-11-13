@@ -136,6 +136,50 @@ Mat3 turn(const Vec3& restPrimary, const std::optional<Vec3>& restHint, const Ve
 	return slerp(plain, mul(*target, transpose(*restFrame)), weight);
 }
 
+Mat3 axisAngle(const Vec3& u, double radians) {
+	const double c = std::cos(radians), s = std::sin(radians), t = 1 - c;
+	return {{{t * u[0] * u[0] + c, t * u[0] * u[1] - s * u[2], t * u[0] * u[2] + s * u[1]},
+		{t * u[0] * u[1] + s * u[2], t * u[1] * u[1] + c, t * u[1] * u[2] - s * u[0]},
+		{t * u[0] * u[2] - s * u[1], t * u[1] * u[2] + s * u[0], t * u[2] * u[2] + c}}};
+}
+
+double wrapDegrees(double a) {
+	a = std::fmod(a + 180.0, 360.0);
+	if (a < 0) a += 360.0;
+	return a - 180.0;
+}
+
+// The turn with its roll about the primary filtered: `result` = twist(about primary) * swing, where
+// swing is the plain turn (the parent's turn plus the shortest swing onto the primary).
+// confidence (0-1): how far this solve's measured roll is followed; 0 holds the last roll.
+Mat3 smoothTwist(const Mat3& result, const Vec3& restPrimary, const Vec3& primary, const Mat3& base, const std::string& bone,
+	double confidence, TwistFilter& tf) {
+	const Mat3 plain = mul(swing(mul(base, restPrimary), primary), base);
+	auto u = unit(primary);
+	if (!u) return result;
+	auto& st = tf.bones[bone];
+	if (!st.init && confidence <= 0.0) return result;
+	const Quat q = quat(mul(result, transpose(plain)));
+	const double raw = wrapDegrees(2.0 * std::atan2(q[1] * (*u)[0] + q[2] * (*u)[1] + q[3] * (*u)[2], q[0]) * kRadToDeg);
+	double input;
+	if (!st.init) {
+		st.init = true;
+		st.unwrapped = raw;
+		st.raw = raw;
+		input = raw;
+	} else if (confidence <= 0.0) {
+		input = st.filtered;	// keep the unwrap reference: the next trusted roll continues from it
+	} else {
+		// Continuous with the roll shown, not the last raw one: after a hold, the measured roll
+		// re-enters from where the bone is.
+		st.unwrapped = st.filtered + wrapDegrees(raw - st.filtered);
+		st.raw = raw;
+		input = st.filtered + confidence * (st.unwrapped - st.filtered);
+	}
+	st.filtered = st.filter.step(input, tf.dt, tf.cutoff, tf.beta, tf.slopeCutoff);
+	return mul(axisAngle(*u, st.filtered * kDegToRad), plain);
+}
+
 Mat3 hinge(const Vec3& restPrimary, const Vec3& primary, const Vec3& restAxis, const Target& t, const Mat3& base) {
 	Vec3 r = unit(restPrimary).value_or(Vec3{0, 1, 0});
 	auto bu = unit(cross(restAxis, r));
@@ -206,7 +250,50 @@ public:
 		}
 	}
 
+	// How much to trust a knuckle-line hint (pinky -> index knuckle): its length against the hand's
+	// (wrist -> middle knuckle). Holistic's hands give about 0.55; a palm whose depth collapsed
+	// gives a short line whose direction is mostly noise (the 5% lowest are under 0.27).
+	// nullopt for other hints (long, reliable lines: their rolls aren't smoothed); 0 for a Holistic
+	// hand the table has but didn't see.
+	std::optional<double> hintConfidence(const VecSpec& hint, const TwistFilter& tf) const {
+		std::string prefix;
+		if (hint.kind == VecSpec::Kind::HandWidth) {
+			for (const auto& side : tf.unseenHands)
+				if (side == hint.side) return 0.0;
+			auto width = vector(hint), length = vector(special(VecSpec::Kind::HandDir, hint.side));
+			return ratioConfidence(width, length);
+		}
+		const std::string pinky = "pinky_mcp", index = "index_finger_mcp";
+		if (hint.kind != VecSpec::Kind::Pair || !hint.from.b.empty() || !hint.to.b.empty()) return std::nullopt;
+		const std::string& a = hint.from.a;
+		if (a.size() < pinky.size() || a.compare(a.size() - pinky.size(), pinky.size(), pinky) != 0) return std::nullopt;
+		prefix = a.substr(0, a.size() - pinky.size());
+		if (hint.to.a != prefix + index) return std::nullopt;
+		auto width = vector(hint), length = vector(pair(prefix + "wrist", prefix + "middle_finger_mcp"));
+		return ratioConfidence(width, length);
+	}
+
 private:
+	static double ratioConfidence(const std::optional<Vec3>& width, const std::optional<Vec3>& length) {
+		if (!width || !length) return 0.0;
+		const double l = norm(*length);
+		if (l < 1e-9) return 0.0;
+		return std::min(1.0, std::max(0.0, (norm(*width) / l - 0.2) / 0.25));
+	}
+	static VecSpec special(VecSpec::Kind kind, const std::string& side) {
+		VecSpec v;
+		v.kind = kind;
+		v.side = side;
+		return v;
+	}
+	static VecSpec pair(const std::string& from, const std::string& to) {
+		VecSpec v;
+		v.kind = VecSpec::Kind::Pair;
+		v.from = {from, ""};
+		v.to = {to, ""};
+		return v;
+	}
+
 	const Landmarks& lm_;
 };
 
@@ -450,9 +537,24 @@ std::string Rig::shortName(int bone) const {
 
 // ---------------------------------------------------------------- solve
 
-const std::vector<Target>& mixamoTargets() {
+const std::vector<Target>& mixamoTargets(bool limits) {
 	static const std::vector<Target> targets = buildMixamoTargets();
-	return targets;
+	static const std::vector<Target> limited = [] {
+		std::vector<Target> t = buildMixamoTargets();
+		for (Target& target : t) {
+			if (target.bone != "LeftLeg" && target.bone != "RightLeg") continue;
+			// The knee bends about the character's left-right axis: cross(+X, the shin pointing
+			// down) is backward, so a positive bend is flexion.
+			target.hinge = true;
+			target.axis = fixedDir(1, 0, 0);
+			target.bend[0] = -5;
+			target.bend[1] = 150;
+			target.spread[0] = -10;
+			target.spread[1] = 10;
+		}
+		return t;
+	}();
+	return limits ? limited : targets;
 }
 
 const std::vector<Blend>& mixamoBlends() {
@@ -461,8 +563,25 @@ const std::vector<Blend>& mixamoBlends() {
 	return blends;
 }
 
+double OneEuro::step(double x, double dt, double cutoff, double beta, double slopeCutoff) {
+	auto alpha = [dt](double fc) {
+		const double tau = 1.0 / (2.0 * kPi * fc);
+		return 1.0 / (1.0 + tau / dt);
+	};
+	if (!init_) {
+		init_ = true;
+		x_ = x;
+		dx_ = 0.0;
+		return x;
+	}
+	const double dx = (x - x_) / dt;
+	dx_ += alpha(slopeCutoff) * (dx - dx_);
+	x_ += alpha(cutoff + beta * std::abs(dx_)) * (x - x_);
+	return x_;
+}
+
 std::vector<Vec3> solve(const Rig& rig, const Landmarks& landmarks, bool mirror, std::vector<Vec3>* positions,
-	const std::vector<Target>& targets, const std::vector<Blend>& blends) {
+	const std::vector<Target>& targets, const std::vector<Blend>& blends, TwistFilter* twist) {
 	Landmarks flipped;
 	if (mirror) flipped = mirrored(landmarks);
 	const Points points(mirror ? flipped : landmarks);
@@ -481,6 +600,11 @@ std::vector<Vec3> solve(const Rig& rig, const Landmarks& landmarks, bool mirror,
 			continue;
 		}
 		turns[t.bone] = turn(*rp, rh, *p, h, base ? *base : eye);
+		if (twist && twist->cutoff > 0.0) {
+			auto confidence = points.hintConfidence(t.hint, *twist);
+			if (confidence)
+				turns[t.bone] = smoothTwist(turns[t.bone], *rp, *p, base ? *base : eye, t.bone, h ? *confidence : 0.0, *twist);
+		}
 	}
 	for (const Blend& b : blends) {
 		if (rig.find(b.bone) < 0) continue;

@@ -67,6 +67,18 @@ def _expr(par, text):
 	par.mode = type(par.mode).EXPRESSION
 
 
+# The Puppet CHOP's Smoothing page, exposed on the tox (name, label, default, slider range, help).
+SMOOTHING = [
+	('Smoothcutoff', 'Landmark Cutoff (Hz)', 1.5, 0.0, 5.0, 'Smooths the tracked landmarks before solving (a One Euro '
+		"filter, like the Filter CHOP's): the cutoff while still. Lower is smoother and slower. 0 = off."),
+	('Smoothspeed', 'Speed Coefficient', 4.0, 0.0, 20.0, 'How fast the smoothing lets go as the person moves faster: '
+		'higher follows quick moves more closely.'),
+	('Smoothslope', 'Slope Cutoff (Hz)', 1.0, 0.1, 5.0, 'Smooths the speed the filter reacts to.'),
+	('Twistcutoff', 'Hand Roll Cutoff (Hz)', 2.0, 0.0, 5.0, "Smooths the forearms', hands' and fingers' roll (from "
+		'the short knuckle line) and holds it while a hand is seen edge-on or not at all. 0 = off.'),
+]
+
+
 def _puppet_chop(comp, name):
 	"""The Puppet CHOP: the registered custom OP, or (until TD has registered it, i.e. the next
 	restart after the first build) a CPlusPlus CHOP loading plugins/PuppetCHOP.dll, which export
@@ -101,6 +113,12 @@ def _pages(comp, engine):
 	page.appendPulse('Capturerest', label='Capture Rest Pose')
 	if engine == 'python':
 		page.appendPulse('Reloadmodules', label='Reload Solver Modules')
+	else:
+		smoothing = comp.appendCustomPage('Smoothing')
+		for name, label, default, lo, hi, text in SMOOTHING:
+			wb._page_par(smoothing, 'Float', name, label, default, text, lo, hi)
+		wb._page_par(smoothing, 'Toggle', 'Kneelimits', 'Knee Limits', True,
+			"Knees bend like hinges, within a natural range: depth noise can't bend them backward or sideways.")
 	about = comp.appendCustomPage('About')
 	wb._page_par(about, 'Str', 'Version', 'Version', wb.version(),
 		'The td-native-inference release this tox was built with.').readOnly = True
@@ -140,6 +158,8 @@ def build(parent_comp, engine=DEFAULT_ENGINE):
 		solver = _puppet_chop(comp, 'solver')
 		comp.create('tableDAT', 'rest_pose').clear()
 		solver.par.Restpose = 'rest_pose'
+		for name in [s[0] for s in SMOOTHING] + ['Kneelimits']:
+			_expr(solver.par[name], f'parent().par.{name}')
 	solver.par.Tracks, solver.par.Image = 'in_tracks', 'in_image'
 	for name in ('Placement', 'Fov', 'Mirror', 'Placesmoothing'):
 		_expr(solver.par[name], f'parent().par.{name}')

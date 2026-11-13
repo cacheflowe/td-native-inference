@@ -6,6 +6,14 @@
   the same rotations and placement as the Python solver. 2.2 to 0.34 ms per frame for a body (Y Bot
   from Holistic GPU). The tox no longer embeds the Python solver; the character's rest pose is
   captured into a table when it loads.
+- **Mixamo Puppet: smoothing and knee limits** (Smoothing page):
+  - a One Euro filter on the tracked landmarks (hand points relative to their wrist);
+  - separate smoothing of the forearms', hands' and fingers' roll, held while a hand is seen
+    edge-on or not at all;
+  - knees that bend only like knees.
+
+  On a dance clip from Holistic GPU, frame-to-frame jumps of more than 30° drop from 21% to 0.4%
+  of frames on the forearms and from 20% to 6% on the hands.
 - [docs/PUPPETS.md](docs/PUPPETS.md): how the puppet solver drives a rigged character.
 
 ## v0.4.0 (2026-11-12)

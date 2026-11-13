@@ -1,9 +1,12 @@
 """Puppeteer lab for /project1/PuppetLab (POST to the bridge's /run). Two separate paths:
-	body: clip / dancer / webcam -> source -> MediaPipe Holistic (world landmarks; its hands also
-	      drive the fingers) -> solver (python/puppet_solver.py, mixamo_retarget) -> rotations ->
-	      the Mixamo character's bones (assets/models/y-bot.fbx)
+	body: clip / dancer / webcam -> source -> MediaPipe Holistic GPU or CPU (Body Tracker; world
+	      landmarks, its hands also drive the fingers) -> solver -> rotations -> the Mixamo
+	      character's bones (assets/models/y-bot.fbx)
 	hand: a close-up hand clip / webcam -> hand_source -> MediaPipe Hands -> hand_solver
-	      (hand_retarget) -> hand_rotations -> a rigged hand's bones (assets/models/hand/handRig_02.fbx)
+	      -> hand_rotations -> a rigged hand's bones (assets/models/hand/handRig_02.fbx)
+Each path has two solvers on the same tracks: `solver` (the Puppet CHOP, cpp/Puppet, with the
+lab's Smoothing settings; its rig from `rest_pose`) and `solver_py` (python/puppet_solver.py, the
+reference, no smoothing); Solver picks which one drives the puppet.
 Models and media aren't committed (their licenses allow use, not redistribution).
 
 The lab COMP's Puppet page drives both: Body Source and Hand Input pick the videos; Placement
@@ -16,14 +19,21 @@ positioned left to right in two bands (body on top, hand under it). Nodes of ear
 and '_' probes are removed; other nodes someone added are left alone. Network boxes are drawn
 afterwards by scripts/lab/annotate_puppet.py (see GROUPS).
 
-Each solver keeps its rig's rest pose in storage (captured from the bones' constant values,
-which binding leaves untouched); pulse Capture Rest Pose after re-importing an FBX."""
+The rest pose is captured from the bones' constant values (which binding leaves untouched) into
+`rest_pose` and the Python solver's storage; rebuild after re-importing an FBX."""
 
 import sys
 
 if project.folder + '/python' not in sys.path:
 	sys.path.insert(0, project.folder + '/python')
+import importlib  # noqa: E402
+
+import puppet_builder  # noqa: E402
+import puppet_runtime  # noqa: E402
 import puppet_solver  # noqa: E402
+
+importlib.reload(puppet_runtime)
+importlib.reload(puppet_builder)
 
 lab = op('/project1/PuppetLab') or op('/project1').create(baseCOMP, 'PuppetLab')
 COL, ROW = 220, 170
@@ -57,12 +67,14 @@ def onCook(scriptOp):
 # Network boxes, drawn by the caller through /annotate: title -> node names.
 GROUPS = {
 	'Body source': ['clip', 'dancer', 'webcam', 'source'],
-	'Body tracking': ['holistic', 'overlay'],
-	'Body puppet: Mixamo character': ['tracks', 'solver', 'solver_callbacks', 'rotations', 'ybot', 'camera', 'light',
+	'Body tracking': ['holistic', 'holistic_gpu', 'overlay_cpu', 'overlay_gpu', 'overlay'],
+	'Body puppet: Mixamo character': ['tracks', 'rest_pose', 'solver', 'solver_py', 'solver_py_callbacks', 'solver_choice',
+		'rotations', 'ybot', 'camera', 'light',
 		'camera_image', 'render', 'mirror', 'image', 'over_body', 'body_stage', 'body_fit_tracking', 'body_fit_puppet', 'body_view', 'body_out', 'out1'],
 	'Hand source': ['hand_clip', 'hand_webcam', 'hand_source'],
 	'Hand tracking': ['hands', 'hand_overlay'],
-	'Hand puppet': ['hand_tracks', 'hand_solver', 'hand_solver_callbacks', 'hand_rotations', 'hand', 'hand_camera',
+	'Hand puppet': ['hand_tracks', 'hand_rest_pose', 'hand_solver', 'hand_solver_py', 'hand_solver_py_callbacks',
+		'hand_solver_choice', 'hand_rotations', 'hand', 'hand_camera',
 		'hand_light', 'hand_camera_image', 'render_hand', 'hand_mirror', 'hand_image', 'over_hand', 'hand_stage',
 		'hand_fit_tracking', 'hand_fit_puppet', 'hand_view', 'hand_out', 'out2',
 		'hand_mat', *HAND_MAPS],
@@ -117,9 +129,26 @@ hfov.help = 'Horizontal field of view assumed for the hand video\'s camera (Over
 hand_par = page.appendMenu('Hand', label='Tracked Hand')[0]
 hand_par.menuNames, hand_par.menuLabels = ['any', 'right', 'left'], ['Any', 'Right', 'Left']
 hand_par.help = 'Which of the person\'s hands drives the hand model (Any: the one in view); the other side mirrors onto it.'
+tr = page.appendMenu('Bodytracker', label='Body Tracker')[0]
+tr.menuNames, tr.menuLabels = ['holistic_gpu', 'holistic'], ['Holistic GPU', 'Holistic (CPU)']
+tr.help = "Which tracker drives the body puppet. CPU Holistic smooths its landmarks inside MediaPipe; the GPU one doesn't."
+sv = page.appendMenu('Solver', label='Solver')[0]
+sv.menuNames, sv.menuLabels = ['cpp', 'python'], ['C++ (Smoothing page)', 'Python (reference, no smoothing)']
+sv.help = 'Which solver drives the puppets: the Puppet CHOP with the Smoothing page, or the old Python solver.'
+smoothing = lab.appendCustomPage('Smoothing')
+for name, label, default, lo, hi, text in puppet_builder.SMOOTHING:
+	p = smoothing.appendFloat(name, label=label)[0]
+	p.default, p.normMin, p.normMax, p.help = default, lo, hi, text
+	p.clampMin, p.min = True, 0.0
+kl = smoothing.appendToggle('Kneelimits', label='Knee Limits')[0]
+kl.default = True
 for name, default in (('Source', 'dancer'), ('Placement', 'image'), ('Fov', 50.0), ('Handinput', 'clip'),
-		('Handfov', 50.0), ('Hand', 'any')):
-	getattr(lab.par, name).val = kept.get(name, default)
+		('Handfov', 50.0), ('Hand', 'any'), ('Bodytracker', 'holistic_gpu'), ('Solver', 'cpp'),
+		*[(s[0], s[2]) for s in puppet_builder.SMOOTHING], ('Kneelimits', True)):
+	try:
+		getattr(lab.par, name).val = kept.get(name, default)
+	except Exception:	# a menu entry that no longer exists
+		getattr(lab.par, name).val = default
 
 
 def tracker(tox, name, col, row, source):
@@ -145,7 +174,8 @@ def tracker(tox, name, col, row, source):
 				pass
 	place(comp, col, row)
 	wire(comp, source)
-	comp.par.Outputworld = True
+	if hasattr(comp.par, 'Outputworld'):	# Holistic GPU always outputs world landmarks
+		comp.par.Outputworld = True
 	return comp, {c.outOP.name: c for c in comp.outputConnectors}	# order isn't by family
 
 
@@ -159,25 +189,52 @@ def fbx_comp(name, file, col, row):
 
 
 def puppet(prefix, tracks_dat, fbx, image, fov_par, row):
-	"""tracks -> solver (+ docked callbacks) -> rotations, bound to the FBX COMP's bones and root."""
+	"""tracks -> solver (the Puppet CHOP) and solver_py (the Python reference, + docked callbacks)
+	-> solver_choice (the lab's Solver) -> rotations, bound to the FBX COMP's bones and root.
+	tracks_dat: a DAT path, or '=' + an expression for one."""
 	tracks = node(selectDAT, prefix + 'tracks', 3, row)
-	tracks.par.dat = tracks_dat
-	solver = node(scriptCHOP, prefix + 'solver', 4, row)
-	callbacks = lab.op(prefix + 'solver_callbacks') or lab.create(textDAT, prefix + 'solver_callbacks')
-	callbacks.text = CALLBACKS
-	solver.par.callbacks = callbacks.name
-	callbacks.dock = solver
-	place(callbacks, 4, row + 0.7)
-	solver.destroyCustomPars()
-	puppet_solver.setup(solver)	# what onSetupParameters runs (a Setup Parameters pulse is deferred)
+	if tracks_dat.startswith('='):
+		expr(tracks.par.dat, tracks_dat[1:])
+	else:
+		tracks.par.dat = tracks_dat
+	# Rest pose from the bones' constant values (binding them leaves those).
+	rest = node(tableDAT, prefix + 'rest_pose', 3, row + 0.7)
+	rest.clear()
+	for r in puppet_runtime.rest_rows(fbx):
+		rest.appendRow(r)
+	solver = lab.op(prefix + 'solver')
+	if solver is not None and solver.OPType != 'PuppetCHOP':
+		solver.destroy()
+		solver = None
+	solver = place(solver or puppet_builder._puppet_chop(lab, prefix + 'solver'), 4, row)
+	solver.par.Restpose = rest.name
 	solver.par.Tracks = tracks.name
-	solver.par.Rig = fbx.name
 	solver.par.Image = image.name
 	expr(solver.par.Placement, P + 'Placement')
 	expr(solver.par.Fov, P + fov_par)
-	rotations = wire(node(nullCHOP, prefix + 'rotations', 5, row), solver)
-	solver.par.Capturerest.pulse()
+	for name in [s[0] for s in puppet_builder.SMOOTHING] + ['Kneelimits']:
+		expr(solver.par[name], P + name)
+
+	solver_py = node(scriptCHOP, prefix + 'solver_py', 4, row + 1.4)
+	callbacks = lab.op(prefix + 'solver_py_callbacks') or lab.create(textDAT, prefix + 'solver_py_callbacks')
+	callbacks.text = CALLBACKS
+	solver_py.par.callbacks = callbacks.name
+	callbacks.dock = solver_py
+	place(callbacks, 4, row + 2.1)
+	solver_py.destroyCustomPars()
+	puppet_solver.setup(solver_py)	# what onSetupParameters runs (a Setup Parameters pulse is deferred)
+	solver_py.par.Tracks = tracks.name
+	solver_py.par.Rig = fbx.name
+	solver_py.par.Image = image.name
+	expr(solver_py.par.Placement, P + 'Placement')
+	expr(solver_py.par.Fov, P + fov_par)
+	solver_py.par.Capturerest.pulse()
+
+	choice = wire(node(switchCHOP, prefix + 'solver_choice', 5, row + 0.7), solver, solver_py)
+	expr(choice.par.index, P + 'Solver.menuIndex')
+	rotations = wire(node(nullCHOP, prefix + 'rotations', 5, row), choice)
 	solver.cook(force=True)
+	solver_py.cook(force=True)
 
 	# The import exports the FBX's animation (exportAnim) onto some bones, which would override
 	# the binding: switch that off. Bind every bone's rotation (constant values stay as the rest
@@ -259,12 +316,16 @@ webcam.par.top = WEBCAM
 source = wire(node(switchTOP, 'source', 1, 0.5), *[lab.op(n) for n, _ in CLIPS], webcam)
 expr(source.par.index, P + 'Source.menuIndex')
 holistic, holistic_out = tracker('MediaPipeHolistic.tox', 'holistic', 2, 0, source)
-overlay = wire(node(overTOP, 'overlay', 2, -1.2), holistic_out['debug'], holistic_out['passthrough'])
+holistic_gpu, holistic_gpu_out = tracker('MediaPipeHolisticGPU.tox', 'holistic_gpu', 2, 1.2, source)
+overlay_cpu = wire(node(overTOP, 'overlay_cpu', 1.4, -1.2), holistic_out['debug'], holistic_out['passthrough'])
+overlay_gpu = wire(node(overTOP, 'overlay_gpu', 2, -1.2), holistic_gpu_out['debug'], holistic_gpu_out['passthrough'])
+overlay = wire(node(switchTOP, 'overlay', 2.6, -1.2), overlay_gpu, overlay_cpu)
+expr(overlay.par.index, P + 'Bodytracker.menuIndex')
 
 ybot = fbx_comp('ybot', BODY_FBX, 6, 0)
 image = node(selectTOP, 'image', 8, 1.4)
 image.par.top = 'source'
-body_solver = puppet('', 'holistic/out_tracks', ybot, image, 'Fov', 0)
+body_solver = puppet('', "=parent().par.Bodytracker + '/out_tracks'", ybot, image, 'Fov', 0)
 camera = node(cameraCOMP, 'camera', 7, -0.6)
 camera.par.tx, camera.par.ty, camera.par.tz = 0, 95, 650
 camera.par.fov, camera.par.far = 40, 5000
@@ -307,7 +368,8 @@ for top in hand.findChildren(type=TOP):
 
 # Nodes earlier versions of this lab made, probes ('_...') and the network boxes go (the caller
 # redraws the boxes); anything else someone added stays.
-RETIRED = ['view', 'null_view', 'side_by_side', 'over_image', 'stage', 'hands1']
+RETIRED = ['view', 'null_view', 'side_by_side', 'over_image', 'stage', 'hands1', 'solver_callbacks', 'hand_solver_callbacks',
+	'solver_cpp', 'hand_solver_cpp', 'rest_cpp', 'hand_rest_cpp']
 for child in list(lab.findChildren(depth=1, includeUtility=True)):
 	if child.valid and (child.name in RETIRED or child.name.startswith('_') or child.OPType == 'annotateCOMP'):
 		child.destroy()

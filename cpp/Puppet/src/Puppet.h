@@ -27,6 +27,16 @@ struct Settings {
 	double fov = 50.0;
 	double placeSmoothing = 0.6;
 	int imageW = 0, imageH = 0;	// the Image TOP's size; 0 = none
+
+	// Additions over the Python solver (all off reproduces it exactly):
+	// One Euro filter on the world landmarks before solving (TD's Filter CHOP, One Euro type):
+	// cutoff in Hz while still, rising by speedCoefficient * speed (m/s); slopeCutoff (Hz)
+	// smooths that speed. Off when cutoff <= 0.
+	double cutoff = 0.0, speedCoefficient = 0.0, slopeCutoff = 1.0;
+	// Twist smoothing (TwistFilter): each bone's roll, One Euro on degrees. Off when <= 0.
+	double twistCutoff = 0.0, twistSpeedCoefficient = 0.0;
+	bool limits = false;	// knee hinges (mixamoTargets(true))
+	double time = -1.0;		// seconds (the cook's frame / rate); < 0 unknown: 1/30 s per solve
 };
 
 // Rest pose table: name, parent, tx, ty, tz, rx, ry, rz, s (header row first; parent "" for roots).
@@ -63,7 +73,7 @@ private:
 			int x, y, conf;
 		};
 		std::vector<Image> image;	// keypoints with _x and _y columns (and their _conf)
-		int lost = -1, total = -1, handedness = -1;
+		int lost = -1, total = -1, handedness = -1, trackId = -1;
 	};
 
 	struct ReadResult {
@@ -72,7 +82,10 @@ private:
 		ImagePoints image;
 		std::string side;	// hands: 'left' / 'right'; empty for a body
 		std::string line;	// the row's text
+		std::string trackId;
 	};
+
+	void filter(ReadResult& r, const Settings& s);
 
 	const Layout& layout(const TableView& t);
 	int pickRow(const TableView& t, const Layout& l, const std::vector<int>& rows) const;
@@ -91,6 +104,11 @@ private:
 	std::optional<Vec3> center_;			// last Center root of a hand
 	std::string sideHeld_;					// the hand side last driven
 	std::optional<std::string> key_;		// what the channels were last solved from
+	std::unordered_map<std::string, std::array<OneEuro, 3>> filters_;	// per world landmark
+	std::string filterTrack_;				// the track the filters follow
+	double filterTime_ = -1.0;				// the last filtered solve's time
+	double filterDt_ = 1.0 / 30.0;			// this solve's time step
+	TwistFilter twist_;
 
 	std::vector<std::string> names_;
 	std::vector<double> values_;

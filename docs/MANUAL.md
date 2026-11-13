@@ -346,12 +346,22 @@ input image (Over Image) or the render alone (Center); the CHOP carries every bo
 | Placement Smoothing | Smooths the character's position over the image (depth is the noisiest part); 0 = raw |
 | Capture Rest Pose | Re-reads the character's rest pose; only needed if you edit the rig inside `fbx` |
 
+**Smoothing page**
+
+| Parameter | What it does |
+|---|---|
+| Landmark Cutoff | Smooths the tracking before the character is posed (a One Euro filter, like the Filter CHOP's). Lower is calmer but slower to follow; 0 turns it off |
+| Speed Coefficient | How quickly the smoothing lets go when the person moves fast. Raise it if quick moves lag, lower it if a moving person looks jittery |
+| Slope Cutoff | Smooths the speed the filter reacts to; rarely needs changing |
+| Hand Roll Cutoff | Extra smoothing for the twist of the forearms, hands and fingers, the noisiest part of the tracking. The twist also holds while a hand is seen edge-on or not at all. 0 turns it off |
+| Knee Limits | Knees bend only like knees, so bad depth can't bend them backward or sideways |
+
 **Notes**
 
 - Fingers follow Holistic's hands; when a hand isn't seen they hold their last pose.
 - The solver needs a Mixamo skeleton (`mixamorig_` bones). Other humanoid rigs aren't supported yet.
-- Rotation smoothing and joint limits aren't in yet: only the tracker's position smoothing applies.
-  The rigged-hand variant and a webcam Mirror toggle are open items in `TODO.md`.
+- Elbows have no limits yet; the rigged-hand variant and a webcam Mirror toggle are open items in
+  `TODO.md`.
 - How the solver turns landmarks into bone rotations, and its known limits:
   [PUPPETS.md](PUPPETS.md).
 

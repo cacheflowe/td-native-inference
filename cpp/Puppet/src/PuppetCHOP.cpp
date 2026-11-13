@@ -78,6 +78,13 @@ bool PuppetCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs, v
 	s.overImage = inputs->getParInt("Placement") == 1;
 	s.fov = inputs->getParDouble("Fov");
 	s.placeSmoothing = inputs->getParDouble("Placesmoothing");
+	s.cutoff = inputs->getParDouble("Smoothcutoff");
+	s.speedCoefficient = inputs->getParDouble("Smoothspeed");
+	s.slopeCutoff = std::max(0.01, inputs->getParDouble("Smoothslope"));
+	s.twistCutoff = inputs->getParDouble("Twistcutoff");
+	s.limits = inputs->getParInt("Kneelimits") != 0;
+	if (const OP_TimeInfo* time = inputs->getTimeInfo())
+		if (time->rate > 0) s.time = double(time->absFrame) / time->rate;
 	if (const OP_TOPInput* top = inputs->getParTOP("Image")) {
 		s.imageW = top->textureDesc.width;
 		s.imageH = top->textureDesc.height;
@@ -196,5 +203,44 @@ void PuppetCHOP::setupParameters(OP_ParameterManager* manager, void*) {
 		np.maxSliders[0] = 0.99;
 		np.help = "Smooths root_tx/ty/tz (depth from the image is the noisiest). 0 = raw.";
 		check(manager->appendFloat(np));
+	}
+	// Smoothing: a One Euro filter (like the Filter CHOP's) on the world landmarks, the hand's points
+	// relative to its wrist; then the hand-driven rolls on their own.
+	struct Num {
+		const char* name;
+		const char* label;
+		double value, lo, hi;
+		const char* help;
+	};
+	const Num nums[] = {
+		{"Smoothcutoff", "Landmark Cutoff (Hz)", 1.5, 0.0, 5.0,
+			"One Euro filter on the tracked landmarks before solving: the cutoff frequency while still. Lower is smoother "
+			"and slower. 0 = off."},
+		{"Smoothspeed", "Speed Coefficient", 4.0, 0.0, 20.0,
+			"How fast the cutoff rises with speed (metres per second): higher follows quick moves more closely."},
+		{"Smoothslope", "Slope Cutoff (Hz)", 1.0, 0.1, 5.0, "Smooths the speed the filter reacts to."},
+		{"Twistcutoff", "Hand Roll Cutoff (Hz)", 2.0, 0.0, 5.0,
+			"Smooths the forearms', hands' and fingers' roll, which comes from the short knuckle line, and holds it "
+			"while that line is unreliable (a hand seen edge-on, or not seen). 0 = off."},
+	};
+	for (const Num& n : nums) {
+		OP_NumericParameter np(n.name);
+		np.label = n.label;
+		np.page = "Smoothing";
+		np.defaultValues[0] = n.value;
+		np.minSliders[0] = n.lo;
+		np.maxSliders[0] = n.hi;
+		np.minValues[0] = 0.0;
+		np.clampMins[0] = true;
+		np.help = n.help;
+		check(manager->appendFloat(np));
+	}
+	{
+		OP_NumericParameter np("Kneelimits");
+		np.label = "Knee Limits";
+		np.page = "Smoothing";
+		np.defaultValues[0] = 1;
+		np.help = "Knees bend like hinges, within a natural range: depth noise can't bend them backward or sideways.";
+		check(manager->appendToggle(np));
 	}
 }

@@ -20,7 +20,9 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
         in the PuppetLab. `tox/MixamoPuppet.tox` is regenerated on it, with no Python solver inside
         (35 → 22 KB).
       - Left: a fresh-process check of the tox (at the next release's package test).
-      - Next: rotation smoothing, body joint limits and side-on flip rejection.
+      - Done (Nov 13, C++ only): landmark smoothing, hand-roll smoothing and knee limits
+        ([docs/PUPPETS.md](docs/PUPPETS.md#smoothing-and-limits-c-solver-only)).
+      - Next: side-on flip rejection (needs a recorded side-on clip first) and arm-twist limits.
 - [ ] Retire the Python tracker once v0.4.0 has been in use for a while: delete the modules, make the
       recorded C++ tables the fixtures, and build the Tracking pages without importing
       `onnxtop_tables`. Same for the Python puppet solver after its port.
@@ -39,8 +41,11 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 
 See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 
-- [ ] Rotation smoothing (slerp) and body joint limits (no backward elbows or knees). The hand rig
-      already has finger hinge limits. Planned in C++, after the port.
+- [x] Smoothing and knee limits (Nov 13, the Puppet CHOP's Smoothing page).
+- [ ] Arm-twist limits: elbows can't bend backward (the upper arm's roll comes from the bend), but
+      bad depth can twist the upper arm instead.
+- [ ] The hands are still the noisiest part (their direction comes from a 9 cm line): try a
+      separate hand cutoff, or MediaPipe Hands for the fingers on a hand crop.
 - [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject a
       frame whose hip line flips faster than a person can turn.
 - [ ] Tune live with a webcam:

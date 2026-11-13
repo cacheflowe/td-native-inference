@@ -157,6 +157,7 @@ const Solver::Layout& Solver::layout(const TableView& t) {
 	l.lost = col("lost_frames");
 	l.total = col("total_frames");
 	l.handedness = col("handedness");
+	l.trackId = col("track_id");
 	layout_ = std::move(l);
 	return layout_;
 }
@@ -241,8 +242,71 @@ Solver::ReadResult Solver::read(const TableView* t, const std::string* hand) {
 		out.image[key] = {num(t->cell(row, im.x)), num(t->cell(row, im.y)), c};
 	}
 	out.side = side;
+	if (l.trackId >= 0) out.trackId = t->cell(row, l.trackId);
 	out.ok = true;
 	return out;
+}
+
+// ---------------------------------------------------------------- smoothing
+
+void Solver::filter(ReadResult& r, const Settings& s) {
+	if (s.cutoff <= 0.0 && s.twistCutoff <= 0.0) {
+		filters_.clear();
+		twist_.bones.clear();
+		filterTime_ = -1.0;
+		return;
+	}
+	double dt = 1.0 / 30.0;
+	if (s.time >= 0.0 && filterTime_ >= 0.0) dt = s.time - filterTime_;
+	// A new person, a gap of more than half a second or time going backward: start over.
+	if (r.trackId != filterTrack_ || dt <= 0.0 || dt > 0.5) {
+		filters_.clear();
+		twist_.bones.clear();
+		dt = 1.0 / 30.0;
+	}
+	filterTrack_ = r.trackId;
+	filterTime_ = s.time;
+	filterDt_ = dt;
+	twist_.dt = dt;
+	twist_.cutoff = s.twistCutoff;
+	twist_.beta = s.twistSpeedCoefficient;
+	twist_.slopeCutoff = s.slopeCutoff;
+	if (s.cutoff <= 0.0) {
+		filters_.clear();
+		return;
+	}
+	// Landmarks not seen this time start fresh when they come back (a hand re-entering snaps).
+	for (auto it = filters_.begin(); it != filters_.end();)
+		it = r.world.count(it->first) ? std::next(it) : filters_.erase(it);
+	// Hand points are filtered relative to their wrist: when the arm moves, every hand point moves
+	// fast, which would open the filter (speed) and let the fingers' noise through. Relative to the
+	// wrist only the hand's own shape moves; the wrist itself is filtered like the body.
+	auto wristOf = [this](const std::string& name) -> std::string {
+		if (hand_) return name == "wrist" ? std::string() : std::string("wrist");
+		const size_t at = name.find("_hand_");
+		if (at == std::string::npos || name.compare(at + 6, std::string::npos, "wrist") == 0) return {};
+		return name.substr(0, at) + "_hand_wrist";
+	};
+	const Landmarks raw = r.world;
+	auto step = [&](const std::string& name, Vec3 p) {
+		auto& f = filters_[name];
+		for (int k = 0; k < 3; ++k) p[k] = f[k].step(p[k], dt, s.cutoff, s.speedCoefficient, s.slopeCutoff);
+		return p;
+	};
+	for (auto& [name, p] : r.world)
+		if (wristOf(name).empty()) p = step(name, p);
+	for (auto& [name, p] : r.world) {
+		const std::string wrist = wristOf(name);
+		if (wrist.empty()) continue;
+		auto rw = raw.find(wrist);
+		auto fw = r.world.find(wrist);
+		if (rw == raw.end()) {	// no wrist this time: filter it as it is
+			p = step(name, p);
+			continue;
+		}
+		const Vec3 offset = step(name, {p[0] - rw->second[0], p[1] - rw->second[1], p[2] - rw->second[2]});
+		p = {fw->second[0] + offset[0], fw->second[1] + offset[1], fw->second[2] + offset[2]};
+	}
 }
 
 // ---------------------------------------------------------------- cook
@@ -282,7 +346,9 @@ bool Solver::cook(const TableView* tracks, const Settings& s) {
 	// The same tracked row and settings as last cook (the tracker only moves on a new model
 	// result): keep the channels as they are.
 	std::string key = r.line + '\x1f' + (s.overImage ? "1" : "0") + s.hand + (s.mirror ? "1" : "0") + g17(s.fov) + ' ' +
-		g17(s.placeSmoothing) + ' ' + std::to_string(s.imageW) + 'x' + std::to_string(s.imageH);
+		g17(s.placeSmoothing) + ' ' + std::to_string(s.imageW) + 'x' + std::to_string(s.imageH) + ' ' + g17(s.cutoff) + ' ' +
+		g17(s.speedCoefficient) + ' ' + g17(s.slopeCutoff) + ' ' + g17(s.twistCutoff) + ' ' + g17(s.twistSpeedCoefficient) +
+		(s.limits ? "L" : "");
 	if (r.ok && key_ && *key_ == key && !names_.empty()) {
 		solveMs_ = 0.0;
 		return false;
@@ -297,8 +363,17 @@ bool Solver::cook(const TableView* tracks, const Settings& s) {
 	std::vector<Vec3> positions, rotations;
 	const bool solved = r.ok && !r.world.empty();
 	if (solved) {
-		rotations = hand_ ? solve(*rig_, r.world, mirror, &positions, hand_->targets, {})
-						  : solve(*rig_, r.world, mirror, &positions, mixamoTargets(), mixamoBlends());
+		filter(r, s);
+		TwistFilter* twist = s.twistCutoff > 0.0 ? &twist_ : nullptr;
+		twist_.unseenHands.clear();
+		if (twist && !hand_)
+			for (const char* side : {"left", "right"}) {
+				const std::string wrist = std::string(side) + "_hand_wrist";
+				if (layout_.worldIndex.count(wrist) && !r.world.count(wrist))
+					twist_.unseenHands.push_back(mirror ? (side[0] == 'l' ? "right" : "left") : side);
+			}
+		rotations = hand_ ? solve(*rig_, r.world, mirror, &positions, hand_->targets, {}, twist)
+						  : solve(*rig_, r.world, mirror, &positions, mixamoTargets(s.limits), mixamoBlends(), twist);
 		if (!hand_) holdFingers(r.world, rotations, mirror);
 		last_ = rotations;
 	} else if (last_) {	// nobody tracked: hold the last pose (rest before the first)

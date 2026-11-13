@@ -190,6 +190,70 @@ the joints `place()` uses and the palm point that Center keeps at the origin.
   render flipped back (the `mirror` channel), because mirroring the model itself (sx = -1) turns its
   shading inside out.
 
+## Smoothing and limits (C++ solver only)
+
+The Puppet CHOP adds three things the Python solver doesn't have. They're on its Smoothing page,
+with all of them off it matches the Python solver exactly. The defaults were chosen by measuring
+the recorded Holistic GPU dancer clip.
+
+**Why it was jittery.** CPU MediaPipe Holistic smooths its world landmarks inside MediaPipe (a One
+Euro filter); the GPU port of Holistic doesn't, so the puppet got raw per-frame landmarks. The
+hands were by far the worst: measured on the dancer clip, almost every large step of a forearm
+was *roll* (about the bone), not direction. Two causes:
+- **Flattened hands.** The roll comes from the knuckle line (pinky → index knuckle, about 5 cm).
+  When the palm is edge-on, Holistic's 3D hand often comes out flattened in depth, with a knuckle
+  line of 1-2 cm instead of 4-5, and its direction is then mostly noise.
+- **Source switches.** When Holistic loses a hand, the hint fell back to the pose model's coarse
+  index / pinky points, which disagree with the hand model's.
+
+The result was roll jumps of 60-120° in one frame.
+
+**1. Landmark smoothing.** A One Euro filter on every world landmark before solving, with the
+Filter CHOP's parameters:
+- **Cutoff** (Hz): the cutoff while still. Default 1.5; 0 turns it off.
+- **Speed Coefficient:** raises the cutoff with speed (m/s), so quick moves aren't delayed.
+  Default 4.
+- **Slope Cutoff:** smooths that speed. Default 1.
+
+Hand landmarks are filtered *relative to their wrist*. When the arm swings, every hand point
+moves fast, which would open the filter and let the fingers' noise through; relative to the wrist
+only the hand's own shape moves. The filter steps per solve with the real time between solves,
+and starts over for a new track, after a gap of more than half a second, or for a landmark that
+reappears.
+
+**2. Hand roll smoothing (swing / twist).** For bones whose roll comes from a knuckle line (the
+forearms, hands and fingers, and the hand rig), the turn is split into:
+- **swing:** the shortest turn onto the bone's direction, from long, reliable segments;
+- **twist:** the roll about that direction.
+
+The twist gets its own One Euro filter (**Hand Roll Cutoff**, default 2 Hz). It is made
+continuous by always taking the roll nearest the current one, so ±180° doesn't wrap, and it is
+followed only as far as the knuckle line can be trusted:
+- the line's length against the hand's (wrist → middle knuckle): Holistic's median is 0.55;
+  confidence ramps from 0 at 0.2 to 1 at 0.45;
+- a hand the table has but Holistic didn't see this frame gets confidence 0, so its roll holds.
+
+Body bones roll from long lines (hips, shoulders, ears), so their twist isn't filtered;
+filtering it only delayed real turns.
+
+**3. Knee limits.** The knees become hinges, like the fingers: a bend of -5° to 150° about the
+character's left-right axis and ±10° of spread, with their twist following the thigh. They keep
+depth noise from bending a knee backward or sideways; on the dancer clip they change nothing.
+
+**Measured** on the dancer clip (Y Bot, 264 solves). Jitter is the RMS frame-to-frame angular
+acceleration, in degrees:
+
+| | Body | Forearms | Hands | Fingers |
+|---|---|---|---|---|
+| Raw jitter | 10.4 | 56.3 | 42.0 | 31.4 |
+| Raw: frames jumping over 30° | 1.5% | 21.5% | 19.8% | 11.2% |
+| Default jitter | 4.7 | 10.6 | 18.6 | 13.4 |
+| Default: frames jumping over 30° | 0.8% | 0.4% | 5.7% | 2.9% |
+
+Body lag, measured against a centred (zero-lag) smoothing of the raw motion, goes from 4.5° to
+8.4°. The hands remain the weakest part: their direction comes from a 9 cm wrist-to-knuckle line
+whose depth is noisy.
+
 ## Cost and caching (Python)
 
 The Script CHOP cooks every frame, but a tracker row only changes on a new model result. So
@@ -207,9 +271,10 @@ by TD's Python on every change. That cost is outside the solver and hasn't been 
 
 ## Known limits
 
-- **No rotation smoothing.** Only the tracker's position smoothing applies, and noise in depth
-  shows up as jitter in roll.
-- **No joint limits on the body:** elbows and knees can bend backward on bad depth.
+- **Smoothing and knee limits are in the C++ solver only** (see above). The Python solver has
+  only the tracker's position smoothing.
+- **No elbow or arm-twist limits.** An elbow can't bend backward, because the upper arm's roll
+  comes from its bend, but bad depth can twist the upper arm instead.
 - **Side-on people:** MediaPipe can swap left and right, and the character turns 180° for a frame.
 - **Head yaw** looks under-turned.
 - **The FOV for Over Image** is a guess per video.

@@ -82,15 +82,50 @@ struct Blend {
 	double f;
 };
 
-const std::vector<Target>& mixamoTargets();
+// limits: the knees as hinges (bend and a little sideways spread, clamped; their twist follows the
+// thigh), so depth noise can't bend a knee backward or sideways. Off: the Python solver's targets.
+const std::vector<Target>& mixamoTargets(bool limits = false);
 const std::vector<Blend>& mixamoBlends();
 
 using Landmarks = std::unordered_map<std::string, Vec3>;
 
+// One Euro filter (Casiry, Roussel, Vogel 2012) on one value: cutoff (Hz) while still, rising by
+// beta * speed; slopeCutoff (Hz) smooths that speed.
+class OneEuro {
+public:
+	double step(double x, double dt, double cutoff, double beta, double slopeCutoff);
+	void reset() { init_ = false; }
+
+private:
+	bool init_ = false;
+	double x_ = 0.0, dx_ = 0.0;
+};
+
+// Twist smoothing: each driven bone's turn split into swing (its direction, from the primary) and
+// twist (its roll about that direction, from the hint), the twist filtered on its own. A bone's
+// direction comes from long, reliable segments; its roll often from short, noisy ones (the
+// forearm's from the knuckle line), so the roll needs much more smoothing than the direction.
+struct TwistFilter {
+	double dt = 1.0 / 30.0;
+	double cutoff = 0.0, beta = 0.0, slopeCutoff = 1.0;	// degrees and degrees/s for beta's speed
+	// Sides ('left' / 'right', after mirroring) whose Holistic hand the table has but didn't see this
+	// time: their hand-width rolls hold instead of switching to the pose model's coarse points.
+	std::vector<std::string> unseenHands;
+	struct State {
+		OneEuro filter;
+		double raw = 0.0;		// last raw twist (wrapped, degrees)
+		double unwrapped = 0.0;	// raw twist made continuous
+		double filtered = 0.0;
+		bool init = false;
+	};
+	std::unordered_map<std::string, State> bones;
+};
+
 // {bone: local Euler degrees} for every bone, aligned with rig.bones (indexed like it); bones
 // outside rig.order are left at {0, 0, 0}. positions (optional): each bone's posed position.
+// twist (optional, cutoff > 0): smooths each driven bone's roll (not hinges or blends).
 std::vector<Vec3> solve(const Rig& rig, const Landmarks& landmarks, bool mirror, std::vector<Vec3>* positions,
-	const std::vector<Target>& targets, const std::vector<Blend>& blends);
+	const std::vector<Target>& targets, const std::vector<Blend>& blends, TwistFilter* twist = nullptr);
 
 // ---------------------------------------------------------------- placement
 
