@@ -105,8 +105,12 @@ class JointGate(unittest.TestCase):
 		self.check_chestup('movenet_chestup')
 
 	def test_yolopose_chestup(self):
-		meta, _ = tr.load(fixture('yolopose_chestup')) if fixture('yolopose_chestup').exists() else ({}, None)
-		if not meta.get('yolo_visibility_fixed'):
+		if not fixture('yolopose_chestup').exists():
+			self.skipTest('no yolopose_chestup recording')
+		_, frames = tr.load(fixture('yolopose_chestup'))
+		conf = [float(v) for f in frames if f['info'] for row in tr.parse(f['info'])[1:2]
+			for name, v in zip(tr.parse(f['info'])[0], row) if name.endswith('_c')]
+		if conf and max(conf) < 0.01:	# 0-0.0016: the visibility divided by the input size
 			self.skipTest('recorded before the YOLO26 visibility fix (re-record after rebuilding OnnxTOP)')
 		self.check_chestup('yolopose_chestup')
 
