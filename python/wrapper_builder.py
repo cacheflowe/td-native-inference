@@ -429,6 +429,17 @@ void main()
 	fragColor = TDOutputSwizzle(mix(now, before, uSmoothing));
 }
 '''
+FLOW_GATE_SHADER = '''// Noise Floor: speeds below uFloor.x become zero; above it the flow fades back in over uFloor.y.
+uniform vec2 uFloor;	// x: floor, y: ease (screen widths per second)
+out vec4 fragColor;
+void main()
+{
+	vec4 f = texture(sTD2DInputs[0], vUV.st);
+	float speed = length(f.rg);
+	float keep = uFloor.y > 0.0 ? smoothstep(uFloor.x, uFloor.x + uFloor.y, speed) : step(uFloor.x, speed);
+	fragColor = TDOutputSwizzle(vec4(f.rg * keep, f.ba));
+}
+'''
 FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, saturation = speed (white = still), the usual flow coding.
 uniform float uFullSpeed;	// screen widths per second shown fully saturated
 out vec4 fragColor;
@@ -461,7 +472,8 @@ def _glsl(comp, name, shader, source):
 def _build_flow(comp):
 	"""`flow`: the flow in the Optical Flow TOP's format (Gain X / Y on the Model page), using the
 	plugin's pair_interval (the measured time between the pair's frames; a project frame until known).
-	`flow_smooth`, the result (TOP 1): Flow Smoothing over it (a Feedback TOP). `flow_color` (TOP 3):
+	`flow_smooth`: Flow Smoothing over it (a Feedback TOP). `flow_gate`, the result (TOP 1): the Noise
+	Floor (after the smoothing, which steadies the speeds it compares). `flow_color` (TOP 3):
 	direction as hue, speed as saturation (Color Full Speed on the Debug page)."""
 	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
 	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
@@ -487,7 +499,17 @@ def _build_flow(comp):
 	smooth.inputConnectors[1].connect(feedback)
 	smooth.par.vec0name = 'uSmoothing'
 	smooth.par.vec0valuex.expr = 'parent().par.Flowsmoothing'
-	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, smooth)
+	floor = _page_par(model, 'Float', 'Noisefloor', 'Noise Floor', 0.02,
+		'Speeds below this (screen widths per second) become zero: the model\'s baseline noise on still areas.', 0.0, 0.2)
+	floor.clampMin, floor.min = True, 0.0
+	ease = _page_par(model, 'Float', 'Floorease', 'Floor Ease', 0.03,
+		'Above the Noise Floor the flow fades back in over this much more speed (0 = a hard cut).', 0.0, 0.2)
+	ease.clampMin, ease.min = True, 0.0
+	gate = _glsl(comp, 'flow_gate', FLOW_GATE_SHADER, smooth)
+	gate.par.vec0name = 'uFloor'
+	gate.par.vec0valuex.expr = 'parent().par.Noisefloor'
+	gate.par.vec0valuey.expr = 'parent().par.Floorease'
+	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, gate)
 	flow_color.par.format = 'rgba8fixed'
 	flow_color.par.vec0name = 'uFullSpeed'
 	flow_color.par.vec0valuex.expr = 'parent().par.Colorfullspeed'
@@ -497,7 +519,7 @@ def _build_flow(comp):
 	output = comp.create('outTOP', 'out_color')
 	output.par.connectorder = 3
 	_connect(output, flow_color)
-	return smooth
+	return gate
 
 
 def _remapped(comp, source, remap, name):
@@ -632,9 +654,9 @@ def _layout(comp, spec):
 		if spec.get('remap'):
 			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
 		if spec.get('flow'):
-			positions.update({'flow': (2, 320), 'flow_feedback': (2, 460), 'flow_smooth': (3, 320), 'flow_color': (4, 460),
-				'overlay': (4, 320), 'out_color': (7, -700)})
-			docked = list(docked) + ['flow_pixel', 'flow_smooth_pixel', 'flow_color_pixel']
+			positions.update({'flow': (2, 320), 'flow_feedback': (2, 460), 'flow_smooth': (3, 320), 'flow_gate': (4, 320),
+				'flow_color': (4, 460), 'overlay': (5, 200), 'out_color': (7, -700)})
+			docked = list(docked) + ['flow_pixel', 'flow_smooth_pixel', 'flow_gate_pixel', 'flow_color_pixel']
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:

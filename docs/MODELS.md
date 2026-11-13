@@ -320,6 +320,10 @@ showing the last motion; a still image shows none.
   restarts the comparison instead of flashing huge motion. It's the mean difference between two
   frames (0-1): moving footage changes up to about 0.04 a frame, a cut 0.1-0.4. 0 turns it off.
 - **Flow Smoothing** (Model page, default 0.3): blends each new flow with the last; 0 is raw.
+- **Noise Floor** / **Floor Ease** (Model page, defaults 0.02 / 0.03 screen widths per second): the
+  model reports a little motion everywhere (about 0.01-0.05 on a still background). Speeds below
+  the floor become zero, and above it the flow fades back in over the ease, so slow real motion
+  doesn't pop on. 0 / 0 is the raw flow.
 
 TOP 3 shows the flow as color: the hue is the direction, the saturation the speed, white is still.
 **Color Full Speed** (Debug page) is the speed, in screen widths per second, shown fully

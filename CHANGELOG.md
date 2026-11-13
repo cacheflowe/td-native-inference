@@ -8,7 +8,10 @@
   frame pair: the previous distinct frame and this one (a repeated frame keeps the pair; Info CHOP
   `pair_interval` is the time between them; **Reset State** starts over). A scene change (or a
   video looping) above **Cut Threshold** restarts the pair instead of flashing huge motion; **Flow
-  Smoothing** steadies the output.
+  Smoothing** steadies the output, and **Noise Floor** / **Floor Ease** zero the model's baseline
+  noise on still areas, fading the flow back in above it. In VisionDemo, NeuFlow's layer shows the
+  color view or the flow data, and the demo composites in 32-bit float (8-bit clamped the flow's
+  negative values).
 - **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
   its depth, normals or matte.
 
