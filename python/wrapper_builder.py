@@ -440,15 +440,14 @@ void main()
 	fragColor = TDOutputSwizzle(vec4(f.rg * keep, f.ba));
 }
 '''
-FLOW_COLOR_SHADER = '''// Flow as color, like viewing the Optical Flow TOP: R = rightward, G = upward, scaled so uFullSpeed is
-// full brightness. Left and down (negative) and still show black.
-uniform float uFullSpeed;	// screen widths per second shown at full brightness
+FLOW_COLOR_SHADER = '''// The flow scaled for viewing: R = x, G = y, signed (32-bit float; left and down are negative), so
+// uFullSpeed reads as 1. Still is 0.
+uniform float uFullSpeed;	// screen widths per second shown as 1
 out vec4 fragColor;
 void main()
 {
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
-	vec2 c = clamp(f / max(uFullSpeed, 1e-4), 0.0, 1.0);
-	fragColor = TDOutputSwizzle(vec4(c, 0.0, 1.0));
+	fragColor = TDOutputSwizzle(vec4(f / max(uFullSpeed, 1e-4), 0.0, 1.0));
 }
 '''
 
@@ -469,7 +468,7 @@ def _build_flow(comp):
 	plugin's pair_interval (the measured time between the pair's frames; a project frame until known).
 	`flow_smooth`: Flow Smoothing over it (a Feedback TOP). `flow_gate`, the result (TOP 1): the Noise
 	Floor (after the smoothing, which steadies the speeds it compares). `flow_color` (TOP 3):
-	R = rightward, G = upward, like viewing the Optical Flow TOP (Color Full Speed on the Debug page)."""
+	the flow scaled so Color Full Speed (Debug page) reads as 1, signed (32-bit float)."""
 	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
 	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
 	flow.par.vec0name = 'uModelSize'
@@ -505,12 +504,11 @@ def _build_flow(comp):
 	gate.par.vec0valuex.expr = 'parent().par.Noisefloor'
 	gate.par.vec0valuey.expr = 'parent().par.Floorease'
 	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, gate)
-	flow_color.par.format = 'rgba8fixed'
 	flow_color.par.vec0name = 'uFullSpeed'
 	flow_color.par.vec0valuex.expr = 'parent().par.Colorfullspeed'
 	debug = next(page for page in comp.customPages if page.name == 'Debug')
 	_page_par(debug, 'Float', 'Colorfullspeed', 'Color Full Speed', 1.0,
-		'TOP 3 (the flow as color): the speed, in screen widths per second, shown at full brightness.', 0.05, 5.0)
+		'TOP 3 (the flow scaled for viewing): the speed, in screen widths per second, that reads as 1 (negative for left / down).', 0.05, 5.0)
 	output = comp.create('outTOP', 'out_color')
 	output.par.connectorder = 3
 	_connect(output, flow_color)
