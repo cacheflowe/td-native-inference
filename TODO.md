@@ -1,303 +1,128 @@
 # TODO: td-native-inference
 
-## Status (Nov 11, 2026)
+## Status (Nov 13, 2026)
 
-v0.2.5 published Nov 10: 13 video toxes + VisionDemo, three audio toxes + AudioDemo, the puppet
-lab (Mixamo body + rigged hand) in the dev project. Everything is generated from
-`wrappers/*.json`; clean-process tests; Apache-2.0 LICENSE and NOTICE; release tooling that
-bundles the redistributable models. The previous plan (Package Root, CPlusPlus TOP wrappers) is in
-git history before commit 7ddfb48. Performance lessons from v0.2.4/0.2.5:
-[docs/learnings/td-cook-performance.md](docs/learnings/td-cook-performance.md).
+v0.4.0 published Nov 12. It ships:
+- 14 video toxes plus VisionDemo, and three audio toxes plus AudioDemo;
+- MixamoPuppet and HandsGeometry;
+- four plugins: OnnxTOP, MediaPipeTOP, MediaPipeCHOP, and the new TrackerDAT.
 
-## Now (Nov 11 plan, in order) -- handoff state
+Every tox's tracking runs in C++ on the Tracker DAT ([docs/TODO-tracking-cpp.md](docs/TODO-tracking-cpp.md)),
+and video toxes have a Performance page. Everything is generated from `wrappers/*.json`. Releases
+follow [docs/RELEASING.md](docs/RELEASING.md), and the history is in [CHANGELOG.md](CHANGELOG.md) and git.
+Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-cook-performance.md).
 
-Work since v0.2.5 is **uncommitted** (both plugins' sources and READMEs, the bench tool, the lab
-test, `CLAUDE.md`, `TODO.md`, `docs/learnings/`, the `.toe`, the MODNet wrapper). TD was restarted
-Nov 11 on the new DLLs and the double-cook fix verified (below).
+## Now
 
-- [x] Learnings write-up: [docs/learnings/td-cook-performance.md](docs/learnings/td-cook-performance.md)
-      (GPU readback stall, Wait for Result / result_delay, cookEveryFrame double cooks, CHOP sample
-      rate, cooking-flag leaks, Python-in-TD limits, CUDA graph result).
-- [x] Demo model toggles: verified fine as they are (on -> off, and a freshly rebuilt demo, leave
-      0 cooks in switched-off wrappers over 60 frames). No code change.
-- [x] **Holistic double cooks: fixed and verified Nov 11** (0.6 cooks/frame on the 30 fps dancer clip, was 1.4; full wrapper lab: all 16 detect). Cause: both plugins set
-      `cookEveryFrame` while a result was pending (almost always with async readback), which adds a
-      cook of its own besides the input-triggered one: 168 cooks in 120 frames at a steady 60 fps.
-      Fix in `MediaPipeTOP.cpp` / `OnnxTOP.cpp` `getGeneralInfo()`: `cookEveryFrameIfAsked` only
-      (MediaPipe keeps `cookEveryFrame` while loading). To verify after the restart: sample
-      `holistic/inference.totalCooks` per frame in `/project1/PuppetLab` (expect 1 per frame on the
-      dancer clip), then run the full wrapper lab test (still images: results must still land, so
-      every wrapper should still detect). Optionally re-run the Wait for Result off check on an ONNX
-      model with a still input.
-- [x] Wrapper lab thumbnails: `THUMBNAILS = False` by default in `tests/td_wrapper_lab.py`; set it
-      True when preparing a release (noted in CLAUDE.md).
-- [x] ONNX Runtime launch cost: measured with `onnxtop_tool --graph` (new flag; the bench now
-      prints launch and inference separately). TensorRT CUDA graphs make `Run()` wait for the
-      replay, so the launch costs the whole inference: not offered in the plugin. The ~2.5 ms YOLO
-      launch is ORT's own CPU cost. New info channel `run_ms` (launch CPU time) on OnnxTOP.
-- [ ] **Matting (MODNet done, BiRefNet / RVM open).** MODNet: `wrappers/MODNet.json`, `tox/MODNet.tox`, icon, lab test + thumbnail, README / MODELS.md / manifest entries (Nov 11); still to do: clean-process test and bundling check at release. Downloaded (gitignored) and benchmarked:
-  - MODNet, `models/onnx/modnet/modnet.onnx`, from Xenova/modnet on Hugging Face (Apache-2.0,
-    25 MB fp32; also `model_fp16.onnx` 13 MB). Input `input` [1, 3, H, W] float32 (dynamic H/W,
-    multiples of 32), output `output` [1, 1, H, W] alpha 0-1. MODNet normalizes the input to
-    -1..1 (OnnxTOP Input Normalization = Signed; check against the reference). TensorRT fp16 p50:
-    1.8 ms at 512x288, 4.6 ms at 1024x576; launch 1.1-1.4 ms. First TensorRT build ~2 min per size.
-    Next: a `wrappers/MODNet.json` like DepthAnything's (Raw mode, Dynamic Size, Raw Map To Input
-    on, no Raw Normalize since the output is already 0-1), `models/README.md` + `fetch_models.ps1`
-    entry (redistributable: can be bundled), then the lab test and a thumbnail.
-    Live check (Nov 11): the matte is very good, but MODNet is sensitive to motion blur and moving
-    subjects (per-frame, no temporal state). RVM's recurrent state is the fix; a cheap stopgap is
-    temporal smoothing of the matte.
-  - **BiRefNet: dropped (Nov 11)** as too slow (92 ms) with an enormous TensorRT engine (304 MB, 22 min build); engine deleted, not wrapped. Notes kept for reference:
-  - BiRefNet lite, `models/onnx/birefnet/birefnet_lite.onnx`, from onnx-community/BiRefNet_lite-ONNX
-    (MIT, 224 MB fp32 / 115 MB fp16; the full BiRefNet is 973 MB). Higher quality, much heavier
-    (1024x1024). **Benchmarked Nov 11** (RTX 4090 laptop, TensorRT fp16): input `input_image`
-    [1, 3, 1024, 1024] (fixed size), output `output_image` [1, 1, 1024, 1024]; TensorRT accepts the
-    graph. **92 ms p50** per frame (launch 3.5 ms): about 10 fps, so a stills / quality option, not
-    real time. The first engine build took **22 minutes** and 7.5 GB of RAM (the Auto provider would
-    run CUDA meanwhile). Not wrapped yet; quality vs MODNet / RVM not compared (ImageNet
-    normalization, Raw index 0, fixed 1024 input).
-- [x] **RVM (Nov 11).** `OnnxEngine` pairs `<x>i`/`<x>o` as recurrent state (zero start, output rebound
-      as the next input, no readback), a lone `[1]` float input is the new **Scalar Input**
-      (`downsample_ratio`), plus a **Reset State** pulse. `wrappers/RVM.json` (CUDA provider: the state
-      changes shape after frame 1, which TensorRT would rebuild for; Raw index 1 = `pha`),
-      `fetch_models.ps1` entry behind a GPL prompt (never bundled). Bench: 3.5 ms p50 at 1024x576. On
-      the fast les-twins clip it flickers about 2.4x less than MODNet (pixels flipping and flipping
-      back: 1.2% vs 2.7%; second difference 0.104 vs 0.171); equal on the calm dancer clip. Edges are
-      softer than MODNet's (downsample 0.25). Open: try fp16 / TensorRT with a fixed-size state
-      export, `rvm_resnet50`, and use `fgr` (foreground colour) as a second output.
-- [x] Puppets: `MixamoPuppet` tox (Nov 11): `python/puppet_builder.py` + `puppet_runtime.py`, `scripts/build_puppet_tox.py`.
-      In TOP + tracks DAT in, FBX File par imports and binds the character at runtime (the tox carries none:
-      Mixamo license), outputs character render / over image / bone CHOP. Checked: exported tox dropped in
-      fresh, FBX set -> 65 bones bound, same placement as the lab. Open: hand-rig variant, joint limits.
-- [x] `HandsGeometry` tox (Nov 11): the lab's POP hand geometry (spheres + cylinders from a hands joints DAT) with a
-      render rig, `scripts/build_hands_tox.py`; checked as a fresh drop-in on the hand clip. POP-capable TD only.
-- [x] A short user manual (Nov 11, `docs/MANUAL.md`, with a Puppets section): what each tox does, how to wire it, its main parameters and outputs,
-      and how the pieces work (trackers, Wait for Result / result_delay, debug overlays).
-- [ ] RTMPose for puppets: plain RTMPose / RTMW is 2D only, which the Mixamo solver can't use. The
-      candidate is **RTMW3D** (MMPose projects/rtmpose3d, 2024, Apache-2.0): 133 whole-body
-      keypoints in 2D and 3D, multi-person, top-down (person detector, then one run per person,
-      384x288, ~65M params for -L). Likely lower CPU load than Holistic (GPU via TensorRT) and
-      multi-person, but coarser fingers (hands from the full-body crop) and a 68-point face. No
-      official ONNX export: step one is exporting it and timing it with `onnxtop_tool`, before
-      any plugin work (SimCC decoder in the crops path, a 133-keypoint name map for the solver).
-      **RTMW3D-X measured Nov 11: viable, ~5x faster than Holistic.** No export needed: an Apache-2.0
-      ONNX of the X variant exists (`Soykaf/RTMW3D-x` on Hugging Face, 369 MB, the one `rtmlib` uses;
-      L is only published as .pth). `models/onnx/rtmw3d/rtmw3d-x.onnx`: input [1, 3, 384, 288] (RGB,
-      ImageNet mean/std on 0-255), outputs `output` [1, 133, 576] (simcc_x), `1554` [1, 133, 768]
-      (simcc_y), `1556` [1, 133, 576] (simcc_z). Decode (from rtmlib): argmax per axis / 2 (simcc split
-      ratio), x, y in crop px, z = (kz / 192 - 1) * 2.1744869 (relative to the root, not metric).
-      TensorRT fp16: **4.15 ms p50** (launch 1.6 ms), engine build 6.7 min, engine 184 MB; Holistic
-      reads 23 ms on the dancer clip (CPU). Quality, warrior photo, crop from the MODNet matte: 2D
-      points sit correctly on the person (body, feet, face); **limb directions vs Holistic world
-      landmarks: 9.4 deg mean, 18 deg worst (a forearm)** after an axis map (x = x, y = -y, z = -z).
-      One photo, and it includes Holistic's own error. Weak spot: fingers (hands are tiny in the 288 px
-      full-body crop), so the likely design is RTMW3D for the body + MediaPipe Hands for the fingers.
-      Plan: (1) "Pose Crops" mode in OnnxTOP: YOLO26 person boxes -> affine crops (padding 1.25, aspect
-      3:4) -> RTMW3D -> SimCC decode kernel (3 heads) -> image + 3D coords per keypoint; (2) a name map
-      from COCO-WholeBody 133 to the MediaPipe pose / hand names the trackers and `mixamo_retarget` use
-      (world landmarks in metres, hip origin, y up: needs the axis map and a scale from the body's
-      proportions); (3) re-check bone rotations on clips against Holistic, fingers via Hands.
-      **Pipeline built Nov 12 (experimental, not in the release or the demos yet).** OnnxTOP Output Mode
-      **Pose Crops**: person boxes from a Crop DAT grown to the model's aspect (unclamped, black outside
-      the image), batch-1 models run once per person, GPU SimCC argmax, Info DAT `kp{i}_u/v/c`, `kp{i}_z`,
-      `crop_w`, `crop_h`; matches a NumPy decode of the same photo within 1.2 px mean. `wrappers/RTMW3D.json`:
-      nested Yolo26Detect (people only) -> crop_boxes -> inference -> `rtmw_info` (`python/rtmw_convert.py`:
-      133 COCO-WholeBody -> Holistic's pose + hands, 75 points, metric world from bone-length scaling) ->
-      tracker mode `rtmw` (skeleton `RTMW_BODY`). Tests: `tests/test_rtmw_convert.py`. MixamoPuppet runs
-      from its tracks unchanged.
-      Results: dancer clip **3.4 ms** RTMW3D vs **18.1 ms** Holistic (median infer_ms); warrior photo limb
-      directions vs Holistic 4-21 deg. **Open problems:** (1) head yaw: RTMW3D's ear / eye depths come out
-      reversed vs Holistic on the warrior photo (Holistic is right there), so the head turns the wrong way;
-      flipping z fixes the head but worsens the limbs, so it's the face depth, not the axis. Try deriving the
-      head turn from 2D face points (ears vs nose) instead of z, or weight the head from the shoulders.
-      (2) An occasional limb glitch on the dancer clip (one of four sampled frames leaned badly). (3) Fingers
-      are coarse (full-body crop): plan MediaPipe Hands for fingers. (4) The world scale is per frame
-      (bone-length median): smooth it. (5) Before shipping: fetch_models entries for RTMW3D-X (Apache-2.0,
-      369 MB), demos, docs, a clean-process test.
-      **Nov 12 review of the clip comparison:** RTMW3D's 3D is clearly worse than Holistic's world landmarks:
-      out-of-frame feet land inverted at the crop edge (SimCC can only place a point inside the crop; gate
-      by score), and arms go through or behind the torso where Holistic has them in front. Its 2D is
-      strong; its z head is weak. Puppets stay on Holistic; next step is Holistic's own models as ONNX on
-      the GPU (below). RTMW3D stays useful for multi-person 2D whole-body.
-      **Keep the RTMPose family as an alternate pose model** next to YOLO pose / MediaPipe Pose (user, Nov
-      12): ship the RTMW3D wrapper (2D whole-body, multi-person) and consider RTMPose-m (17 points, 2.4 ms)
-      and RTMW-l as wrappers too; Pose Crops already runs all three.
-      **Holistic on the GPU, stage 1 done Nov 12.** Qualcomm AI Hub's Hugging Face exports are a dead end
-      (zmurez MediaPipePyTorch port: 25-point upper-body pose, no world landmarks). Instead
-      `scripts/convert_holistic_onnx.py` converts the landmark models inside `holistic_landmarker.task`
-      (tf2onnx, NCHW `image` input, segmentation output dropped) into `models/onnx/mediapipe_holistic/`:
-      outputs match TFLite to float32 rounding (world landmarks within 5e-6). The pose detector won't
-      convert (sparse DENSIFY weights): use YOLO26. TensorRT fp16 p50, batch 1: pose landmarks 0.66 ms
-      (195 = 39 x [x, y, z, visibility, presence] in 256 px crop space; world `Identity_4` 39 x 3 m;
-      heatmap 64x64x39), hand ROI refinement 0.51 ms, hand landmarks 0.50 ms (224 px; world `Identity_3`),
-      face landmarks 0.65 ms (192 px, 468 x 3). One person with both hands and a face is about 3.3 ms of
-      inference vs CPU Holistic's 18 ms. Engine builds 70-115 s each. Still to check: fp16 vs fp32 output
-      drift. Next (stage 2): rotated crops in the crop kernel, a "crop then regress" OnnxTOP output mode,
-      MediaPipe's ROI logic (previous-frame tracking, alignment points, world rotation) in Python, output
-      in the Holistic table format so the tracker and MixamoPuppet run unchanged.
-      **Stage 2 working Nov 12 (uncommitted, lab only).** OnnxTOP mode `landmarkcrops` (rotated MediaPipe
-      NormalizedRects from the Crop DAT, edge-replicated like ImageToTensor; every output <= 4096 values per
-      crop goes to the Info DAT raw as `o{k}_{i}`). `python/holistic_onnx.py` reimplements Holistic's ROI
-      logic (pose tracking from the alignment points, hand ROI from pose + recrop model + RoiTracking, face
-      ROI from pose points + mesh tracking) and outputs MediaPipeTOP's Holistic table (553 points, world for
-      75; hand world moved onto the pose wrist, as Holistic does). Test network: `/project1/HolisticLab`
-      (CPlusPlus TOPs on a renamed copy of the new DLL, `cpp/OnnxTOP/build/OnnxTOP_dev1.dll`; a reference
-      MediapipeTOP `mp`). vs CPU Holistic: warrior photo pose 6 px / world 1.7 cm, hands 2.4-2.9 px / world
-      1.6-2.6 cm; face photo mesh 0.7 px. Dancer clip (150 frames): pose 12.5 px median (MediaPipe smooths,
-      we don't), hands 3.2-3.4 px, face 2.1 px; presence agrees except at the threshold. Main-thread cost
-      10.9 ms (4 sync OnnxTOPs ~1.5-1.9 ms each, Python ~4.5 ms: `merge` 2.2, pose decode 1.1) vs 20 ms for
-      MediapipeTOP with Wait for Result. Deviations: no heatmap refinement (feet up to ~14 px), no BlazeFace
-      face detector in the face recrop (pose face points instead), no MediaPipe landmark smoothing. Next:
-      move decode + ROI logic into C++ (one "Holistic" OnnxTOP mode running all models: no Info DAT
-      round trips, the Python cost goes away), heatmap refinement, a wrapper + tracker wiring, MixamoPuppet
-      test, fetch_models entry (the converted models are Apache-2.0: ship or convert on install).
-      **Stage 3 (C++ Holistic mode) working Nov 12.** OnnxTOP Output Mode `holistic`: Model = the pose model,
-      the other three load from its folder as companion engines (the loader now handles a main engine plus
-      companions, built / upgraded together); `Holistic.cpp` ports the Python ROI logic plus the heatmap
-      refinement; three stages with one GPU sync each. vs CPU Holistic: photo pose 2.3-2.6 px, hands 2-4 px,
-      face 0.6-0.7 px; dancer clip pose 9.7 px median, hands 3.1-3.6, face 2.3. **5.7 ms** per frame (p90 7.2)
-      vs 20.6 ms for MediapipeTOP with Wait for Result. Wrapper spec `MediaPipeHolisticGPU` (nested
-      Yolo26Detect, tracker `mp_holistic`); builder's detector path now takes an optional "converter"
-      (RTMW3D: rtmw_convert). To do: build the wrapper after a TD restart, MixamoPuppet test, demos,
-      README thumbnail, clean-process test. `python/holistic_onnx.py` (the Landmark Crops prototype) can go
-      once the C++ path is proven.
-      **Pinned: dedicated head-pose models**, for a face crop, if landmark-based head pose falls short:
-      6DRepNet (rotation matrix out, about 4 deg MAE on AFLW2000, comparable to landmark fitting, not
-      clearly better than face mesh) and WHENet (full 360 deg yaw, works on the back of the head: the
-      real win for installations where people turn away). Both would need a "crop then regress" OnnxTOP
-      mode. Licenses unchecked.
-      **2D benchmark done Nov 11** (the RTMW3D export is still to do). TensorRT fp16, models in
-      `models/onnx/rtmpose/` (OpenMMLab `onnx_sdk` zips, gitignored): 256x192 crops, dynamic batch,
-      SimCC outputs `simcc_x` [N, K, 384] / `simcc_y` [N, K, 512].
+- [ ] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
+      [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd). `cpp/Puppet`:
+      core, replay library, offline equivalence test, then `PuppetCHOP.dll` and the tox switch. After
+      that, rotation smoothing, body joint limits and side-on flip rejection.
+- [ ] Retire the Python tracker once v0.4.0 has been in use for a while: delete the modules, make the
+      recorded C++ tables the fixtures, and build the Tracking pages without importing
+      `onnxtop_tables`. Same for the Python puppet solver after its port.
+- [ ] Remove `python/holistic_onnx.py` (the Landmark Crops prototype; the C++ Holistic mode replaced it).
 
-      | Model | Keypoints | batch 1 p50 | batch 4 p50 | engine build |
-      |---|---|---|---|---|
-      | RTMPose-m body7 | 17 | 2.4 ms | 1.8 ms | 3.2 / 3.4 min |
-      | RTMW-l (cocktail14) | 133 | 3.6 ms | 10.0 ms | 5.4 / 5.8 min |
+## Speed
 
-      Batch-4 numbers are noisy (p95 up to 50 ms, one 600 ms outlier; the GPU was shared). Cost is
-      roughly linear in people, about 2.5-3.6 ms each for 133 keypoints, on top of a detector. Each
-      batch size is its own static engine (a dynamic-batch profile would avoid that). The OpenMMLab
-      YOLOX-m detector (NMS inside the graph) does not run on TensorRT (`TopK K exceeds 3840`) and
-      falls back to CUDA at 95 ms, so the NMS-free YOLO26 detect (AGPL, fetched) would be the person
-      detector. Verdict for 2D multi-person whole-body keypoints: worth building (a "Pose Crops" mode
-      next to Classify Crops: YOLO26 boxes -> crops -> RTMW -> SimCC argmax per keypoint -> image
-      coordinates, confidence from the peak). Still no 3D world landmarks, so puppets stay on
-      Holistic unless RTMW3D exports cleanly. The RTMW weights' dataset terms are unchecked.
+- [ ] **Debug overlay:** now the largest per-frame main-thread cost in Holistic GPU after the
+      plugin: 0.7-1.3 ms, mostly DebugBB's Render TOP and a Select DAT. It's network work in
+      `tox/shared/DebugBB.tox`, not C++.
+- [ ] Hand decoded detections from the TOP to the tracker in binary (an in-process registry) to
+      skip the Info DAT strings.
+- [ ] `write_instance_colors` (Seg wrappers, Instances encoding) is still Python; small.
 
-## Next: more model types
+## Puppets
 
-- [ ] **DAViD (Microsoft, MIT) wrappers, Nov 12, built after a TD restart.** Human normals / depth / matte
-      (ViT-B, ~10 ms each, TensorRT FP16) and the multi-task ViT-L (all three, 21 ms). OnnxTOP gained
-      Letterbox Padding = Edge Pixels (DAViD's own padding; gray bars left stripes along the outputs) and
-      Raw **All Outputs** (other outputs in color buffers 1, 2, ... for Render Select). Builder: spec
-      `remap` (Math TOP gain / offset on the result) and `extra_outputs` (buffers as TOPs 3, 4, ...).
-      Specs DAViDNormals / DAViDMatte / DAViDHuman; models via fetch_models (2.3 GB, asks). DAViDDepth
-      (ViT-B) dropped: its output spans ~0.419-0.426, banded in FP16, 43 ms in FP32; depth comes from
-      DAViDHuman (near = large there, no flip needed).
-      Remaining edge lines at the image's real left / right borders are the model's (background only).
-      Ideas: run on a person crop (YOLO box) so small people get the full 512 px; mask normals / depth
-      with the matte inside the wrapper; a relighting example.
+See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 
-Wrappers come in three inputs: `video` (In TOP; trackers + overlays), `audio` (In CHOP; kinds
-`transcript`, `scores`) and `text` (In DAT; kind `speech`), all from `wrappers/*.json`.
-
-- [x] **Audio (v0.2)**: `cpp/MediaPipeCHOP` (Custom CHOP `MediapipeaudioCHOP`) wraps MediaPipe
-      1.2.2's audio tasks from `libmediapipe.dll`: Classify Sounds (YAMNet), Transcribe Speech
-      (AudioTranscriber, `.litertlm` from litert-community) and Speak Text (TextToSpeech, Kokoro).
-      Toxes `MediaPipeSoundClassifier`, `MediaPipeSpeechToText`, `MediaPipeTextToSpeech` and
-      `AudioDemo`, lab-tested; offline tools `audio_test`, `asr_test`, `tts_test`.
-- [x] v0.2 release (v0.2.0-v0.2.5 published Nov 8-10).
-- [ ] Speech to text: try parakeet-tdt (615 MB, CC-BY-4.0) and Qwen3-ASR (960 MB, Apache-2.0);
-      a fetch for the large ones. Moonshine sometimes mishears ("pay" for "fade").
-- [ ] Text to speech: word timestamps (`MpTextToSpeechComputeWordTimestamps`) for read-along
-      captions; a voice menu; Qwen3-TTS or other `.litertlm` voices.
-- [ ] Audio embedder (`MpAudioEmbedder*`): same plugin, another task. Merge MpAudio's loader with
-      MediaPipeTOP's MpApi into `cpp/common/`.
-- [ ] Also exported and cheap to add: MediaPipe text classifier/embedder, language detector,
-      object detector, image classifier/embedder, interactive segmenter.
-- [ ] Other ONNX candidates: RF-DETR (Apache-2.0); RTMPose / RTMW whole-body pose (133 keypoints;
-      top-down: needs person crops, like Classify Crops); MODNet / BiRefNet / RVM matting (above);
-      Real-ESRGAN upscaling and fast style transfer (Raw mode); Segment Anything (MobileSAM /
-      EfficientSAM: needs prompt inputs) and RAFT optical flow (needs two frames). Check each
-      license before bundling.
-
-## Dev vs installed plugins
-
-- [x] Switching: `scripts\plugins.ps1 dev|install|status` (Nov 9) moves the installed binaries
-      aside or copies the local build in; models stay put. README says "one install per machine".
-- [ ] A tox/plugin version check that warns on a mismatch (an installed dev build still reports
-      the last `VERSION`).
-
-## Puppeteering a rigged character (MediaPipe Holistic, single person)
-
-Target: a Mixamo-rigged FBX COMP in TouchDesigner, driven by one tracked person.
-
-- [x] **World landmarks out of the tox** (Nov 9). **World Landmark Columns** on the Pose and
-      Holistic Model pages; `<joint>_wx/_wy/_wz` columns and channels in metres, TD axes (y up,
-      +z toward the camera), hip origin, smoothed, unseen hands hold. Holistic's hands turned out
-      to be in body space already (hand wrist = body wrist), so no attaching step.
-- [x] **Bone rotations for Mixamo** (Nov 9, first pass). `python/mixamo_retarget.py` (numpy,
-      `tests/test_retarget.py`): per bone a primary direction plus a roll hint, measured the same
-      way on the rest skeleton; a weak hint (straight arm) falls back to the parent's turn plus
-      the shortest swing; spine and neck blend between hips, chest and head. ~1 ms per frame.
-- [x] **Drive the FBX COMP** (lab). `scripts/lab/build_puppet.py` builds `/project1/PuppetLab`:
-      clip or webcam -> Holistic -> solver Script CHOP -> every bone's rx/ry/rz bound to it ->
-      render. Checked on `build/pose.jpg` (warrior pose matches). Since Nov 10 the solver lives in
-      `python/puppet_solver.py`, and the lab has controls on its Puppet page and two paths (body,
-      hand) in labelled network boxes.
-- [x] **Over Image placement** (Nov 10). `mixamo_retarget.place()`: the root translation that
-      lays the posed model's joints over the 2D keypoints, by least squares, for a camera at the
-      origin with an assumed horizontal FOV (Image FOV). Smoothed (Placement Smoothing).
-- [x] **Rigged hand** (Nov 10). `python/hand_retarget.py` maps MediaPipe hand landmarks onto a
-      Blender-style hand rig (handRig_02.fbx: `pulse`, `hand`, `<finger>_base/_01.._03`), with
-      its own close-up clip and MediaPipe Hands tracker in the lab. Either hand drives the one-hand
-      model (the other side mirrored, sx = -1). Tests: `tests/test_hand_retarget.py` (needs
-      `build/hand_rest.json`, dumped from the lab's hand FBX COMP).
-- [ ] Hand: on a mirrored (selfie) webcam image the left/right labels name the mirrored hand; the
-      model then mirrors the right way for the image, but Tracked Hand Right/Left picks the other
-      hand. A Mirror toggle could swap them.
-- [ ] Over Image: the FOV is a guess per video; could be estimated from the person's known
+- [ ] Rotation smoothing (slerp) and body joint limits (no backward elbows or knees). The hand rig
+      already has finger hinge limits. Planned in C++, after the port.
+- [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject a
+      frame whose hip line flips faster than a person can turn.
+- [ ] Tune live with a webcam:
+      - head yaw and pitch (they look under-turned);
+      - whether the forearm should take only part of the hand's twist;
+      - foot roll.
+- [ ] Hand on a mirrored (selfie) webcam: the left/right labels name the mirrored hand, so Tracked
+      Hand Right/Left picks the other hand. A Mirror toggle could swap them. Also a hand-rig variant
+      of the tox.
+- [ ] Over Image: the FOV is a guess per video; it could be estimated from the person's known
       proportions over a few frames.
-- [ ] Tune live with a webcam: head yaw/pitch (looks under-turned), whether the forearm should
-      take only part of the hand's twist, foot roll.
-- [ ] Rotation smoothing (slerp) and joint limits (no backward elbows/knees); for now only the
-      tracker's position smoothing. The hand rig already has finger hinge limits
-      (`hand_retarget.FINGER_LIMITS`).
-- [ ] Full pose model in Holistic: repack `holistic_landmarker.task` with
-      `pose_landmarker_full`'s landmark model (Holistic ships the lite one); steadier, ~2x slower.
-- [x] Hips translation: Over Image placement (above) moves the character with the person.
-- [ ] Side-on people: MediaPipe swaps left and right, turning the character 180°. Maybe reject
-      a frame whose hip line flips faster than a person can turn.
-- [x] Package (done, see Now): a `MixamoPuppet` tox generated like the wrappers. Easiest use: drop it in, set
-      its FBX file (any Mixamo character) and point it at a Holistic / Pose tox; it imports the
-      FBX inside, captures the rest pose, binds the bones and renders (or exposes the FBX COMP for
-      your own render). Pars: Mirror, Placement (Center / Over Image), Image FOV, smoothing,
-      joint limits. A hand variant for Blender-style hand rigs.
-- [ ] Face: Holistic's blendshapes could drive a Mixamo face only if the character has matching
-      shape keys (ARKit names); out of scope until a character needs it.
+- [ ] Other humanoid rigs: a bone-name map table instead of Mixamo names.
+- [ ] Full pose model in Holistic: repack `holistic_landmarker.task` with `pose_landmarker_full`'s
+      landmark model (Holistic ships the lite one). Steadier, about 2x slower.
+- [ ] Face: Holistic's blendshapes could drive a face only with matching (ARKit-named) shape keys;
+      out of scope until a character needs it.
 
-## Tracking (area of interest)
+## Models
 
-- [ ] **Port the tracker to C++** (planned Nov 12, 2026): a `TrackerDAT` plugin replacing the
-      tracker COMP's three Script DATs, ~4.5 ms -> ~0.5 ms per frame for Holistic. Plan, behavior
-      inventory and phases: [docs/TODO-tracking-cpp.md](docs/TODO-tracking-cpp.md).
+- [ ] **RTMW3D** (`wrappers/RTMW3D.json`, experimental, `"demo": false`, not shipped):
+      - **What it's good for:** multi-person 2D whole-body. Its 3D is clearly worse than Holistic's,
+        so puppets stay on Holistic: out-of-frame feet land inverted at the crop edge (gate by
+        score), arms go behind the torso, and head yaw comes from reversed face depth.
+      - **Fixes:** derive head yaw from the 2D ears versus the nose, and smooth the world scale.
+      - **Before shipping:** a fetch_models entry (RTMW3D-X, Apache-2.0, 369 MB), demos, docs, and
+        a clean-process test.
+- [ ] RTMPose-m (17 points, 2.4 ms) and RTMW-l (133 points, 3.6 ms) wrappers: Pose Crops already
+      runs both. The RTMW weights' dataset terms are unchecked.
+- [ ] Pinned: dedicated head-pose models for face crops, if landmark head pose falls short:
+      - **6DRepNet:** about 4° MAE.
+      - **WHENet:** full 360° yaw, including the back of the head.
 
-- [ ] The Python tracker (`python/object_tracker.py`, `*_tracker_pipeline.py`) is ByteTrack-based
-      with our own changes (keypoint-distance matching, scale-relative matching, coast, presence,
-      gesture debounce). Revisit after real-world testing of the scale-relative default; open
-      questions to be collected from that testing.
+      Both need a "crop then regress" mode. Licenses unchecked.
+- [ ] RVM: fp16 / TensorRT with a fixed-size state export, `rvm_resnet50`, and `fgr` (foreground
+      color) as a second output.
+- [ ] DAViD on a person crop (YOLO box), so small people get the full 512 px. Also: mask normals and
+      depth with the matte inside the wrapper, and a relighting example.
+- [ ] Other ONNX candidates (check each license before bundling):
+      - RF-DETR (Apache-2.0);
+      - Real-ESRGAN upscaling and fast style transfer (Raw mode);
+      - MobileSAM / EfficientSAM (needs prompt inputs);
+      - RAFT optical flow (needs two frames).
+- [ ] Also exported by MediaPipe and cheap to add: text classifier / embedder, language detector,
+      object detector, image classifier / embedder, interactive segmenter.
+
+## Audio
+
+- [ ] Speech to text: try parakeet-tdt (615 MB, CC-BY-4.0) and Qwen3-ASR (960 MB, Apache-2.0), with
+      a fetch entry for the large ones. Moonshine sometimes mishears ("pay" for "fade").
+- [ ] Text to speech: word timestamps (`MpTextToSpeechComputeWordTimestamps`) for read-along
+      captions; a voice menu; other `.litertlm` voices.
+- [ ] Audio embedder (`MpAudioEmbedder*`): another task in the same plugin. At the same time, merge
+      MpAudio's loader with MediaPipeTOP's MpApi into `cpp/common/`.
+
+## Tracking
+
+- [ ] The tracker is ByteTrack-based with our own changes:
+      - keypoint-distance and scale-relative matching;
+      - coasting, presence, gesture debounce.
+
+      Revisit after real-world testing of the scale-relative default.
 
 ## Housekeeping
 
-- [x] Nov 10: async GPU readback in both plugins, Wait for Result / Max Wait, `result_delay`,
-      cheaper Info DATs, trackers apply a result once and snap back after a gap, Sound Classifier
-      output at the timeline rate, the wrapper lab restores its Cooking flag.
-
-- [x] Retired `/project1/ONNX_Native` and `python/mediapipe_hands_component.py` (Nov 7).
-- [x] Deleted the stale `cache/trt/` engine folder (Nov 7); `.gitattributes` added.
+- [ ] A tox/plugin version check that warns on a mismatch (an installed dev build still reports the
+      last `VERSION`).
 - [ ] TensorRT cache: a per-user cache (`%LOCALAPPDATA%`) keyed by model content, for read-only
-      installs. Today it's `trt_cache/` next to each model, which is writable in Documents.
-- [x] Plugins compile in the version from `VERSION`; `package` checks it.
+      installs. Today it's `trt_cache/` next to each model.
 - [ ] CI build (GitHub Actions, CUDA toolkit).
 - [ ] haxlib side: point its scripts at this repo's Python or keep a copy; remove its `cpp/`.
+- [ ] TD exits silently now and then (twice on Nov 12, no dump; Windows logged `RADAR_PRE_LEAK_64`).
+      Not reproduced. This dev machine has two unstable P-cores, so random crashes here can be
+      hardware.
+
+## Reference: measurements worth keeping
+
+RTMPose 2D on TensorRT fp16, 256x192 crops (OpenMMLab `onnx_sdk` exports):
+
+| Model | Keypoints | batch 1 p50 | batch 4 p50 | engine build |
+|---|---|---|---|---|
+| RTMPose-m body7 | 17 | 2.4 ms | 1.8 ms | 3.2 / 3.4 min |
+| RTMW-l (cocktail14) | 133 | 3.6 ms | 10.0 ms | 5.4 / 5.8 min |
+
+**Dropped:**
+- **BiRefNet lite** (Nov 11): 92 ms per frame, a 304 MB engine and a 22-minute build.
+- **DAViDDepth (ViT-B):** banded in fp16, 43 ms in fp32. DAViDHuman's depth is used instead.
+- **OpenMMLab's YOLOX-m detector:** doesn't run on TensorRT (`TopK K exceeds 3840`); YOLO26 is the
+  person detector.

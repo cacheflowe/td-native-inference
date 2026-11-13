@@ -156,7 +156,7 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done |
 | 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert` (`write_instance_colors` stays Python); the Performance page | done |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
-| 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++ | 2 sessions |
+| 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++: design in [PUPPETS.md](PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd) | 2 sessions |
 
 Later, separately: hand the decoded detections from the TOP to the tracker in binary (in-process
 registry) to skip the Info DAT strings entirely.
@@ -175,7 +175,7 @@ moves to C++; event-driven or once-per-build code stays Python.
 | `rtmw_convert` | RTMW3D: reshapes the Pose Crops Info DAT for the tracker | not measured (75 points a person, a full table pass in Python) | Phase 4: the Tracker DAT reads RTMW3D's layout directly, the Script DAT goes |
 | `write_instance_colors` (`wrapper_runtime`) | Seg wrappers, Matte Encoding = Instances: one color per object | small | Phase 4, with the box tracker's outputs |
 | Puppet solver (`puppet_solver` + `mixamo_retarget`) | `MixamoPuppet.tox` | **2.7 ms** per body solve | Phase 6: a C++ CHOP; capturing the rig from the FBX COMP stays Python (once per character) and hands the rest pose over as a table |
-| Hand puppet (`hand_retarget`) | `HandsGeometry.tox` | small per solve | Phase 6 |
+| Hand puppet (`hand_retarget`) | the PuppetLab's rigged hand (no tox yet) | small per solve | Phase 6 |
 | Stays Python | `wrapper_builder`, `puppet_builder` (build time), `wrapper_runtime` model controls and pulses, `puppet_runtime` (character loading), the demos' `model_controls`, Holistic GPU's `detector_gate` (one comparison per frame), the audio wrappers' caption / event / top-results scripts (per new line of text, a few rows) | - | - |
 
 Not Python, but now the largest per-frame costs after inference in the Holistic GPU wrapper: the

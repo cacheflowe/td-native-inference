@@ -195,8 +195,8 @@ where faces are, not their shape. MediaPipe (BlazeFace short range), Apache-2.0.
 ### MediaPipe Holistic (`MediaPipeHolistic.tox`)
 One person: body, both hands and the face mesh in one model (75 tracked joints plus face).
 **Blendshapes** adds the face expression scores. Heavier than Pose. **Face Mesh** (Tracking page)
-off leaves the face out of the tables: MediaPipe still runs it, but the tracker's Python drops from
-about 4.5 ms to 1.2 ms. MediaPipe, Apache-2.0.
+off leaves the face out of the tables: MediaPipe still runs it, but the tracker drops from about
+1.4 ms to 0.5 ms per frame. MediaPipe, Apache-2.0.
 
 ### MediaPipe Holistic GPU (`MediaPipeHolisticGPU.tox`)
 The same models as MediaPipe Holistic, converted to ONNX and run on the GPU by OnnxTOP, with

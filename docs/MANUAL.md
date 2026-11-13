@@ -352,4 +352,6 @@ input image (Over Image) or the render alone (Center); the CHOP carries every bo
 - The solver needs a Mixamo skeleton (`mixamorig_` bones). Other humanoid rigs aren't supported yet.
 - Rotation smoothing and joint limits aren't in yet: only the tracker's position smoothing applies.
   The rigged-hand variant and a webcam Mirror toggle are open items in `TODO.md`.
+- How the solver turns landmarks into bone rotations, and its known limits:
+  [PUPPETS.md](PUPPETS.md).
 

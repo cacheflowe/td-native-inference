@@ -123,9 +123,10 @@ frame rate meanwhile); after that it loads in seconds.
 
 ## Development
 
-The repo holds the plugins' C++ sources (`cpp/OnnxTOP`, `cpp/MediaPipeTOP`, `cpp/MediaPipeCHOP`),
-the shared Python tracking code (`python/`), the debug visualizers (`tox/shared/`) and the dev
-project `td-native-inference.toe`. Each model tox is generated from a spec in `wrappers/` by
+The repo holds the plugins' C++ sources (`cpp/OnnxTOP`, `cpp/MediaPipeTOP`, `cpp/MediaPipeCHOP`,
+and the tracker in `cpp/Tracking`), the builders and the puppet solver (`python/`; how the puppets
+work: [docs/PUPPETS.md](docs/PUPPETS.md)), the debug visualizers (`tox/shared/`) and the dev project
+`td-native-inference.toe`. Each model tox is generated from a spec in `wrappers/` by
 `python/wrapper_builder.py`, with a node icon from `scripts/build_icons.py`.
 [CLAUDE.md](CLAUDE.md) covers building, regenerating and testing; [docs/RELEASING.md](docs/RELEASING.md)
 covers releases. Plugin parameters in depth: [cpp/OnnxTOP/README.md](cpp/OnnxTOP/README.md),
@@ -133,7 +134,7 @@ covers releases. Plugin parameters in depth: [cpp/OnnxTOP/README.md](cpp/OnnxTOP
 
 Building the plugins needs the CUDA Toolkit 12.x, CMake 3.24+, Ninja and an MSVC toolset your CUDA
 supports (CUDA before 12.4 needs MSVC v142): run `cpp\OnnxTOP\build.cmd`,
-`cpp\MediaPipeTOP\build.cmd` and `cpp\MediaPipeCHOP\build.cmd`. Models for a source checkout go in
+`cpp\MediaPipeTOP\build.cmd`, `cpp\MediaPipeCHOP\build.cmd` and `cpp\Tracking\build.cmd`. Models for a source checkout go in
 `models/` (see [models/README.md](models/README.md)).
 
 The build lands in `plugins/`, which TouchDesigner scans as the dev project's own Plugins folder. If a
