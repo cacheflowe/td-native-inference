@@ -14,7 +14,7 @@ import importlib
 import sys
 from pathlib import Path
 
-ONLY = ['holistic_gpu_chestup', 'pose_chestup', 'yolopose_chestup', 'movenet_chestup']
+ONLY = []
 MEDIA = (Path(project.folder) / 'media').as_posix()
 PHOTOS = (Path(project.folder) / 'docs' / 'images' / 'sources').as_posix()
 

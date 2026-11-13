@@ -27,10 +27,11 @@ def fixture(name):
 	return path if path.exists() else FIXTURES / f'{name}.jsonl.gz'
 
 
-def seen_rates(name, gate=True, window=None):
+def seen_rates(name, gate=True, window=None, legs_out=False):
 	"""Per joint: in frames with a tracked person, how often it's seen in the tracks table (conf > 0)
 	and present in the joints table. gate False: the gate off (the Python tracker's output).
-	window: (first, last) recorded frames counted (all are replayed)."""
+	window: (first, last) recorded frames counted (all are replayed). legs_out: count only frames whose
+	hips are at the image's bottom edge (legs out of the picture)."""
 	meta, frames = tr.load(fixture(name))
 	if window is None and meta.get('start') == 240:	# the first chest-up recordings: frames 30-95 are the clean framing
 		window = (30, 95)
@@ -53,9 +54,11 @@ def seen_rates(name, gate=True, window=None):
 			continue
 		header = tracks[0]
 		row = dict(zip(header, tracks[1]))
+		if f'{prefix}left_hip_y' not in row:	# not a person's row (an error table while the model loads)
+			continue
 		# Legs out of the picture means hips at the image's bottom edge; when the dancer crouches
 		# (hips at mid-image) his bent knees come into view.
-		if window and (float(row[f'{prefix}left_hip_y']) + float(row[f'{prefix}right_hip_y'])) / 2 > 0.35:
+		if legs_out and (float(row[f'{prefix}left_hip_y']) + float(row[f'{prefix}right_hip_y'])) / 2 > 0.35:
 			continue
 		people += 1
 		first_id = tracks[1][0]
@@ -75,8 +78,8 @@ class JointGate(unittest.TestCase):
 	def check_chestup(self, name):
 		if not fixture(name).exists():
 			self.skipTest(f'no {name} recording')
-		people, gated = seen_rates(name)
-		_, raw = seen_rates(name, gate=False)
+		people, gated = seen_rates(name, legs_out=True)
+		_, raw = seen_rates(name, gate=False, legs_out=True)
 		print(f'\n  {name}: {people} frames; seen (tracks) / drawn (joints), raw -> gated:')
 		for j in LEGS + UPPER:
 			print(f'    {j:15s} {raw[j][0]:.2f}/{raw[j][1]:.2f} -> {gated[j][0]:.2f}/{gated[j][1]:.2f}')
