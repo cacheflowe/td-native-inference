@@ -451,7 +451,7 @@ vec3 hsv2rgb(vec3 c)
 void main()
 {
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
-	float hue = atan(f.y, f.x) / 6.2831853 + 0.5;
+	float hue = fract(atan(f.y, f.x) / 6.2831853);	// right = red (like R), up = yellow-green, left = cyan, down = violet
 	float speed = clamp(length(f) / max(uFullSpeed, 1e-4), 0.0, 1.0);
 	fragColor = TDOutputSwizzle(vec4(hsv2rgb(vec3(hue, 1.0, speed)), 1.0));
 }
