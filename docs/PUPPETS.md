@@ -222,8 +222,7 @@ by TD's Python on every change. That cost is outside the solver and hasn't been 
 **Goal:** the same rotations and placement from a C++ custom CHOP, then the features that are
 awkward in per-frame Python (rotation smoothing, joint limits).
 
-**Status (Nov 13):** steps 1-3 are done except the tox regeneration, which needs the registered
-custom OP (a TD restart). Results:
+**Status (Nov 13):** steps 1-3 are done; `MixamoPuppet.tox` runs on the Puppet CHOP. Results:
 - **Offline** (`tests/test_puppet_cpp.py`, 24 combinations of rig, fixture and settings):
   rotations within 4e-14, roots within 5e-12.
 - **In TD** (`tests/td_puppet_lab.py`, 300 frames each): every channel the same.

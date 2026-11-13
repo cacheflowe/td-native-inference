@@ -17,10 +17,10 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 - [ ] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
       [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd).
       - Done (Nov 13): `cpp/Puppet` and `PuppetCHOP.dll`, identical to the Python solver offline and
-        in the PuppetLab.
-      - Left: after a TD restart (which registers the CHOP), regenerate `tox/MixamoPuppet.tox`
-        (`scripts/build_puppet_tox.py`) and test it fresh.
-      - Then: rotation smoothing, body joint limits and side-on flip rejection.
+        in the PuppetLab. `tox/MixamoPuppet.tox` is regenerated on it, with no Python solver inside
+        (35 → 22 KB).
+      - Left: a fresh-process check of the tox (at the next release's package test).
+      - Next: rotation smoothing, body joint limits and side-on flip rejection.
 - [ ] Retire the Python tracker once v0.4.0 has been in use for a while: delete the modules, make the
       recorded C++ tables the fixtures, and build the Tracking pages without importing
       `onnxtop_tables`. Same for the Python puppet solver after its port.
@@ -83,6 +83,11 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
       - Real-ESRGAN upscaling and fast style transfer (Raw mode);
       - MobileSAM / EfficientSAM (needs prompt inputs);
       - RAFT optical flow (needs two frames).
+- [ ] **NeuFlow v2** optical flow (2024): built for edge devices, much lighter than RAFT for similar
+      accuracy, so a real-time candidate. Like RAFT it takes two frames: OnnxTOP would need a
+      previous-frame input (or a two-frame Raw mode) and a 2-channel flow output (Raw, RG = dx, dy).
+      Steps: find or export an ONNX, check that TensorRT accepts it, time it with `onnxtop_tool`, and
+      check the license before bundling.
 - [ ] Also exported by MediaPipe and cheap to add: text classifier / embedder, language detector,
       object detector, image classifier / embedder, interactive segmenter.
 

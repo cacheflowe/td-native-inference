@@ -156,7 +156,7 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done |
 | 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert` (`write_instance_colors` stays Python); the Performance page | done |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
-| 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++: design in [PUPPETS.md](PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd); `cpp/Puppet`, matched offline and in TD (Nov 13) | tox switch after a TD restart |
+| 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++: design in [PUPPETS.md](PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd); `cpp/Puppet`, matched offline and in TD; MixamoPuppet runs on it (Nov 13) | done |
 
 Later, separately: hand the decoded detections from the TOP to the tracker in binary (in-process
 registry) to skip the Info DAT strings entirely.
