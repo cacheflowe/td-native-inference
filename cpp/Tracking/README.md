@@ -25,7 +25,18 @@ moves the locked file aside).
 Three nodes per tracker, replacing the tracker COMP's Script DATs: **Table** = Tracks reads the
 Info DAT wired into it, advances the tracker and writes the tracks table; Joints and Bones are
 wired after it and write the same result's joints and bones (they find its tracker through the
-wire, in the same DLL).
+wire, in the same DLL). Two more tables replace wrapper Script DATs:
+
+- **Class Scores** (`onnxtop_tables.write_scores`, HSEmotion): input 1 the tracks, input 2 a Classify
+  Crops Info DAT; adds `<prefix>_label` and `<prefix>_<class>` (smoothed in float32, like numpy)
+  before `r, g, b`, and names the class in the label. Class Column Prefix, Class Score Smoothing.
+- **Convert RTMW3D** (`rtmw_convert`): RTMW3D's Pose Crops Info DAT reshaped into the Holistic-like
+  table the `rtmw` mode reads, with metric world landmarks. Frame TOP: the source image.
+
+The Tracks and Class Scores nodes also publish `t{id}_{column}` for every numeric cell on their Info
+CHOP (`wrapper_runtime.write_channels`), built only when an Info CHOP asks. An Info CHOP doesn't cook
+the node it reads, so the wrappers copy them with a Script CHOP that reads the node first
+(`wrapper_builder.track_channels`).
 
 Modes: every Tracker Mode of the Python tracker (`pose`, `movenet`, `face`, `detect`, `segment`,
 `mp_pose`, `mp_hands`, `mp_face`, `mp_holistic`, `mp_facedet`, `rtmw`). The tables are identical to
@@ -44,9 +55,11 @@ either one can wander to a different rotation.
 The parameters carry the Pose mode's defaults. A wrapper binds each to its tracker COMP, which
 builds the per-mode Tracking page (`wrapper_builder`, engine `cpp`).
 
-Info CHOP: `cook_ms` (the whole cook), `track_ms` (without writing the table), `input_ms`
-(getting the input DAT), `num_tracks`, `next_track_id` / `next_box_track_id` (the process-wide id
-counters).
+Info CHOP: `cook_ms` (the whole cook), `track_ms` (before writing the table), `input_ms`
+(getting the input DATs), `write_ms` (setting the output cells), `num_tracks`, `next_track_id` /
+`next_box_track_id` (the process-wide id counters), `cook_ms_avg` and `tracker_ms_avg` (Tracks
+nodes: their own average plus their Joints / Bones nodes', for the Performance page), then the track
+values.
 
 Track ids come from two counters per process (skeleton modes, box and face modes), shared by every
 Tracker DAT, as in Python. Only cells

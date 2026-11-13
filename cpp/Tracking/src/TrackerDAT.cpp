@@ -10,8 +10,8 @@ using namespace tracking;
 
 namespace {
 
-const char* kTableNames[] = {"tracks", "joints", "bones"};
-const char* kTableLabels[] = {"Tracks", "Joints", "Bones"};
+const char* kTableNames[] = {"tracks", "joints", "bones", "scores", "convert_rtmw"};
+const char* kTableLabels[] = {"Tracks", "Joints", "Bones", "Class Scores", "Convert RTMW3D"};
 
 const char* kModeNames[] = {"pose", "movenet", "face", "detect", "segment", "mp_pose", "mp_hands", "mp_face", "mp_holistic",
 	"mp_facedet", "rtmw"};
@@ -105,9 +105,21 @@ private:
 	const OP_DATInput* dat_;
 };
 
-TableKind tableOf(const OP_Inputs* inputs) {
+TrackerDAT::Output tableOf(const OP_Inputs* inputs) {
 	const int t = inputs->getParInt("Table");
-	return t == 1 ? TableKind::Joints : t == 2 ? TableKind::Bones : TableKind::Tracks;
+	return t >= 0 && t <= 4 ? TrackerDAT::Output(t) : TrackerDAT::Output::Tracks;
+}
+
+double msSince(std::chrono::steady_clock::time_point t) {
+	return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
+}
+
+// Running average of a cook time (a time constant of about ten cooks).
+void average(double& avg, double value) { avg = avg < 0 ? value : avg + (value - avg) * 0.1; }
+
+std::unique_ptr<DatInfo> tableInput(const OP_Inputs* inputs, int index) {
+	const OP_DATInput* dat = inputs->getNumInputs() > index ? inputs->getInputDAT(index) : nullptr;
+	return dat && dat->isTable ? std::make_unique<DatInfo>(dat) : nullptr;
 }
 
 }  // namespace
@@ -121,7 +133,7 @@ DLLEXPORT void FillDATPluginInfo(DAT_PluginInfo* info) {
 	info->customOPInfo.opIcon->setString("TRK");
 	info->customOPInfo.authorName->setString("td-native-inference");
 	info->customOPInfo.minInputs = 0;
-	info->customOPInfo.maxInputs = 1;
+	info->customOPInfo.maxInputs = 2;	// Class Scores: the tracks and the classifier's Info DAT
 }
 
 DLLEXPORT DAT_CPlusPlusBase* CreateDATInstance(const OP_NodeInfo* info) { return new TrackerDAT(info); }
@@ -149,8 +161,29 @@ void TrackerDAT::setupParameters(OP_ParameterManager* manager, void*) {
 		sp.page = "Tracker";
 		sp.defaultValue = kTableNames[0];
 		sp.help = "Tracks runs the tracker on the Info DAT wired in. Joints / Bones: wire a Tracks Tracker DAT in; "
-			"they write its joints and bones for the same result.";
-		manager->appendMenu(sp, 3, kTableNames, kTableLabels);
+			"they write its joints and bones for the same result. Class Scores: the tracks (input 1) plus a Classify "
+			"Crops Info DAT's per-track class scores (input 2), smoothed. Convert RTMW3D: RTMW3D's Pose Crops Info DAT "
+			"reshaped into the Holistic-like table the RTMW3D tracker mode reads (Frame TOP: the source image).";
+		manager->appendMenu(sp, int32_t(std::size(kTableNames)), kTableNames, kTableLabels);
+	}
+	{
+		OP_StringParameter sp("Classprefix");
+		sp.label = "Class Column Prefix";
+		sp.page = "Tracker";
+		sp.defaultValue = "class";
+		sp.help = "Class Scores: the columns are <prefix>_label and <prefix>_<class name>.";
+		manager->appendString(sp);
+	}
+	{
+		OP_NumericParameter np("Classsmoothing");
+		np.label = "Class Score Smoothing";
+		np.page = "Tracker";
+		np.defaultValues[0] = 0.5;
+		np.minValues[0] = np.minSliders[0] = 0.0;
+		np.maxValues[0] = np.maxSliders[0] = 0.99;
+		np.clampMins[0] = np.clampMaxes[0] = true;
+		np.help = "Class Scores: per-track smoothing of the scores (0 = raw, higher = steadier).";
+		manager->appendFloat(np);
 	}
 	{
 		OP_StringParameter sp("Trackermode");
@@ -164,7 +197,7 @@ void TrackerDAT::setupParameters(OP_ParameterManager* manager, void*) {
 		OP_StringParameter sp("Frametop");
 		sp.label = "Frame TOP";
 		sp.page = "Tracker";
-		sp.help = "Face with Head Pose Method SolvePnP: the source image, for the camera model's frame size.";
+		sp.help = "The source image: its size is Face / SolvePnP's camera model and Convert RTMW3D's pixel scale.";
 		manager->appendTOP(sp);
 	}
 	{
@@ -203,10 +236,13 @@ void TrackerDAT::setupParameters(OP_ParameterManager* manager, void*) {
 }
 
 void TrackerDAT::setParameterEnableStates(const OP_Inputs* inputs, OP_ParEnableState* state, void*) {
-	const bool tracks = tableOf(inputs) == TableKind::Tracks;
+	const Output t = tableOf(inputs);
+	const bool tracks = t == Output::Tracks;
 	state->setEnableState("Trackermode", tracks);
 	state->setEnableState("Resultschop", tracks);
-	state->setEnableState("Frametop", tracks);
+	state->setEnableState("Frametop", tracks || t == Output::ConvertRtmw);
+	state->setEnableState("Classprefix", t == Output::Scores);
+	state->setEnableState("Classsmoothing", t == Output::Scores);
 	for (const Par& p : kPars) state->setEnableState(p.name, tracks);
 }
 
@@ -214,16 +250,48 @@ void TrackerDAT::execute(DAT_Output* output, const OP_Inputs* inputs, void*) {
 	const auto start = std::chrono::steady_clock::now();
 	error_.clear();
 	warning_.clear();
-	const TableKind kind = tableOf(inputs);
-	if (kind == TableKind::Tracks)
-		cookTracks(inputs);
-	else
-		cookFollower(kind, inputs);
-	const auto written = std::chrono::steady_clock::now();
-	trackMs_ = std::chrono::duration<double, std::milli>(written - start).count();
+	inputMs_ = 0.0;
+	tableKind_ = tableOf(inputs);
+	switch (tableKind_) {
+		case Output::Tracks: cookTracks(inputs); break;
+		case Output::Joints: cookFollower(TableKind::Joints, inputs); break;
+		case Output::Bones: cookFollower(TableKind::Bones, inputs); break;
+		case Output::Scores: cookScores(inputs); break;
+		case Output::ConvertRtmw: cookConvertRtmw(inputs); break;
+	}
+	trackMs_ = msSince(start);
+	const auto writeStart = std::chrono::steady_clock::now();
 	write(output, table_);
-	numTracks_ = kind == TableKind::Tracks && !table_.empty() && table_[0].size() > 1 ? int(table_.size()) - 1 : 0;
-	cookMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	writeMs_ = msSince(writeStart);
+	numTracks_ = (tableKind_ == Output::Tracks || tableKind_ == Output::Scores) && !table_.empty() && table_[0].size() > 1
+		? int(table_.size()) - 1 : 0;
+	channelsDirty_ = true;
+	cookMs_ = msSince(start);
+	average(cookAvg_, cookMs_);
+	++cooks_;
+}
+
+void TrackerDAT::cookScores(const OP_Inputs* inputs) {
+	const auto t0 = std::chrono::steady_clock::now();
+	auto tracks = tableInput(inputs, 0);
+	auto scores = tableInput(inputs, 1);
+	inputMs_ = msSince(t0);
+	scores_.update(tracks.get(), scores.get(), inputs->getParString("Classprefix"), inputs->getParDouble("Classsmoothing"),
+		table_);
+}
+
+void TrackerDAT::cookConvertRtmw(const OP_Inputs* inputs) {
+	const auto t0 = std::chrono::steady_clock::now();
+	auto info = tableInput(inputs, 0);
+	inputMs_ = msSince(t0);
+	double w = 1, h = 1;
+	if (const OP_TOPInput* top = inputs->getParTOP("Frametop")) {
+		w = top->textureDesc.width;
+		h = top->textureDesc.height;
+	} else {
+		warning_ = "Set Frame TOP to the source image (keypoints are scaled to its pixels)";
+	}
+	tracking::convertRtmw(info.get(), w, h, table_);
 }
 
 void TrackerDAT::cookTracks(const OP_Inputs* inputs) {
@@ -287,7 +355,13 @@ void TrackerDAT::cookFollower(TableKind kind, const OP_Inputs* inputs) {
 		error_ = "Wire a Tracker DAT with Table = Tracks into this one";
 		return;
 	}
-	it->second->tracker_->cook(kind, nullptr, table_);
+	TrackerDAT* owner = it->second;
+	owner->tracker_->cook(kind, nullptr, table_);
+	const int slot = kind == TableKind::Joints ? 0 : 1;
+	// This cook's time so far; the write that follows is added on the next cook (close enough for a
+	// running average).
+	average(owner->followerAvg_[slot], cookMs_ > 0 ? cookMs_ : msSince(t0));
+	owner->followerAt_[slot] = owner->cooks_;
 }
 
 void TrackerDAT::write(DAT_Output* output, const Table& table) {
@@ -316,16 +390,46 @@ void TrackerDAT::write(DAT_Output* output, const Table& table) {
 	}
 }
 
-int32_t TrackerDAT::getNumInfoCHOPChans(void*) { return 6; }
+namespace {
+const char* const kStatNames[] = {"cook_ms", "track_ms", "input_ms", "write_ms", "num_tracks", "next_track_id",
+	"next_box_track_id", "cook_ms_avg", "tracker_ms_avg"};
+const int kStats = int(std::size(kStatNames));
+}  // namespace
+
+void TrackerDAT::buildChannels() {
+	if (!channelsDirty_) return;
+	channelsDirty_ = false;
+	if (tableKind_ == Output::Tracks || tableKind_ == Output::Scores)
+		tracking::trackChannels(table_, channels_);
+	else
+		channels_.clear();
+}
+
+// Stats first (the wrapper's Performance page reads them), then, on Tracks and Class Scores nodes,
+// t{id}_{column} per numeric cell (the wrapper's channels output; built only when an Info CHOP asks).
+int32_t TrackerDAT::getNumInfoCHOPChans(void*) {
+	buildChannels();
+	return kStats + int32_t(channels_.size());
+}
 
 void TrackerDAT::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*) {
-	// cook_ms: the whole execute; track_ms: without writing the table; input_ms: getting the input DAT.
-	// next_track_id / next_box_track_id: the process-wide id counters of the keypoint and box trackers
-	// (the lab test starts the Python tracker's there).
-	const char* names[] = {"cook_ms", "track_ms", "input_ms", "num_tracks", "next_track_id", "next_box_track_id"};
-	const double values[] = {cookMs_, trackMs_, inputMs_, double(numTracks_), double(KeypointTrack::nextId),
-		double(BoxTrack::nextId)};
-	chan->name->setString(names[index]);
+	// cook_ms: the whole execute; track_ms: before writing the table; input_ms: getting the input DATs;
+	// write_ms: setting the output cells. tracker_ms_avg (Tracks nodes): this node's average plus its
+	// Joints / Bones nodes' while they cook. next_track_id / next_box_track_id: the process-wide id
+	// counters of the keypoint and box trackers (the lab test starts the Python tracker's there).
+	if (index >= kStats) {
+		buildChannels();
+		const auto& c = channels_[size_t(index - kStats)];
+		chan->name->setString(c.first.c_str());
+		chan->value = c.second;
+		return;
+	}
+	double trackerAvg = std::max(cookAvg_, 0.0);
+	for (int i = 0; i < 2; ++i)
+		if (followerAt_[i] >= cooks_ - 2 && followerAvg_[i] >= 0) trackerAvg += followerAvg_[i];
+	const double values[] = {cookMs_, trackMs_, inputMs_, writeMs_, double(numTracks_), double(KeypointTrack::nextId),
+		double(BoxTrack::nextId), std::max(cookAvg_, 0.0), trackerAvg};
+	chan->name->setString(kStatNames[index]);
 	chan->value = float(values[index]);
 }
 

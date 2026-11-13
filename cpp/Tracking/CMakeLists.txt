@@ -16,7 +16,7 @@ endif()
 
 # The tracker itself (no TouchDesigner dependency): pipelines, matching, table formatting.
 add_library(tracking_core STATIC src/KeypointTracker.cpp src/PoseTracker.cpp src/BoxTracker.cpp src/BoxPipeline.cpp
-	src/HeadPose.cpp src/Tracker.cpp)
+	src/HeadPose.cpp src/Tracker.cpp src/Extras.cpp)
 target_include_directories(tracking_core PUBLIC src)
 target_compile_definitions(tracking_core PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 

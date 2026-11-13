@@ -91,6 +91,7 @@ private:
 	bool				myActive = true;
 	int					myFrameW = 0, myFrameH = 0;
 	double				myExecuteMs = 0.0;
+	double				myAvgMs[2] = {-1.0, -1.0};	// infer, execute (running averages)
 	std::string			myModelPath;
 	std::string			myError;
 	std::string			myWarning;

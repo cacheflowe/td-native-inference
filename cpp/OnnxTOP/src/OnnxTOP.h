@@ -200,6 +200,8 @@ private:
 	double						myInferMs = 0.0;
 	double						myRunMs = 0.0;		// CPU time spent in OnnxEngine::run (the launch)
 	double						myExecuteMs = 0.0;
+	double						myDecodeMs = 0.0;	// reading back and decoding the outputs (incl. waiting for the GPU)
+	double						myAvgMs[4] = {-1.0, -1.0, -1.0, -1.0};	// infer, execute, run, decode
 	int64_t						myExecuteCount = 0;
 
 	// Wait for Result off: this cook queues the inference without waiting for it, and the next

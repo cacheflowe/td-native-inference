@@ -25,6 +25,12 @@ namespace
 		return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 	}
 
+	// Running average of a timing (a time constant of about ten cooks), for the wrappers' Performance page.
+	void average(double& avg, double value)
+	{
+		avg = avg < 0.0 ? value : avg + (value - avg) * 0.1;
+	}
+
 	// Info DAT cells: to_chars is several times cheaper than snprintf, and this runs for every cell.
 	void formatValue(char* buf, size_t size, float v, bool integer)
 	{
@@ -1267,7 +1273,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		Letterbox lb = computeLetterbox((int)top->textureDesc.width, (int)top->textureDesc.height,
 			myModelW, myModelH, letterbox);
 		// Detections (and the seg matte) from the engine's current outputs, for the frame lb maps.
-		auto decode = [&](const Letterbox& from) -> bool
+		auto decodeOutputs = [&](const Letterbox& from) -> bool
 		{
 			bool ok = true;
 			if (mode == ModeYolo)
@@ -1287,6 +1293,13 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				myError = err;
 			myYoloMode = true;
 			return true;	// the decoders always write (or clear) the output
+		};
+		auto decode = [&](const Letterbox& from) -> bool
+		{
+			const auto tDecode = Clock::now();
+			const bool written = decodeOutputs(from);
+			myDecodeMs = msSince(tDecode);
+			return written;
 		};
 
 		bool decoded = false;
@@ -1353,6 +1366,10 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 
 	myContext->endCUDAOperations(nullptr);
 	myExecuteMs = msSince(tExec);
+	average(myAvgMs[0], myInferMs);
+	average(myAvgMs[1], myExecuteMs);
+	average(myAvgMs[2], myRunMs);
+	average(myAvgMs[3], myDecodeMs);
 }
 
 void OnnxTOP::readInferMs()
@@ -1810,7 +1827,7 @@ bool OnnxTOP::runLandmarkCrops(OnnxEngine& engine, int start, int count, std::st
 
 int32_t OnnxTOP::getNumInfoCHOPChans(void*)
 {
-	return 11;
+	return 16;
 }
 
 void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -1832,6 +1849,12 @@ void OnnxTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		case 10: chan->name->setString("run_ms");			chan->value = (float)myRunMs; break;
 		case 9: chan->name->setString("result_delay");		chan->value = myResultFrame >= 0 && myInputFrame >= myResultFrame ?
 			(float)(myInputFrame - myResultFrame) : 0.f; break;
+		// Reading back and decoding the model's outputs (YOLO, MoveNet, YuNet, Raw), and running averages.
+		case 11: chan->name->setString("decode_ms");		chan->value = (float)myDecodeMs; break;
+		case 12: chan->name->setString("infer_ms_avg");		chan->value = (float)std::max(myAvgMs[0], 0.0); break;
+		case 13: chan->name->setString("execute_ms_avg");	chan->value = (float)std::max(myAvgMs[1], 0.0); break;
+		case 14: chan->name->setString("run_ms_avg");		chan->value = (float)std::max(myAvgMs[2], 0.0); break;
+		case 15: chan->name->setString("decode_ms_avg");	chan->value = (float)std::max(myAvgMs[3], 0.0); break;
 	}
 }
 

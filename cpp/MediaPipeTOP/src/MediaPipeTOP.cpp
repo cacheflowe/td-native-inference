@@ -406,13 +406,16 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	if (waitFrame >= 0 && myWorker->waitFor(waitFrame, maxWaitMs))
 		myWorker->latest(myResult);
 	myExecuteMs = msSince(tExec);
+	// Running averages (a time constant of about ten cooks), for the wrappers' Performance page.
+	for (auto [avg, value] : {std::pair<double*, double>{&myAvgMs[0], myResult.inferMs}, {&myAvgMs[1], myExecuteMs}})
+		*avg = *avg < 0.0 ? value : *avg + (value - *avg) * 0.1;
 }
 
 // ---------------------------------------------------------------- info CHOP / DAT
 
 int32_t MediaPipeTOP::getNumInfoCHOPChans(void*)
 {
-	return 10;
+	return 12;
 }
 
 void MediaPipeTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
@@ -433,6 +436,8 @@ void MediaPipeTOP::getInfoCHOPChan(int32_t index, OP_InfoCHOPChan* chan, void*)
 		// with Output Index -result_delay shows the frame that matches the landmarks.
 		case 9: chan->name->setString("result_delay");		chan->value = myResult.inputFrame >= 0 && myInputFrame >= myResult.inputFrame ?
 			(float)(myInputFrame - myResult.inputFrame) : 0.f; break;
+		case 10: chan->name->setString("infer_ms_avg");		chan->value = (float)std::max(myAvgMs[0], 0.0); break;
+		case 11: chan->name->setString("execute_ms_avg");	chan->value = (float)std::max(myAvgMs[1], 0.0); break;
 	}
 }
 

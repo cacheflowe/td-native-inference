@@ -87,7 +87,8 @@ id, class, conf, u1, v1, u2, v2, label, kp{i}_u, kp{i}_v, kp{i}_c ..., [kp{i}_z 
 
 **Info CHOP**: `loaded`, `loading`, `num_detections`, `infer_ms` (the worker's MediaPipe time),
 `execute_ms` (TD-side cook), `frame_w`, `frame_h`, `results` (results received so far),
-`dropped_frames` (frames replaced before the worker got to them), and `result_delay`: how many
+`dropped_frames` (frames replaced before the worker got to them), `infer_ms_avg` and
+`execute_ms_avg` (running averages over about ten cooks), and `result_delay`: how many
 input frames old the current result is (counted in the input TOP's cooks). To show the frame the
 landmarks belong to, cache the input with a Cache TOP (Cache Size above the largest delay) and
 set its Output Index to `-result_delay`.

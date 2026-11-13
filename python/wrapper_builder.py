@@ -56,6 +56,7 @@ LAYOUT = {
 	'joints': (6, -240), 'out_joints': (7, -240),
 	'bones': (6, -380), 'out_bones': (7, -380),
 	'inference_stats': (5, -540), 'channels': (6, -540), 'out_channels': (7, -540),
+	'track_values': (4, -680), 'track_channels': (5, -680), 'tracker_stats': (4, -820),
 	'component': (0, -100), 'model_pulses': (1, -100), 'local': (0, -260),
 	'tracker/in_info': (0, 0), 'tracker/script_tracks': (1, 0), 'tracker/out_tracks': (3, 0),
 	'tracker/script_joints': (2, -150), 'tracker/out_joints': (3, -150),
@@ -77,7 +78,7 @@ LAYOUT_RESULT_INFERENCE = {'matte': (5, 160), 'overlay': (5, 20), 'out_boxes': (
 	# Instances: a band under the CHOP outputs. instance_matte above instance_lookup (input order).
 	'instance_matte': (5, -680), 'instance_colors': (4, -820), 'instance_lookup': (5, -820),
 	'instances': (6, -750), 'out_instances': (7, -750)}
-DOCKED = ('rtmw_info_callbacks', 'channels_callbacks', 'scores_callbacks', 'instance_colors_callbacks', 'instances_pixel', 'tracker/script_tracks_callbacks',
+DOCKED = ('rtmw_info_callbacks', 'channels_callbacks', 'track_channels_callbacks', 'scores_callbacks', 'instance_colors_callbacks', 'instances_pixel', 'tracker/script_tracks_callbacks',
 	'tracker/script_joints_callbacks', 'tracker/script_bones_callbacks')
 
 # Audio wrappers, same banding: the caption chain on top, the DAT outputs, then the CHOP outputs.
@@ -227,13 +228,13 @@ TRACKER_DAT_MODES = ('pose', 'movenet', 'face', 'detect', 'segment', 'mp_pose', 
 TRACKER_DAT_PLUGIN = 'plugins/TrackerDAT.dll'
 
 
-def _tracker_dat(tracker, name, table):
+def _tracker_dat(parent_comp, name, table):
 	"""A Tracker DAT: the registered custom OP, or (before TD has registered it, i.e. until the next
 	restart after the first build) a CPlusPlus DAT loading plugins/TrackerDAT.dll."""
 	try:
-		node = tracker.create('TrackerDAT', name)
+		node = parent_comp.create('TrackerDAT', name)
 	except Exception:
-		node = tracker.create('cplusplusDAT', name)
+		node = parent_comp.create('cplusplusDAT', name)
 		node.par.plugin = (root() / TRACKER_DAT_PLUGIN).as_posix()
 		node.cook(force=True)	# loads the plugin, which adds its parameters
 	node.par.Table = table
@@ -285,7 +286,7 @@ def _build_tracker(comp, mode, source='detections', engine='python', defaults=No
 	return tracker
 
 
-def _build_classifier(comp, spec):
+def _build_classifier(comp, spec, engine='python'):
 	"""Second stage: a nested detector wrapper finds and tracks faces; this node classifies their
 	crops and `scores` joins the class scores onto the detector's tracks."""
 	detector = build(load_spec(spec['detector']), comp, name='detector')
@@ -294,14 +295,20 @@ def _build_classifier(comp, spec):
 	_connect(detector, comp.op('input'))
 	# script_tracks, not out_tracks: the crops must not depend on the scored table.
 	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
-	scores = comp.create('scriptDAT', 'scores')
-	comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
-		'\tonnxtop_tables.write_scores(scriptOp, parent(), scriptOp.inputs[0], scriptOp.inputs[1])\n')
+	if engine == 'cpp':
+		scores = _tracker_dat(comp, 'scores', 'scores')
+		for name in ('Classprefix', 'Classsmoothing'):
+			if hasattr(comp.par, name):
+				scores.par[name].expr = f'parent().par.{name}'
+	else:
+		scores = comp.create('scriptDAT', 'scores')
+		comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
+			'\tonnxtop_tables.write_scores(scriptOp, parent(), scriptOp.inputs[0], scriptOp.inputs[1])\n')
 	_connect(scores, comp.op('crop_boxes'), comp.op('detections'))
 	return detector
 
 
-def _build_posecrops(comp, spec):
+def _build_posecrops(comp, spec, engine='python'):
 	"""A landmarks wrapper with a nested person detector: the detector finds and tracks the people,
 	`inference` (OnnxTOP Pose Crops / Holistic) takes their boxes from `crop_boxes`. With a
 	"converter" (RTMW3D: rtmw_convert), `rtmw_info` reshapes the keypoints into the tracker's
@@ -333,7 +340,12 @@ def _build_posecrops(comp, spec):
 			"\tif bool(detector.par.Active.eval()) != need:\n"
 			"\t\tdetector.par.Active = need\n")
 	converter = spec.get('converter')
-	if converter:
+	if converter and engine == 'cpp':
+		assert converter == 'rtmw_convert', f'[WrapperBuilder] no C++ version of {converter}'
+		convert = _tracker_dat(comp, 'rtmw_info', 'convert_rtmw')
+		convert.par.Frametop = 'input'
+		_connect(convert, comp.op('detections'))
+	elif converter:
 		convert = comp.create('scriptDAT', 'rtmw_info')
 		comp.op('rtmw_info_callbacks').text = (f'import {converter}\ndef onCook(scriptOp):\n'
 			f"\t{converter}.convert(scriptOp, scriptOp.inputs[0], parent().op('input'))\n")
@@ -613,8 +625,9 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 	passthrough = comp.create('nullTOP', 'null_passthrough')
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
-	detector = _build_classifier(comp, spec) if kind == 'classifier' else _build_posecrops(comp, spec) if posecrops else None
 	engine = tracker_engine or spec.get('tracker_engine', 'python')
+	detector = (_build_classifier(comp, spec, engine) if kind == 'classifier'
+		else _build_posecrops(comp, spec, engine) if posecrops else None)
 	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine,
 		spec.get('tracker_defaults')) if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
@@ -638,16 +651,140 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 		output = comp.create('outDAT', 'out_' + suffix)
 		output.par.connectorder = index
 		_connect(output, comp.op(suffix))
-	channels = comp.create('scriptCHOP', 'channels')
-	comp.op('channels_callbacks').text = (
-		"def onCook(scriptOp):\n\tparent().op('component').module.write_channels(scriptOp, parent())\n")
-	_connect(comp.create('outCHOP', 'out_channels'), channels)
+	_connect(comp.create('outCHOP', 'out_channels'), _build_channels(comp, engine))
+	_build_performance(comp, spec, engine)
 	for node in comp.findChildren():
 		node.viewer = False
 	_layout(comp, spec)
 	_add_icon(comp, comp.name, './debug')
 	_restore_wires(comp, inputs, outputs)
 	return comp
+
+
+# The t{id}_{column} track values on a Tracker DAT's Info CHOP (its stats and TD's standard info
+# channels don't match: brackets are a numeric range in TD patterns).
+TRACK_CHANNELS = 't[0-9]*'
+
+
+def track_channels(comp, track_path, values_name='track_values', name='track_channels'):
+	"""The t{id}_{column} channels of a Tracker DAT, current every cook: an Info CHOP scoped to them,
+	copied by a Script CHOP that first reads the Tracker DAT. An Info CHOP alone only reports a node's
+	latest numbers, it doesn't cook it (nothing else pulling the tables, the channels stood still);
+	reading the DAT cooks it and makes the Script CHOP depend on it. One C++ copy per cook."""
+	values = comp.create('infoCHOP', values_name)
+	values.par.op = track_path
+	values.par.iscope = TRACK_CHANNELS
+	pull = comp.create('scriptCHOP', name)
+	comp.op(name + '_callbacks').text = (
+		"def onCook(scriptOp):\n"
+		f"\tif parent().op('{track_path}').numRows >= 0:\n"
+		f"\t\tvalues = parent().op('{values_name}')\n"
+		"\t\tvalues.cook(force=True)\n"
+		"\t\tscriptOp.copy(values)\n")
+	return pull
+
+
+def _track_node(comp):
+	"""The node writing the wrapper's final tracks table: the tracker's Tracks node, or a classifier's
+	scores. None for image wrappers."""
+	if comp.op('tracker') is not None:
+		return comp.op('tracker/script_tracks')
+	return comp.op('scores')
+
+
+def _build_channels(comp, engine):
+	"""`channels`: t{id}_{column} for every numeric tracks cell, then the plugin's Info CHOP stats.
+	Python: wrapper_runtime.write_channels in a Script CHOP. C++: the Tracker DAT publishes the track
+	values on its Info CHOP (built only when asked; see track_channels); a Merge adds the plugin's
+	stats."""
+	track = _track_node(comp)
+	if engine == 'cpp' and track is not None and track.OPType != 'scriptDAT':
+		channels = comp.create('mergeCHOP', 'channels')
+		_connect(channels, track_channels(comp, track.path[len(comp.path) + 1:]), comp.op('inference_stats'))
+		return channels
+	channels = comp.create('scriptCHOP', 'channels')
+	comp.op('channels_callbacks').text = (
+		"def onCook(scriptOp):\n\tparent().op('component').module.write_channels(scriptOp, parent())\n")
+	return channels
+
+
+# TD caches an expression's value until something it depends on changes; cook times aren't tracked
+# dependencies, so these also read absTime.frame to be re-evaluated every frame they're shown.
+FRESH = ' + absTime.frame * 0'
+
+
+def _cooked_ms(name):
+	"""A node's main-thread time last frame: a COMP's children, else the node's own cook (0 when it
+	didn't cook, rather than its last, stale cook time)."""
+	node = f"me.op('{name}')"
+	return f"({node}.childrenCookTime if {node}.isCOMP else ({node}.cookTime if {node}.cookAbsFrame >= absTime.frame - 1 else 0.0))"
+
+
+def _perf(page, name, label, expression, help_text):
+	parameter = page.appendFloat(name, label=label)[0]
+	parameter.expr = expression
+	parameter.readOnly = True
+	parameter.help = help_text
+	return parameter
+
+
+def _build_performance(comp, spec, engine):
+	"""The Performance page: read-only timings, evaluated only while something shows them (the
+	parameter dialog on this page), so they cost nothing otherwise. Plugin and tracker numbers are
+	the plugins' own running averages; Info DAT and overlay are TouchDesigner's cook times."""
+	page = comp.appendCustomPage('Performance')
+	onnx = spec['plugin'] == 'OnnxTOP'
+	stat = "me.op('inference_stats')['{}'].eval() if me.op('inference_stats')['{}'] is not None else 0.0"
+	_perf(page, 'Perfinfer', 'Inference ms', stat.format('infer_ms_avg', 'infer_ms_avg'),
+		'The model itself: GPU time (OnnxTOP, CUDA events) or the MediaPipe worker thread\'s time. Off TD\'s main '
+		'thread unless Wait for Result is on.' if onnx else 'The MediaPipe worker thread\'s time per result (off TD\'s main thread).')
+	_perf(page, 'Perfplugin', 'Plugin Cook ms', stat.format('execute_ms_avg', 'execute_ms_avg'),
+		"The plugin's cook on TD's main thread: uploading the frame, launching the model, reading back results.")
+	mode = spec.get('preset', {}).get('Mode')
+	if onnx and mode != 'holistic':	# Holistic runs its models on a worker thread
+		_perf(page, 'Perflaunch', 'Model Launch ms', stat.format('run_ms_avg', 'run_ms_avg'),
+			'Part of Plugin Cook: the CPU time ONNX Runtime takes to launch a run.')
+	if onnx and mode not in ('holistic', 'crops', 'posecrops'):
+		_perf(page, 'Perfdecode', 'Decode ms', stat.format('decode_ms_avg', 'decode_ms_avg'),
+			'Part of Plugin Cook: reading back and decoding the outputs (boxes, keypoints, images), including '
+			'waiting for the GPU when the result is needed this frame.')
+	_perf(page, 'Perfinfodat', 'Info DAT ms', _cooked_ms('detections') + FRESH,
+		"Writing the detections into the Info DAT (TD's cook time, last frame).")
+	track = _track_node(comp)
+	if track is not None:
+		if track.OPType == 'scriptDAT':
+			names = [n for n in ('tracker/script_tracks', 'tracker/script_joints', 'tracker/script_bones', 'scores')
+				if comp.op(n) is not None]
+			expression = ' + '.join(_cooked_ms(n) for n in names) + FRESH
+			help_text = "The Python tracker's three Script DATs (TD's cook times, last frame)."
+		else:
+			# A second Info CHOP, unscoped: track_values only carries the track channels.
+			stats = comp.create('infoCHOP', 'tracker_stats')
+			stats.par.op = track.path[len(comp.path) + 1:]
+			stats.par.iscope = 'tracker_ms_avg'
+			expression = "me.op('tracker_stats')['tracker_ms_avg'].eval() if me.op('tracker_stats')['tracker_ms_avg'] is not None else 0.0"
+			help_text = 'The Tracker DAT: tracking and writing the tracks, joints and bones tables (its own timing).'
+		_perf(page, 'Perftracker', 'Tracker ms', expression, help_text)
+	if comp.op('detector') is not None:
+		_perf(page, 'Perfdetector', 'Detector ms', "me.op('detector').par.Perftotal.eval()",
+			"The nested person / face detector wrapper's main-thread total (its own Performance page).")
+	overlays = [n for n in ('debug_boxes', 'debug_keypoints', 'overlay', 'instances') if comp.op(n) is not None]
+	if overlays:
+		_perf(page, 'Perfoverlay', 'Debug Overlay ms', ' + '.join(_cooked_ms(n) for n in overlays) + FRESH,
+			"Drawing the debug overlay (TD's cook times, last frame); 0 with Debug Overlay off.")
+	_perf(page, 'Perftotal', 'Main Thread Total ms', 'me.childrenCookTime' + FRESH,
+		"Everything inside this wrapper on TD's main thread last frame (TD's measure; inference on the GPU or a "
+		"worker thread isn't in it).")
+	delay = page.appendInt('Perfdelay', label='Result Delay (frames)')[0]
+	delay.expr = stat.format('result_delay', 'result_delay')
+	delay.readOnly = True
+	delay.help = 'Input frames between the shown result and the newest frame (0 = this frame\'s result).'
+	if spec['plugin'] != 'OnnxTOP':
+		dropped = page.appendInt('Perfdropped', label='Dropped Frames')[0]
+		dropped.expr = stat.format('dropped_frames', 'dropped_frames')
+		dropped.readOnly = True
+		dropped.help = 'Frames the MediaPipe worker skipped because it was still busy.'
+	comp.sortCustomPages(*[p.name for p in comp.customPages if p.name != 'About'], 'About')
 
 
 ICON_SIZE = (320, 260)	# the 16:13 card at node size: sharp in the network, 4x smaller in the tox than 2x

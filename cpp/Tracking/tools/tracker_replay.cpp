@@ -5,6 +5,7 @@
 
 #include "Common.h"
 #include "BoxPipeline.h"
+#include "Extras.h"
 #include "Tracker.h"
 
 using namespace tracking;
@@ -64,5 +65,29 @@ __declspec(dllexport) int trk_head_pose_solvepnp(const double* kp10, double widt
 		kp[i][1] = kp10[2 * i + 1];
 	}
 	return headPoseSolvePnP(kp, width, height, focalScale, out3) ? 1 : 0;
+}
+}
+
+extern "C" {
+// Tests: wrapper_runtime.write_channels' track channels for a tracks table (text), as "name\tvalue"
+// lines with the float32 value in %.9g (round-trips).
+__declspec(dllexport) const char* trk_channels(const char* tableText) {
+	static std::string out;
+	TextInfo info(tableText ? tableText : "");
+	Table t;
+	for (int r = 0; r < info.numRows(); ++r) {
+		Row row;
+		for (int c = 0; c < info.numCols(); ++c) row.emplace_back(info.cell(r, c));
+		t.push_back(std::move(row));
+	}
+	std::vector<std::pair<std::string, float>> ch;
+	trackChannels(t, ch);
+	out.clear();
+	char buf[64];
+	for (auto& [name, v] : ch) {
+		snprintf(buf, sizeof(buf), "%.9g", double(v));
+		out += name + "\t" + buf + "\n";
+	}
+	return out.c_str();
 }
 }

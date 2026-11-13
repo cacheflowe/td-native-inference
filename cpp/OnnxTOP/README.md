@@ -226,9 +226,12 @@ Holistic mode above replaced it for speed.
   `mask_fill` (share of the box the mask covers at Mask Threshold, computed like the Python seg
   script's `mask_area_ratio`). Pose models add `kp{i}_u, kp{i}_v, kp{i}_c`.
 - **Info CHOP:** `loaded, loading, tensorrt, num_detections, infer_ms, execute_ms, model_w, model_h,
-  trt_building, result_delay, run_ms`. `infer_ms` is the inference's GPU time (CUDA events);
-  `result_delay` is how many input frames old the current detections are (0 with Wait for Result
-  on); `run_ms` is the CPU time ONNX Runtime takes to launch the run (paid in the cook either way).
+  trt_building, result_delay, run_ms, decode_ms` and the running averages `infer_ms_avg,
+  execute_ms_avg, run_ms_avg, decode_ms_avg` (about ten cooks; the wrappers' Performance page).
+  `infer_ms` is the inference's GPU time (CUDA events); `result_delay` is how many input frames old
+  the current detections are (0 with Wait for Result on); `run_ms` is the CPU time ONNX Runtime
+  takes to launch the run (paid in the cook either way); `decode_ms` is reading back and decoding
+  the outputs (YOLO, MoveNet, YuNet, Raw), including waiting for the GPU when it's needed now.
 - **Info popup** (middle-click): ORT version and path, the active provider, I/O shapes, and recent
   ORT log lines.
 

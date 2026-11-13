@@ -6,7 +6,7 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status (Nov 12, 2026):** phases 0-3 done, checked in TD. 16 sessions recorded in TD
+**Status (Nov 12, 2026):** phases 0-4 done, checked in TD. 16 sessions recorded in TD
 (`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
 recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
 skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
@@ -41,6 +41,19 @@ pose in C++; every mode now runs on the Tracker DAT. Replays exactly on detect, 
   is chaotic in either. The replay allows yaw / pitch / roll differences on that fixture only.
 - The recorder reset the tracker before the new session's image was in place, so one cook ran on
   the previous image unrecorded (yunet_photo); the reset now happens in the first step.
+
+Phase 4 (Nov 12): the Tracker DAT's Class Scores and Convert RTMW3D tables and its track channels
+replace `write_scores`, `rtmw_convert` and `write_channels` (C++ engine). In TD
+(`tests/td_extras_lab.py`): Class Scores and Convert RTMW3D identical to the Python every frame;
+channels match `write_channels` on every recorded table offline (`tests/test_tracking_extras.py`)
+and stay current in a C++ wrapper where only `channels` is pulled. Two TD lessons: an Info CHOP
+doesn't cook the node it reads (a Script CHOP that reads the node first does), and an expression on
+a cook time is cached until a dependency changes (`absTime.frame` keeps it live). Comparing the
+Python wrapper's own channels live doesn't work: `write_channels` force-cooks `inference_stats`,
+which recooks the plugin mid-frame. Holistic GPU's channels: Python 6-11 ms, C++ 0.3 ms.
+`write_instance_colors` stays Python (a multi-sample lookup CHOP, one value per object).
+The Performance page: plugin timings (`decode_ms` and running averages added to OnnxTOP and
+MediaPipeTOP), the Tracker DAT's, and TD's cook times for the Info DAT, overlay and the tox total.
 
 Kalman exactness: the filter's matrices are 0s and 1s and the dimensions independent, so products
 round the same in any order; numpy's solve multiplies by the reciprocal of the (diagonal) Cholesky
@@ -139,7 +152,7 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 1 | Core: KeypointTracker + pose pipeline + skeletons + formatting; replay tool; exact diff on every skeleton mode | done |
 | 2 | `TrackerDAT` plugin, wrapper builder option, Holistic GPU on it, measured | done |
 | 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done |
-| 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert`, `write_instance_colors` (see below) | 1-2 sessions |
+| 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert` (`write_instance_colors` stays Python); the Performance page | done |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
 | 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++ | 2 sessions |
 

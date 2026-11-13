@@ -55,6 +55,7 @@ Parameters sit on pages of the tox:
 - **Tracking**: how detections become stable tracks (video models with tracks only).
 - **Debug**: **Debug Overlay** on or off (**Show Result** on image models), and on landmark
   models **Overlay Layers**, **Joint Size** and **Joint Outline**.
+- **Performance**: read-only timings in milliseconds, see [section 4](#4-speed-and-latency).
 - **About**: the package version. A tox expects the plugins of its own version.
 
 **Active** off stops the model and clears its output. **Reload** (a pulse) retries after a
@@ -144,6 +145,24 @@ TensorRT cannot be used. In these cases check the `tensorrt` channel (1 = Tensor
   disables TensorRT until you restart; cook the ONNX model first or avoid that TOP.
 - RVM runs on CUDA by design: its state changes shape after the first frame, which would make
   TensorRT rebuild.
+
+**The Performance page** shows where a tox's time goes, live. The values are only computed while
+the page is on screen, so it costs nothing otherwise.
+
+| Value | What it is |
+|---|---|
+| Inference | The model itself: GPU time for ONNX models, the worker thread's time for MediaPipe. Off TouchDesigner's main thread unless Wait for Result is on. |
+| Plugin Cook | The plugin's cook on the main thread: uploading the frame, starting the model, reading results back. |
+| Model Launch, Decode | ONNX models: parts of Plugin Cook (starting the run; reading back and decoding boxes, keypoints or images). |
+| Info DAT | Writing the detections into the plugin's Info DAT. |
+| Tracker | Tracking and writing the tracks, joints and bones tables. |
+| Detector | Models with a nested person or face detector: that detector's main-thread total. |
+| Debug Overlay | Drawing TOP 1. Turn Debug Overlay off and this drops to near 0. |
+| Main Thread Total | Everything inside the tox on the main thread last frame, as TouchDesigner measures it. |
+| Result Delay, Dropped Frames | See `result_delay` above; frames a MediaPipe worker skipped while busy. |
+
+Plugin and tracker times are running averages (about ten frames); the others are last frame's, so
+the rows don't add up exactly.
 
 **Where to spend less.** Lower **Dynamic Size** on depth and matting models; set **Max
 Hands / Faces / Poses** to what you expect (MediaPipe runs its detector every frame while fewer

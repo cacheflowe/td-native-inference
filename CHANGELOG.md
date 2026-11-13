@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Performance** page on every video tox: inference, the plugin's cook (model launch and decode
+  for ONNX models), the Info DAT, the tracker, the nested detector, the debug overlay and the
+  tox's main-thread total, live, in milliseconds. Computed only while shown. The plugins add
+  `decode_ms` (OnnxTOP) and running averages (`infer_ms_avg`, `execute_ms_avg`, ...) to their Info
+  CHOPs.
 - **Tracker DAT** (`TrackerDAT.dll`, a fourth plugin to allow): the tracker in C++, writing exactly
   the tables the Python tracker wrote. MediaPipe Holistic GPU uses it: one person, all three tables,
   4.5 to 1.3 ms per frame with Face Mesh on, 2.7 to 0.4 ms with it off. The other wrappers follow.
