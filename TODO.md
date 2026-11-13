@@ -30,7 +30,7 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
       PuppetLab has only the C++ solver.
 - [ ] **DAViD: depth alone in the VisionDemo** (asked Nov 13): an option to show just DAViDHuman's
       depth.
-- [ ] **NeuFlow v2** first steps (see Models).
+- [x] **NeuFlow v2** first steps (Nov 13, see Models): licensed, timed, plan for a frame-pair mode.
 
 ## Speed
 
@@ -96,10 +96,26 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
       - MobileSAM / EfficientSAM (needs prompt inputs);
       - RAFT optical flow (needs two frames).
 - [ ] **NeuFlow v2** optical flow (2024): built for edge devices, much lighter than RAFT for similar
-      accuracy, so a real-time candidate. Like RAFT it takes two frames: OnnxTOP would need a
-      previous-frame input (or a two-frame Raw mode) and a 2-channel flow output (Raw, RG = dx, dy).
-      Steps: find or export an ONNX, check that TensorRT accepts it, time it with `onnxtop_tool`, and
-      check the license before bundling.
+      accuracy. **First steps done Nov 13:**
+      - **License:** the model is Apache-2.0 ([neufieldrobotics/NeuFlow_v2](https://github.com/neufieldrobotics/NeuFlow_v2)),
+        so it can be bundled. ONNX exports (MIT scripts) from
+        [ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow](https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow),
+        release 0.1.0: `neuflow_mixed.onnx` (in `models/onnx/neuflow/`, sha256 7a079294...),
+        `neuflow_sintel.onnx`, `neuflow_things.onnx`, 42 MB each.
+      - **Graph:** opset 16, inputs `input1` (previous frame) and `input2` (current), each
+        [1, 3, 432, 768] float RGB 0-1 (fixed size). Output `output` [1, 2, 432, 768]: flow in
+        pixels of the 768x432 input (dx right, dy down). 9 GridSample layers.
+      - **Speed:** TensorRT fp16 takes it: **5.7 ms p50** (p95 8.2) on the RTX 4090 Laptop, launch
+        1.6 ms, engine build 2.6 min. TensorRT keeps the layer norms in fp32 (overflow warning).
+      - **Sanity (CPU):** the same frame twice gives 0.03 px mean flow; two dancer frames 15 apart
+        give coherent motion (the head 156 px to the right).
+
+      **Next:** OnnxTOP has no two-frame input yet. A "frame pair" mode: when a model has two image
+      inputs of one shape, feed `input1` the previous frame's tensor (kept on the GPU, like RVM's
+      recurrent state) and `input2` the current one. The flow comes out through Raw mode as RG,
+      converted to UV (dx / 768, -dy / 432). Then a wrapper spec, a flow-to-color visualization
+      (GLSL), the lab test and a fetch / bundle entry. Also compare fp16 with fp32 output on real
+      frames.
 - [ ] Also exported by MediaPipe and cheap to add: text classifier / embedder, language detector,
       object detector, image classifier / embedder, interactive segmenter.
 
