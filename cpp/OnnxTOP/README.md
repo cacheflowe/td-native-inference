@@ -166,9 +166,12 @@ appears in the Info DAT's input list, which names the image input only.
 #### Frame pairs (optical flow, NeuFlow v2)
 
 A model with two image inputs of one shape is fed a frame pair: the first input gets the previous
-frame, the second this one (Output Mode **Raw** only). The previous frame's tensor stays on the GPU and
-is copied across, in stream order, only when a new input frame arrives, so repeat cooks of one frame
-keep the pair; the very first frame goes into both (no motion). **Reset State** starts over.
+frame, the second this one (Output Mode **Raw** only). Each cook's frame is preprocessed into a
+scratch tensor and compared with the current one on the GPU (no readback): only a frame that differs
+advances the pair (previous = current, current = this frame). A repeated frame keeps the pair, so the
+model reports the last real motion: a 30 fps video or webcam in a 60 fps project delivers every image
+twice, and shifting on each cook made the flow strobe between motion and none. The very first frame
+goes into both (no motion). **Reset State** starts over.
 
 `models/onnx/neuflow/neuflow_mixed.onnx`: Input Normalize **0 to 1**, **Letterbox** off (the frame is
 stretched to 768x432, so a flow in model pixels divided by the model size is a flow in UV), Raw

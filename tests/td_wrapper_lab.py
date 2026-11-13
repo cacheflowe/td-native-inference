@@ -19,6 +19,9 @@ SOURCES = Path(project.folder) / 'docs' / 'images' / 'sources'
 IMAGES = {'MediaPipeHands': 'hand.jpg', 'MediaPipeFace': 'face.jpg', 'MediaPipeFaceDetector': 'face.jpg',
 	'YuNet': 'face.jpg', 'HSEmotion': 'face.jpg', 'MediaPipeSegment': 'face.jpg', 'DAViDNormals': 'face.jpg'}
 DEFAULT_IMAGE = 'body.jpg'
+# Video instead of a photo (local media, gitignored): optical flow wants real motion. Without the file
+# the photo is used and the lab's moving_source sways it.
+CLIPS = {'NeuFlowV2': 'media/dancer.mp4'}
 LAB = '/project1/WrapperLab'
 REPORT = Path(project.folder) / 'build' / 'wrapper-lab.json'
 
@@ -52,7 +55,21 @@ def _begin_next():
 	if not state['queue']:
 		return _finish()
 	name = state['queue'][0]
-	op(LAB).op('source').par.file = (SOURCES / IMAGES.get(name, DEFAULT_IMAGE)).as_posix()
+	clip = Path(project.folder) / CLIPS[name] if name in CLIPS else None
+	clip = clip if clip is not None and clip.exists() else None
+	source = op(LAB).op('source')
+	source.par.file = clip.as_posix() if clip else (SOURCES / IMAGES.get(name, DEFAULT_IMAGE)).as_posix()
+	moving = op(LAB).op('moving_source')
+	if moving is not None:
+		moving.bypass = clip is not None	# a clip moves by itself
+	if clip:
+		# One clip frame per TD frame: played in real time, a 30 fps clip repeats every frame at 60 fps,
+		# and a repeated frame is (correctly) no motion.
+		state['playmode'] = source.par.playmode.eval()
+		source.par.playmode = 'specify'
+		source.par.indexunit = 'frames'
+		source.par.index.expr = 'absTime.frame % 300'
+	op(LAB).op(name).unstore('lab_flow_seen')
 	comp = op(LAB).op(name)
 	if comp.fetch('wrapper_spec')['kind'] == 'speech':
 		# Muted while tested; a new line in the input DAT is what gets spoken.
@@ -114,9 +131,11 @@ def _detected(comp):
 		text = comp.op('speaking_text')
 		return bool(comp.fetch('lab_heard', False)) and bool(text.numRows and text[0, 0].val)
 	if spec.get('flow'):
-		# Motion found: the lab feeds it a swaying image (moving_source); a still frame gives ~0.
-		flow = comp.op('out_flow').numpyArray()[..., :2]
-		return float(abs(flow).max()) > 0.002
+		# Motion found (on any cook so far: a repeated frame is no motion): the lab feeds it a clip, or
+		# a swaying photo (moving_source).
+		if float(abs(comp.op('out_flow').numpyArray()[..., :2]).max()) > 0.002:
+			comp.store('lab_flow_seen', True)
+		return bool(comp.fetch('lab_flow_seen', False))
 	if spec['kind'] == 'image':
 		return comp.op('debug').numpyArray()[..., :3].max() > 0
 	tracks = comp.op('tracks')
@@ -248,7 +267,14 @@ def _thumbnail(comp):
 
 def _finish():
 	state = op(LAB).fetch('lab_test')
-	op(LAB).op('source').par.file = state['original']
+	source = op(LAB).op('source')
+	source.par.file = state['original']
+	if 'playmode' in state:
+		source.par.index.expr = ''
+		source.par.index.mode = ParMode.CONSTANT
+		source.par.playmode = state['playmode']
+	if op(LAB).op('moving_source') is not None:
+		op(LAB).op('moving_source').bypass = False
 	op(LAB).unstore('lab_test')
 	REPORT.parent.mkdir(parents=True, exist_ok=True)
 	REPORT.write_text(json.dumps(state['results'], indent=1, default=str), encoding='utf-8')

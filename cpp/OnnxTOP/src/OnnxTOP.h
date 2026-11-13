@@ -90,6 +90,9 @@ private:
 	// previous frame, and whether it does yet.
 	const OnnxEngine*			myPairEngine = nullptr;
 	bool						myPairPrimed = false;
+	void*						myPairIncoming = nullptr;	// each cook's frame, compared before the pair advances
+	size_t						myPairIncomingBytes = 0;
+	int*						myPairFlag = nullptr;
 	std::atomic<bool>			myUpgrading{ false };	// Auto: running on CUDA, TensorRT building
 	std::string					myStaticModelPath;		// last model probed as fixed-size (Dynamic Size ignored)
 	EngineConfig				myRequestedConfig;

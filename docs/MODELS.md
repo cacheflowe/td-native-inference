@@ -309,7 +309,8 @@ saturated). TOP 3 is the flow itself, in UV per frame: R = across (right is posi
 (up is positive), at the input's resolution. Use it to displace or advect an image, drive particles,
 or measure motion in a region. The model works on a 768 x 432 version of each frame (5.7 ms with
 TensorRT, about 1.6 ms of TouchDesigner's main thread); **Reset State** forgets the previous frame,
-e.g. after a cut, so the next frame shows no motion. A still image shows no motion. GPU. NeuFlow v2,
+e.g. after a cut, so the next frame shows no motion. A still image shows no motion; a repeated frame
+(a 30 fps video or webcam in a 60 fps project) keeps showing the last motion. GPU. NeuFlow v2,
 Apache-2.0.
 
 ### Robust Video Matting (`RVM.tox`)

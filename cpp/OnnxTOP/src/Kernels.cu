@@ -658,6 +658,52 @@ cudaError_t launchClear(cudaSurfaceObject_t out, int outW, int outH, int bytesPe
 	return cudaGetLastError();
 }
 
+__global__ void kPairDiffers(const unsigned int* a, const unsigned int* b, size_t words, int* flag)
+{
+	for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < words; i += (size_t)gridDim.x * blockDim.x)
+		if (a[i] != b[i])
+		{
+			*flag = 1;	// any thread may set it; reading it races harmlessly
+			return;
+		}
+}
+
+__global__ void kPairShift(const unsigned int* incoming, unsigned int* current, unsigned int* previous, size_t words,
+	const int* flag)
+{
+	if (!*flag)
+		return;
+	for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < words; i += (size_t)gridDim.x * blockDim.x)
+	{
+		previous[i] = current[i];
+		current[i] = incoming[i];
+	}
+}
+
+cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool first, int* flag,
+	cudaStream_t stream)
+{
+	const size_t words = bytes / 4;	// float32 / float16 pairs / int32: a multiple of 4 bytes
+	if (first || bytes % 4)	// (an odd-sized uint8 tensor: no comparison, always advance)
+	{
+		if (!first)
+		{
+			cudaMemcpyAsync(previous, current, bytes, cudaMemcpyDeviceToDevice, stream);
+			cudaMemcpyAsync(current, incoming, bytes, cudaMemcpyDeviceToDevice, stream);
+			return cudaGetLastError();
+		}
+		cudaMemcpyAsync(current, incoming, bytes, cudaMemcpyDeviceToDevice, stream);
+		cudaMemcpyAsync(previous, incoming, bytes, cudaMemcpyDeviceToDevice, stream);
+		return cudaGetLastError();
+	}
+	cudaMemsetAsync(flag, 0, sizeof(int), stream);
+	const int block = 256, grid = 256;
+	kPairDiffers<<<grid, block, 0, stream>>>((const unsigned int*)incoming, (const unsigned int*)current, words, flag);
+	kPairShift<<<grid, block, 0, stream>>>((const unsigned int*)incoming, (unsigned int*)current, (unsigned int*)previous,
+		words, flag);
+	return cudaGetLastError();
+}
+
 cudaError_t launchSimccArgmax(const float* sx, const float* sy, const float* sz, int numCrops, int K,
 	int nx, int ny, int nz, float* out, cudaStream_t stream)
 {

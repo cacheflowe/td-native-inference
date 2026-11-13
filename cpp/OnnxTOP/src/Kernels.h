@@ -145,3 +145,11 @@ cudaError_t launchTensorToTexture(const void* data, bool isHalf, int C, int H, i
 
 // Zeroes a surface. bytesPerPixel: 4 = Mono32Float, 8 = RGBA16Float, 16 = RGBA32Float.
 cudaError_t launchClear(cudaSurfaceObject_t out, int outW, int outH, int bytesPerPixel, cudaStream_t stream);
+
+// Frame pairs (optical flow): `incoming` is the frame just preprocessed. If it differs from
+// `current` (any byte), the pair advances: previous = current, current = incoming. An identical
+// frame (a 30 fps video or webcam in a 60 fps project delivers each image twice) leaves the pair
+// as it is, so the model reports the last real motion instead of none. first = fill both with it.
+// Entirely on the GPU (no readback); flag is one device int of scratch.
+cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool first, int* flag,
+	cudaStream_t stream);

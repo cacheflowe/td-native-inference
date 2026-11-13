@@ -398,6 +398,10 @@ OnnxTOP::~OnnxTOP()
 		cudaFree(myDevCropBoxes);
 	if (myHostLogits)
 		cudaFreeHost(myHostLogits);
+	if (myPairIncoming)
+		cudaFree(myPairIncoming);
+	if (myPairFlag)
+		cudaFree(myPairFlag);
 	if (myStream)
 		cudaStreamDestroy(myStream);
 }
@@ -1330,15 +1334,32 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		{
 			const bool queue = async && newInput;
 			const TensorSlot* previous = framePair ? &engine->inputs()[0] : nullptr;
-			// A new frame: last frame's tensor becomes the previous one (in stream order, before it's
-			// overwritten). A repeat cook of the same frame keeps the pair as it is.
-			if (previous && myPairPrimed && newInput)
-				cudaMemcpyAsync(previous->device, in->device, in->bytes(), cudaMemcpyDeviceToDevice, myStream);
-			cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, letterboxPad, myStream);
-			if (ce == cudaSuccess && previous && !myPairPrimed)
+			if (previous && myPairIncomingBytes != in->bytes())
 			{
-				cudaMemcpyAsync(previous->device, in->device, in->bytes(), cudaMemcpyDeviceToDevice, myStream);
-				myPairPrimed = true;
+				if (myPairIncoming)
+					cudaFree(myPairIncoming);
+				myPairIncoming = nullptr;
+				myPairIncomingBytes = 0;
+				if (cudaMalloc(&myPairIncoming, in->bytes()) == cudaSuccess)
+					myPairIncomingBytes = in->bytes();
+				if (!myPairFlag)
+					cudaMalloc((void**)&myPairFlag, sizeof(int));
+				myPairPrimed = false;
+			}
+			cudaError_t ce;
+			if (previous && myPairIncoming && myPairFlag)
+			{
+				// Frame pair: this frame goes to a scratch tensor; the pair advances on the GPU only if
+				// it differs from the current one (a repeated frame keeps the last real motion).
+				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, myPairIncoming, letterboxPad, myStream);
+				if (ce == cudaSuccess)
+					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(), !myPairPrimed,
+						myPairFlag, myStream);
+				myPairPrimed = ce == cudaSuccess;
+			}
+			else
+			{
+				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, letterboxPad, myStream);
 			}
 			if (ce != cudaSuccess)
 				myError = std::string("Preprocess kernel failed: ") + cudaGetErrorString(ce);
