@@ -1171,6 +1171,14 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 			menu.val = menu.default = 'result'
 			menu.help = f"Which of {spec.get('label', spec['name'])}'s outputs is its layer."
 			views[spec['name']] = menu.name
+		elif spec.get('flow'):
+			# The flow data (TOP 1) is signed, so it reads as mostly black; the color view is the default.
+			menu = models.appendMenu(spec['name'].capitalize() + 'show', label='    Show')[0]
+			menu.menuNames = ['color', 'result']
+			menu.menuLabels = ['Color', 'Flow Data']
+			menu.val = menu.default = 'color'
+			menu.help = f"Which of {spec.get('label', spec['name'])}'s outputs is its layer."
+			views[spec['name']] = menu.name
 	about = demo.appendCustomPage('About')
 	release = about.appendStr('Version', label='Version')[0]
 	release.val = release.default = version()
@@ -1186,6 +1194,7 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 	transparent.par.resolutionh.expr = "op('input_frame').height"
 	composite = demo.create('compositeTOP', 'debug_composite')
 	composite.par.operand = 'over'
+	composite.par.format = 'rgba32float'	# float layers (flow, depth) keep their values: 8-bit clamps to 0-1
 	for index, spec in enumerate(specs):
 		toggle = next(key for key, value in controls.items() if value == spec['name'])
 		wrapper = build(spec, demo)
