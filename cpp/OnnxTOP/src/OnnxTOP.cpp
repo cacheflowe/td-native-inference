@@ -809,6 +809,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
 	inputs->enablePar("Resetstate", myEngine && (myEngine->hasState() || myEngine->inputs().size() == 2));
 	inputs->enablePar("Cutthreshold", myEngine && myEngine->inputs().size() == 2);
+	const float cutThreshold = (float)inputs->getParDouble("Cutthreshold");
 
 	EngineConfig desired;
 	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
@@ -1388,7 +1389,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, myPairIncoming, letterboxPad, myStream);
 				if (ce == cudaSuccess)
 					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(),
-						in->type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, (float)inputs->getParDouble("Cutthreshold"), first,
+						in->type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, cutThreshold, first,
 						myPairFlag, myStream);
 				myPairPrimed = ce == cudaSuccess;
 				if (first)
