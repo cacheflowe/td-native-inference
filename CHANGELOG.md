@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **NeuFlow v2 Optical Flow** (`NeuFlowV2.tox`): how every pixel moved since the previous frame, 5.7
+  ms on the GPU. TOP 1 the flow as color, TOP 3 the flow in UV. OnnxTOP runs models with two image
+  inputs as a frame pair (the previous frame and this one; **Reset State** starts over).
+- **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
+  its depth, normals or matte.
+
 ## v0.5.0 (2026-11-13)
 
 - **Puppet CHOP** (`PuppetCHOP.dll`, a fifth plugin to allow): Mixamo Puppet's solver in C++, with

@@ -798,7 +798,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
 	inputs->enablePar("Waitforresult", mode != ModeRaw);
 	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
-	inputs->enablePar("Resetstate", myEngine && myEngine->hasState());
+	inputs->enablePar("Resetstate", myEngine && (myEngine->hasState() || myEngine->inputs().size() == 2));
 
 	EngineConfig desired;
 	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
@@ -878,13 +878,19 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	InputLayout inLayout;
 	if (engine)
 	{
-		in = &engine->inputs()[0];
+		// Frame pair (optical flow, e.g. NeuFlow v2): two image inputs of one shape, the previous frame
+		// then the current one. Raw mode only; the current frame is written to the second.
+		const auto& ins = engine->inputs();
+		const bool pair = mode == ModeRaw && ins.size() == 2 && ins[0].shape == ins[1].shape && ins[0].type == ins[1].type;
+		in = &ins[pair ? 1 : 0];
 		const auto& sh = in->shape;
-		bool okInput = engine->inputs().size() == 1 && sh.size() == 4 && (sh[1] == 3 || sh[3] == 3) &&
+		bool okInput = (ins.size() == 1 || pair) && sh.size() == 4 && (sh[1] == 3 || sh[3] == 3) &&
 			tensorElem(in->type, inLayout.elem);
 		if (!okInput)
 		{
-			myError = "Model must have one image input shaped [1, 3, H, W] or [1, H, W, 3] "
+			myError = ins.size() == 2
+				? "Two image inputs (a frame pair, e.g. optical flow) need Output Mode Raw and inputs of one shape"
+				: "Model must have one image input shaped [1, 3, H, W] or [1, H, W, 3] "
 				"(float32 / float16 / int32 / uint8), got " + shapeString(sh) + " " + ortTypeName(in->type);
 			engine = nullptr;
 		}
@@ -1007,7 +1013,18 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		myPending.active = false;	// switched to waiting, or engine / mode changed: not wanted
 	readInferMs();
 	if (myResetState.exchange(false) && engine)
+	{
 		engine->resetState();
+		myPairPrimed = false;
+	}
+	// Frame pair: the first input holds the previous frame. A new engine starts over (the first
+	// frame goes into both: no motion).
+	const bool framePair = engine && engine->inputs().size() == 2;
+	if (framePair && myPairEngine != engine)
+	{
+		myPairEngine = engine;
+		myPairPrimed = false;
+	}
 	auto queueRun = [&](bool sync) -> bool
 	{
 		cudaEventRecord(myRunStart, myStream);
@@ -1312,7 +1329,17 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		if (!(async && decoded && !newInput))
 		{
 			const bool queue = async && newInput;
+			const TensorSlot* previous = framePair ? &engine->inputs()[0] : nullptr;
+			// A new frame: last frame's tensor becomes the previous one (in stream order, before it's
+			// overwritten). A repeat cook of the same frame keeps the pair as it is.
+			if (previous && myPairPrimed && newInput)
+				cudaMemcpyAsync(previous->device, in->device, in->bytes(), cudaMemcpyDeviceToDevice, myStream);
 			cudaError_t ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, in->device, letterboxPad, myStream);
+			if (ce == cudaSuccess && previous && !myPairPrimed)
+			{
+				cudaMemcpyAsync(previous->device, in->device, in->bytes(), cudaMemcpyDeviceToDevice, myStream);
+				myPairPrimed = true;
+			}
 			if (ce != cudaSuccess)
 				myError = std::string("Preprocess kernel failed: ") + cudaGetErrorString(ce);
 			else if (queueRun(!queue && mode != ModeRaw))
@@ -2189,7 +2216,8 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		OP_NumericParameter np("Resetstate");
 		np.label = "Reset State";
 		np.page = "ONNX";
-		np.help = "For a recurrent model (RVM): forget the previous frames, e.g. after a cut.";
+		np.help = "For a recurrent model (RVM) or a frame-pair model (optical flow): forget the previous frames, "
+			"e.g. after a cut.";
 		check(manager->appendPulse(np));
 	}
 	{

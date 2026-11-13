@@ -69,7 +69,7 @@ def _poll():
 	state = op(LAB).fetch('lab_test')
 	name = state['queue'][0]
 	comp = op(LAB).op(name)
-	for output in ('debug', 'out_channels', 'out_boxes', 'out_audio'):
+	for output in ('debug', 'out_channels', 'out_boxes', 'out_audio', 'out_flow'):
 		node = comp.op(output)
 		if node is not None:
 			node.cook(force=True)
@@ -113,6 +113,10 @@ def _detected(comp):
 			comp.store('lab_heard', True)
 		text = comp.op('speaking_text')
 		return bool(comp.fetch('lab_heard', False)) and bool(text.numRows and text[0, 0].val)
+	if spec.get('flow'):
+		# Motion found: the lab feeds it a swaying image (moving_source); a still frame gives ~0.
+		flow = comp.op('out_flow').numpyArray()[..., :2]
+		return float(abs(flow).max()) > 0.002
 	if spec['kind'] == 'image':
 		return comp.op('debug').numpyArray()[..., :3].max() > 0
 	tracks = comp.op('tracks')

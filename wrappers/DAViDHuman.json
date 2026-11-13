@@ -3,6 +3,7 @@
 	"label": "DAViD Depth + Normals + Matte",
 	"plugin": "OnnxTOP",
 	"kind": "image",
+	"result_label": "Depth",
 	"preset": {
 		"Model": "models/onnx/david/multi-task-model-vitl16_384.onnx",
 		"Mode": "raw",

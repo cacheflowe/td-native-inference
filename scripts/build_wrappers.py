@@ -50,6 +50,15 @@ if WRAPPERS:
 		text_source = lab.create('textDAT', 'text_source')
 		text_source.text = 'Hello from the wrapper lab.'
 		text_source.nodeX, text_source.nodeY = 0, -600
+	# Optical flow needs motion: the test image swaying (a few percent of the frame, every frame).
+	moving = lab.op('moving_source')
+	if moving is None:
+		moving = lab.create('transformTOP', 'moving_source')
+		moving.inputConnectors[0].connect(source)
+		moving.par.extend = 'mirror'
+		moving.par.tx.expr = '0.04 * math.sin(absTime.frame * 0.15)'
+		moving.par.ty.expr = '0.02 * math.cos(absTime.frame * 0.11)'
+		moving.nodeX, moving.nodeY = 150, 150
 	sources = {'video': source, 'audio': audio_source, 'text': text_source}
 	for name in names:
 		spec = wrapper_builder.load_spec(name)
@@ -57,7 +66,7 @@ if WRAPPERS:
 		comp = wrapper_builder.build(spec, lab)
 		if not existed:
 			comp.nodeX, comp.nodeY = 300, -wrapper_builder.spec_names().index(name) * 200
-			comp.inputConnectors[0].connect(sources[spec.get('input', 'video')])
+			comp.inputConnectors[0].connect(moving if spec.get('flow') else sources[spec.get('input', 'video')])
 		entry = {'nodes': len(comp.findChildren())}
 		if EXPORT:
 			destination = Path(project.folder) / 'tox' / f'{name}.tox'

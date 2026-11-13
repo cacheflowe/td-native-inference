@@ -1,0 +1,19 @@
+{
+	"name": "NeuFlowV2",
+	"label": "NeuFlow v2 Optical Flow",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"flow": true,
+	"preset": {
+		"Model": "models/onnx/neuflow/neuflow_mixed.onnx",
+		"Mode": "raw",
+		"Inputnorm": "unit",
+		"Letterbox": false,
+		"Rawoutput": 0,
+		"Rawnormalize": "none",
+		"Rawmaptoinput": true
+	},
+	"model": [
+		"Resetstate"
+	]
+}

@@ -302,6 +302,16 @@ Alpha matte of the person in frame (white = person), hair detail included. TOP 1
 the input's resolution; use it as a mask over the input. **Dynamic Size** sets the inference
 resolution (multiple of 32; 512 x 288 for 16:9 is about 2 ms with TensorRT). GPU. MODNet, Apache-2.0.
 
+### NeuFlow v2 Optical Flow (`NeuFlowV2.tox`)
+How every pixel moved since the previous frame. TOP 1 shows it as color: the hue is the direction, the
+saturation the speed, white is still (**Flow Scale** on the Debug page sets which speed is fully
+saturated). TOP 3 is the flow itself, in UV per frame: R = across (right is positive), G = up and down
+(up is positive), at the input's resolution. Use it to displace or advect an image, drive particles,
+or measure motion in a region. The model works on a 768 x 432 version of each frame (5.7 ms with
+TensorRT, about 1.6 ms of TouchDesigner's main thread); **Reset State** forgets the previous frame,
+e.g. after a cut, so the next frame shows no motion. A still image shows no motion. GPU. NeuFlow v2,
+Apache-2.0.
+
 ### Robust Video Matting (`RVM.tox`)
 Alpha matte of the person in frame, built to stay steady from frame to frame: the model carries
 state from one frame to the next, so it holds up under motion blur and movement better than a

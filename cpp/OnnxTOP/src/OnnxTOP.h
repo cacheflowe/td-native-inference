@@ -86,6 +86,10 @@ private:
 	std::string					myLoadWarning;	// shown as warning once Ready
 	std::atomic<bool>			myCancelLoad{ false };
 	std::atomic<bool>			myResetState{ false };	// Reset State pulse: consumed by the next cook
+	// Frame pair (two image inputs, e.g. optical flow): the engine whose first input holds the
+	// previous frame, and whether it does yet.
+	const OnnxEngine*			myPairEngine = nullptr;
+	bool						myPairPrimed = false;
 	std::atomic<bool>			myUpgrading{ false };	// Auto: running on CUDA, TensorRT building
 	std::string					myStaticModelPath;		// last model probed as fixed-size (Dynamic Size ignored)
 	EngineConfig				myRequestedConfig;

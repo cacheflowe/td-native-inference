@@ -69,7 +69,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | TensorRT FP16 | Part of the engine cache key |
 | ONNX | Reload Model | Retries after a failure, or reloads in place |
 | ONNX | Scalar Input | Value for a model's extra single-number float input, e.g. RVM's `downsample_ratio` (the model works on the frame scaled by this: 0.25 for HD, 0.5 for SD). Only enabled when the model has one; changing it reloads the model |
-| ONNX | Reset State | Recurrent models: forget the previous frames (after a cut). Only enabled when the model has state |
+| ONNX | Reset State | Recurrent and frame-pair models: forget the previous frames (after a cut). Only enabled when the model has state or two image inputs |
 | ONNX | Active | Off = skip inference, clear the output |
 | ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
 | ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, **Raw Output Tensor**, **Pose Crops** (RTMPose / RTMW / RTMW3D on person boxes), **Landmark Crops** or **MediaPipe Holistic** (both below). A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
@@ -162,6 +162,18 @@ recurrent state: it starts as a 1×1×1×1 zero tensor and each run's output bec
 input, on the GPU, with no readback. **Reset State** returns it to zero. State advances once per run,
 so a still input converges rather than flickers. A lone `[1]` float input gets Scalar Input. Neither
 appears in the Info DAT's input list, which names the image input only.
+
+#### Frame pairs (optical flow, NeuFlow v2)
+
+A model with two image inputs of one shape is fed a frame pair: the first input gets the previous
+frame, the second this one (Output Mode **Raw** only). The previous frame's tensor stays on the GPU and
+is copied across, in stream order, only when a new input frame arrives, so repeat cooks of one frame
+keep the pair; the very first frame goes into both (no motion). **Reset State** starts over.
+
+`models/onnx/neuflow/neuflow_mixed.onnx`: Input Normalize **0 to 1**, **Letterbox** off (the frame is
+stretched to 768x432, so a flow in model pixels divided by the model size is a flow in UV), Raw
+Output Index 0, Raw Normalize **None**, Raw Map To Input on. The output's R and G are the flow in
+pixels of the model's input (x right, y down); `NeuFlowV2.tox` converts it to UV.
 
 #### DAViD (human depth, normals, matte)
 
