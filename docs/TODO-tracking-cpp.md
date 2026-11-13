@@ -6,8 +6,7 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status (Nov 12, 2026):** phases 0-3 done; phase 3 (box and face modes) still needs its check in TD
-(`tests/td_tracker_dat_lab.py` after a restart). 16 sessions recorded in TD
+**Status (Nov 12, 2026):** phases 0-3 done, checked in TD. 16 sessions recorded in TD
 (`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
 recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
 skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
@@ -46,6 +45,10 @@ pose in C++; every mode now runs on the Tracker DAT. Replays exactly on detect, 
 Kalman exactness: the filter's matrices are 0s and 1s and the dimensions independent, so products
 round the same in any order; numpy's solve multiplies by the reciprocal of the (diagonal) Cholesky
 factor, checked bit for bit in TD's numpy 2.1 and 2.5. NMS is float32 like numpy's.
+
+In TD (`tests/td_tracker_dat_lab.py`, 300 frames each, every table identical, ids included), per
+frame, all tables pulled: Holistic GPU 4.27 -> 1.36 ms, without the face mesh 1.48 -> 0.50, YOLO26
+Detect 3.71 -> 0.29, YOLO26 Seg 5.22 -> 0.42, YuNet 1.51 -> 0.22.
 
 Run: `cpp\Tracking\build.cmd`, then `python tests/tracking_replay.py build/tracking/*.jsonl.gz
 --engine cpp` (full recordings) or `python -m unittest tests.test_tracking_replay` (committed ones).
@@ -135,7 +138,7 @@ the box pipeline, face `size_aspect`, `keypoints_visible` (always true), legacy 
 | 0 | Fixture recorder, Python replay harness, fix the test file's mid-file `unittest.main()` | done |
 | 1 | Core: KeypointTracker + pose pipeline + skeletons + formatting; replay tool; exact diff on every skeleton mode | done |
 | 2 | `TrackerDAT` plugin, wrapper builder option, Holistic GPU on it, measured | done |
-| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done (TD check pending) |
+| 3 | ByteTracker + Kalman + Hungarian, box pipeline (detect / segment), face pipeline (YuNet, geometric and solvePnP) | done |
 | 4 | The rest of the wrapper's per-frame Python: `write_channels`, `write_scores`, `rtmw_convert`, `write_instance_colors` (see below) | 1-2 sessions |
 | 5 | Switch every wrapper to TrackerDAT, regenerate toxes and demos, release; then retire the Python tracker modules (fixtures switch to recorded C++ output) | 1 session |
 | 6 | The puppet solvers (`puppet_solver`, `mixamo_retarget`, `hand_retarget`) in C++ | 2 sessions |
