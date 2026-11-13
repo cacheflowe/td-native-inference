@@ -6,9 +6,9 @@ with C++, for raw speed. The Python tracker costs ~4.5 ms per frame for one Holi
 points), more than the GPU inference it follows; C++ should bring that to ~0.3-0.6 ms, most of it
 TouchDesigner's table I/O rather than tracking.
 
-**Status (Nov 12, 2026):** phases 0-4 done, checked in TD; phase 5 under way: every wrapper runs the
-Tracker DAT (the builder's default engine) and no longer embeds the Python tracker. Left: the release,
-then retiring the Python tracker. 16 sessions recorded in TD
+**Status (Nov 12, 2026):** phases 0-5 done: every wrapper runs the Tracker DAT (the builder's default
+engine) and no longer embeds the Python tracker; released in v0.4.0. Left: retiring the Python tracker
+once the release has been in use for a while (see phase 5). 16 sessions recorded in TD
 (`tests/td_record_tracking.py`, in `/project1/TrackingLab`); the Python replay reproduces every
 recorded table exactly, and the C++ core (`cpp/Tracking`) matches it cell for cell on every
 skeleton mode (mp_holistic with and without the face mesh, mp_pose, mp_hands, mp_face,
