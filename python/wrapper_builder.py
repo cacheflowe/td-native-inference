@@ -419,6 +419,16 @@ void main()
 	fragColor = TDOutputSwizzle(vec4(x, y, 0.0, 1.0));
 }
 '''
+FLOW_SMOOTH_SHADER = '''// Flow Smoothing: this flow blended with the last smoothed one (input 2, a Feedback TOP).
+uniform float uSmoothing;	// 0 = raw
+out vec4 fragColor;
+void main()
+{
+	vec4 now = texture(sTD2DInputs[0], vUV.st);
+	vec4 before = texture(sTD2DInputs[1], vUV.st);
+	fragColor = TDOutputSwizzle(mix(now, before, uSmoothing));
+}
+'''
 FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, saturation = speed (white = still), the usual flow coding.
 uniform float uFullSpeed;	// screen widths per second shown fully saturated
 out vec4 fragColor;
@@ -449,10 +459,10 @@ def _glsl(comp, name, shader, source):
 
 
 def _build_flow(comp):
-	"""`flow`, the result (TOP 1): the flow in the Optical Flow TOP's format (Gain X / Y on the Model
-	page), using the plugin's pair_interval (the measured time between the pair's frames; a project
-	frame until known). `flow_color` (TOP 3): direction as hue, speed as saturation (Color Full Speed
-	on the Debug page)."""
+	"""`flow`: the flow in the Optical Flow TOP's format (Gain X / Y on the Model page), using the
+	plugin's pair_interval (the measured time between the pair's frames; a project frame until known).
+	`flow_smooth`, the result (TOP 1): Flow Smoothing over it (a Feedback TOP). `flow_color` (TOP 3):
+	direction as hue, speed as saturation (Color Full Speed on the Debug page)."""
 	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
 	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
 	flow.par.vec0name = 'uModelSize'
@@ -467,7 +477,17 @@ def _build_flow(comp):
 	model = next(page for page in comp.customPages if page.name == 'Model')
 	_page_par(model, 'Float', 'Gainx', 'Gain X', 1.0, 'Multiplies the horizontal flow (R), like the Optical Flow TOP.', 0.0, 4.0)
 	_page_par(model, 'Float', 'Gainy', 'Gain Y', 1.0, 'Multiplies the vertical flow (G), like the Optical Flow TOP.', 0.0, 4.0)
-	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, flow)
+	smoothing = _page_par(model, 'Float', 'Flowsmoothing', 'Flow Smoothing', 0.3,
+		'Blends each new flow with the last result (0 = raw, higher = steadier but slower to follow).', 0.0, 0.95)
+	smoothing.clampMin, smoothing.clampMax, smoothing.min, smoothing.max = True, True, 0.0, 0.99
+	feedback = comp.create('feedbackTOP', 'flow_feedback')
+	_connect(feedback, flow)
+	feedback.par.top = 'flow_smooth'
+	smooth = _glsl(comp, 'flow_smooth', FLOW_SMOOTH_SHADER, flow)
+	smooth.inputConnectors[1].connect(feedback)
+	smooth.par.vec0name = 'uSmoothing'
+	smooth.par.vec0valuex.expr = 'parent().par.Flowsmoothing'
+	flow_color = _glsl(comp, 'flow_color', FLOW_COLOR_SHADER, smooth)
 	flow_color.par.format = 'rgba8fixed'
 	flow_color.par.vec0name = 'uFullSpeed'
 	flow_color.par.vec0valuex.expr = 'parent().par.Colorfullspeed'
@@ -477,7 +497,7 @@ def _build_flow(comp):
 	output = comp.create('outTOP', 'out_color')
 	output.par.connectorder = 3
 	_connect(output, flow_color)
-	return flow
+	return smooth
 
 
 def _remapped(comp, source, remap, name):
@@ -612,8 +632,9 @@ def _layout(comp, spec):
 		if spec.get('remap'):
 			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
 		if spec.get('flow'):
-			positions.update({'flow': (2, 320), 'flow_color': (3, 460), 'overlay': (3, 320), 'out_color': (7, -700)})
-			docked = list(docked) + ['flow_pixel', 'flow_color_pixel']
+			positions.update({'flow': (2, 320), 'flow_feedback': (2, 460), 'flow_smooth': (3, 320), 'flow_color': (4, 460),
+				'overlay': (4, 320), 'out_color': (7, -700)})
+			docked = list(docked) + ['flow_pixel', 'flow_smooth_pixel', 'flow_color_pixel']
 	for path, (column, y) in positions.items():
 		node = comp.op(path)
 		if node is not None:

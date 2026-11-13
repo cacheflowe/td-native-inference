@@ -668,20 +668,47 @@ __global__ void kPairDiffers(const unsigned int* a, const unsigned int* b, size_
 		}
 }
 
+// Sum of |a - b| over float tensors (block reduction, one atomic per block).
+__global__ void kPairAbsDiff(const float* a, const float* b, size_t n, float* sum)
+{
+	__shared__ float partial[256];
+	float acc = 0.f;
+	for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < n; i += (size_t)gridDim.x * blockDim.x)
+		acc += fabsf(a[i] - b[i]);
+	partial[threadIdx.x] = acc;
+	__syncthreads();
+	for (int stride = blockDim.x / 2; stride > 0; stride /= 2)
+	{
+		if (threadIdx.x < stride)
+			partial[threadIdx.x] += partial[threadIdx.x + stride];
+		__syncthreads();
+	}
+	if (threadIdx.x == 0)
+		atomicAdd(sum, partial[0]);
+}
+
+// flag: 0 = the same frame (keep the pair), 1 = a new frame (advance), 2 = a cut (restart).
+__global__ void kPairDecide(const float* sum, size_t n, float cut, int* flag)
+{
+	const float mean = *sum / (float)n;
+	*flag = *sum == 0.f ? 0 : (cut > 0.f && mean > cut ? 2 : 1);
+}
+
 __global__ void kPairShift(const unsigned int* incoming, unsigned int* current, unsigned int* previous, size_t words,
 	const int* flag)
 {
-	if (!*flag)
+	const int f = *flag;
+	if (!f)
 		return;
 	for (size_t i = blockIdx.x * (size_t)blockDim.x + threadIdx.x; i < words; i += (size_t)gridDim.x * blockDim.x)
 	{
-		previous[i] = current[i];
+		previous[i] = f == 2 ? incoming[i] : current[i];	// a cut: no motion across it
 		current[i] = incoming[i];
 	}
 }
 
-cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool first, int* flag,
-	cudaStream_t stream)
+cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool isFloat,
+	float cutThreshold, bool first, int* flag, cudaStream_t stream)
 {
 	const size_t words = bytes / 4;	// float32 / float16 pairs / int32: a multiple of 4 bytes
 	if (first || bytes % 4)	// (an odd-sized uint8 tensor: no comparison, always advance)
@@ -697,9 +724,19 @@ cudaError_t launchPairAdvance(const void* incoming, void* current, void* previou
 		cudaMemcpyAsync(previous, incoming, bytes, cudaMemcpyDeviceToDevice, stream);
 		return cudaGetLastError();
 	}
-	cudaMemsetAsync(flag, 0, sizeof(int), stream);
 	const int block = 256, grid = 256;
-	kPairDiffers<<<grid, block, 0, stream>>>((const unsigned int*)incoming, (const unsigned int*)current, words, flag);
+	if (isFloat)
+	{
+		float* sum = (float*)(flag + 1);
+		cudaMemsetAsync(sum, 0, sizeof(float), stream);
+		kPairAbsDiff<<<grid, block, 0, stream>>>((const float*)incoming, (const float*)current, words, sum);
+		kPairDecide<<<1, 1, 0, stream>>>(sum, words, cutThreshold, flag);
+	}
+	else
+	{
+		cudaMemsetAsync(flag, 0, sizeof(int), stream);
+		kPairDiffers<<<grid, block, 0, stream>>>((const unsigned int*)incoming, (const unsigned int*)current, words, flag);
+	}
 	kPairShift<<<grid, block, 0, stream>>>((const unsigned int*)incoming, (unsigned int*)current, (unsigned int*)previous,
 		words, flag);
 	return cudaGetLastError();

@@ -808,6 +808,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Waitforresult", mode != ModeRaw);
 	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
 	inputs->enablePar("Resetstate", myEngine && (myEngine->hasState() || myEngine->inputs().size() == 2));
+	inputs->enablePar("Cutthreshold", myEngine && myEngine->inputs().size() == 2);
 
 	EngineConfig desired;
 	desired.modelPath = resolveModelPath(modelPath, inputs->getParString("Model"), myModelHint);
@@ -1348,7 +1349,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				if (cudaMalloc(&myPairIncoming, in->bytes()) == cudaSuccess)
 					myPairIncomingBytes = in->bytes();
 				if (!myPairFlag)
-					cudaMalloc((void**)&myPairFlag, sizeof(int));
+					cudaMalloc((void**)&myPairFlag, 2 * sizeof(int));	// the decision, the difference sum
 				myPairPrimed = false;
 			}
 			cudaError_t ce;
@@ -1371,7 +1372,13 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 					{
 						const double t = myPairSlotTime[myPairHead];
 						if (myPairLastAdvance >= 0.0 && t > myPairLastAdvance)
-							myPairInterval = t - myPairLastAdvance;
+						{
+							// A video's frame rate is steady; TD's cook timing jitters: a slow average.
+							// A pause (over half a second) isn't a frame interval.
+							const double interval = t - myPairLastAdvance;
+							if (interval < 0.5)
+								myPairInterval = myPairInterval > 0.0 ? myPairInterval * 0.9 + interval * 0.1 : interval;
+						}
 						myPairLastAdvance = t;
 					}
 					myPairHead = (myPairHead + 1) % kPairSlots;
@@ -1380,7 +1387,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				const bool first = !myPairPrimed;
 				ce = launchPreprocess(inSurf, fmt, lb, inputNorm, inLayout, myPairIncoming, letterboxPad, myStream);
 				if (ce == cudaSuccess)
-					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(), first,
+					ce = launchPairAdvance(myPairIncoming, in->device, previous->device, in->bytes(),
+						in->type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT, (float)inputs->getParDouble("Cutthreshold"), first,
 						myPairFlag, myStream);
 				myPairPrimed = ce == cudaSuccess;
 				if (first)
@@ -2283,6 +2291,20 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.help = "For a recurrent model (RVM) or a frame-pair model (optical flow): forget the previous frames, "
 			"e.g. after a cut.";
 		check(manager->appendPulse(np));
+	}
+	{
+		OP_NumericParameter np("Cutthreshold");
+		np.label = "Cut Threshold";
+		np.page = "ONNX";
+		np.defaultValues[0] = 0.08;
+		np.minSliders[0] = 0.0;
+		np.maxSliders[0] = 0.5;
+		np.minValues[0] = 0.0;
+		np.clampMins[0] = true;
+		np.help = "Frame-pair models (optical flow): a frame whose mean difference from the last (in the model's "
+			"input values, 0-1) is above this is a scene change, so the pair restarts there instead of reporting "
+			"huge motion. Moving footage changes up to about 0.04 a frame; a cut 0.1-0.4. 0 = off.";
+		check(manager->appendFloat(np));
 	}
 	{
 		OP_NumericParameter np("Active");

@@ -6,7 +6,9 @@
   ms on the GPU. TOP 1 is the flow in the Optical Flow TOP's format (R right, G up, in screen widths
   per second; Gain X / Y), TOP 3 the flow as color. OnnxTOP runs models with two image inputs as a
   frame pair: the previous distinct frame and this one (a repeated frame keeps the pair; Info CHOP
-  `pair_interval` is the time between them; **Reset State** starts over).
+  `pair_interval` is the time between them; **Reset State** starts over). A scene change (or a
+  video looping) above **Cut Threshold** restarts the pair instead of flashing huge motion; **Flow
+  Smoothing** steadies the output.
 - **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
   its depth, normals or matte.
 

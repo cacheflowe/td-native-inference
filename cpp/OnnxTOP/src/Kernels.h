@@ -146,10 +146,13 @@ cudaError_t launchTensorToTexture(const void* data, bool isHalf, int C, int H, i
 // Zeroes a surface. bytesPerPixel: 4 = Mono32Float, 8 = RGBA16Float, 16 = RGBA32Float.
 cudaError_t launchClear(cudaSurfaceObject_t out, int outW, int outH, int bytesPerPixel, cudaStream_t stream);
 
-// Frame pairs (optical flow): `incoming` is the frame just preprocessed. If it differs from
-// `current` (any byte), the pair advances: previous = current, current = incoming. An identical
-// frame (a 30 fps video or webcam in a 60 fps project delivers each image twice) leaves the pair
-// as it is, so the model reports the last real motion instead of none. first = fill both with it.
-// Entirely on the GPU (no readback); flag is one device int of scratch.
-cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool first, int* flag,
-	cudaStream_t stream);
+// Frame pairs (optical flow): `incoming` is the frame just preprocessed, compared with `current`:
+//   the same (every byte): the pair stays (a 30 fps source in a 60 fps project delivers each image
+//     twice; the model then reports the last real motion instead of none);
+//   different: the pair advances, previous = current, current = incoming;
+//   isFloat (float32 tensors) and the mean |incoming - current| above cutThreshold (> 0): a cut, both
+//     become incoming (no motion across a scene change or a video's loop point).
+// first = fill both. All on the GPU (no readback). flag: two ints of device scratch; flag[0] gets
+// 0 / 1 / 2 (same / advanced / cut), flag[1] holds the difference sum.
+cudaError_t launchPairAdvance(const void* incoming, void* current, void* previous, size_t bytes, bool isFloat,
+	float cutThreshold, bool first, int* flag, cudaStream_t stream);

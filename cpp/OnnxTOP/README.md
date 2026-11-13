@@ -70,6 +70,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | ONNX | Reload Model | Retries after a failure, or reloads in place |
 | ONNX | Scalar Input | Value for a model's extra single-number float input, e.g. RVM's `downsample_ratio` (the model works on the frame scaled by this: 0.25 for HD, 0.5 for SD). Only enabled when the model has one; changing it reloads the model |
 | ONNX | Reset State | Recurrent and frame-pair models: forget the previous frames (after a cut). Only enabled when the model has state or two image inputs |
+| ONNX | Cut Threshold | Frame-pair models: a frame whose mean difference from the last (the model's input values, 0-1) is above this restarts the pair (a scene change; no flow across it). Moving footage changes up to about 0.04 a frame, a cut 0.1-0.4. 0 = off |
 | ONNX | Active | Off = skip inference, clear the output |
 | ONNX | Wait for Result | **On** (default): the cook waits for this frame's inference, so detections match the image exactly. **Off**: the cook queues the inference and returns; the next cook decodes it (`result_delay` 1), so TouchDesigner's main thread doesn't sit out the inference time. A still input runs synchronously either way. Raw mode never waits (its output stays on the GPU, same frame). |
 | ONNX | Output Mode | **YOLO End2End** (Ultralytics NMS-free det/seg/pose; also DETR-style detect exports with separate `logits [1, N, C]` + `pred_boxes [1, N, 4]` outputs, like `models/onnx/yolo26/yolo26s.onnx`, decoded like `onnx_yolo26_obj_det.py`), **MoveNet Multipose**, **YuNet Faces**, **Classify Crops**, **Raw Output Tensor**, **Pose Crops** (RTMPose / RTMW / RTMW3D on person boxes), **Landmark Crops** or **MediaPipe Holistic** (both below). A model that doesn't match the mode errors instead of outputting black. Saved nodes keep their value |
@@ -171,9 +172,12 @@ scratch tensor and compared with the current one on the GPU (no readback): only 
 advances the pair (previous = current, current = this frame). A repeated frame keeps the pair, so the
 model reports the last real motion: a 30 fps video or webcam in a 60 fps project delivers every image
 twice, and shifting on each cook made the flow strobe between motion and none. The very first frame
-goes into both (no motion). **Reset State** starts over. Whether a cook advanced the pair is copied
+goes into both (no motion). **Reset State** starts over, and so does a cut: with a float32 input the
+comparison is the mean absolute difference, and above **Cut Threshold** both tensors become the new
+frame. Whether a cook advanced the pair is copied
 back to the CPU asynchronously (read on a later cook, never waited for), and the time between advances
-is the Info CHOP's `pair_interval`: what a flow per second needs (`NeuFlowV2.tox` converts to the
+is the Info CHOP's `pair_interval` (a slow average: a source's frame rate is steady, TD's cook
+timing jitters): what a flow per second needs (`NeuFlowV2.tox` converts to the
 Optical Flow TOP's screen widths per second with it).
 
 `models/onnx/neuflow/neuflow_mixed.onnx`: Input Normalize **0 to 1**, **Letterbox** off (the frame is

@@ -14,6 +14,7 @@
 		"Rawmaptoinput": true
 	},
 	"model": [
-		"Resetstate"
+		"Resetstate",
+		"Cutthreshold"
 	]
 }

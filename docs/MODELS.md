@@ -312,9 +312,14 @@ particlesGpu component's forces):
 - Right and up are positive.
 - **Gain X / Gain Y** (Model page) multiply them, like the Optical Flow TOP's Gain.
 
-Per second uses the measured time between the two frames compared (the plugin's `pair_interval`),
-so a 30 fps video or webcam in a 60 fps project gives true speeds. A repeated frame keeps showing the
-last motion; a still image shows none.
+Per second uses the measured time between the two frames compared (the plugin's `pair_interval`,
+averaged), so a 30 fps video or webcam in a 60 fps project gives true speeds. A repeated frame keeps
+showing the last motion; a still image shows none.
+
+- **Cut Threshold** (Model page, default 0.08): a scene change, or a video jumping back to its start,
+  restarts the comparison instead of flashing huge motion. It's the mean difference between two
+  frames (0-1): moving footage changes up to about 0.04 a frame, a cut 0.1-0.4. 0 turns it off.
+- **Flow Smoothing** (Model page, default 0.3): blends each new flow with the last; 0 is raw.
 
 TOP 3 shows the flow as color: the hue is the direction, the saturation the speed, white is still.
 **Color Full Speed** (Debug page) is the speed, in screen widths per second, shown fully
