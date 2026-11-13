@@ -147,6 +147,9 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 - [ ] TD exits silently now and then (twice on Nov 12, no dump; Windows logged `RADAR_PRE_LEAK_64`).
       Not reproduced. This dev machine has two unstable P-cores, so random crashes here can be
       hardware.
+- [ ] The full wrapper lab sometimes misses a MediaPipe wrapper that passes alone (Sound
+      Classifier earlier, Hands on Nov 13: no hand in 1200 frames, no errors). Lab ordering or a
+      MediaPipe graph not starting after the wrapper before it; retry once before failing?
 
 ## Reference: measurements worth keeping
 

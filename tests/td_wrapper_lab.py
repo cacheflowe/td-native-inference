@@ -234,7 +234,15 @@ def _thumbnail(comp):
 		if spec.get('input') in ('audio', 'text'):
 			panels = [over(select('debug'), source)]
 		elif spec.get('flow'):
-			panels = [source, select('out_color')]	# TOP 1 is the flow as data (dark); its color view
+			# The flow is signed data (left / down negative, slow motion near 0): shown as the speed per
+			# axis, R horizontal and G vertical, brightened.
+			shader = work.create('textDAT', 'flow_view_pixel')
+			shader.text = ('out vec4 fragColor;\nvoid main()\n{\n\tvec2 f = texture(sTD2DInputs[0], vUV.st).rg;\n'
+				'\tfragColor = TDOutputSwizzle(vec4(clamp(abs(f) * 4.0, 0.0, 1.0), 0.0, 1.0));\n}\n')
+			view = work.create('glslTOP', 'flow_view')
+			view.par.pixeldat = shader.name
+			view.inputConnectors[0].connect(select('debug'))
+			panels = [source, view]
 		elif spec['kind'] == 'image':
 			panels = [source, select('debug')]
 		elif spec.get('result') == 'inference':
