@@ -325,9 +325,9 @@ showing the last motion; a still image shows none.
   the floor become zero, and above it the flow fades back in over the ease, so slow real motion
   doesn't pop on. 0 / 0 is the raw flow.
 
-TOP 3 shows the flow as color: the hue is the direction, the saturation the speed, white is still.
-**Color Full Speed** (Debug page) is the speed, in screen widths per second, shown fully
-saturated.
+TOP 3 shows the flow as color: the hue is the direction, the brightness the speed, black is still.
+**Color Full Speed** (Debug page) is the speed, in screen widths per second, shown at full
+brightness.
 
 Unlike the Optical Flow TOP, it isn't limited to newer NVIDIA cards' hardware flow. The model works
 on a 768 x 432 version of each frame: 5 ms with TensorRT, about 1.5 ms of TouchDesigner's main

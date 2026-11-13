@@ -440,8 +440,8 @@ void main()
 	fragColor = TDOutputSwizzle(vec4(f.rg * keep, f.ba));
 }
 '''
-FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, saturation = speed (white = still), the usual flow coding.
-uniform float uFullSpeed;	// screen widths per second shown fully saturated
+FLOW_COLOR_SHADER = '''// Flow as color: hue = direction, brightness = speed (black = still).
+uniform float uFullSpeed;	// screen widths per second shown at full brightness
 out vec4 fragColor;
 vec3 hsv2rgb(vec3 c)
 {
@@ -453,7 +453,7 @@ void main()
 	vec2 f = texture(sTD2DInputs[0], vUV.st).rg;
 	float hue = atan(f.y, f.x) / 6.2831853 + 0.5;
 	float speed = clamp(length(f) / max(uFullSpeed, 1e-4), 0.0, 1.0);
-	fragColor = TDOutputSwizzle(vec4(hsv2rgb(vec3(hue, speed, 1.0)), 1.0));
+	fragColor = TDOutputSwizzle(vec4(hsv2rgb(vec3(hue, 1.0, speed)), 1.0));
 }
 '''
 
@@ -474,7 +474,7 @@ def _build_flow(comp):
 	plugin's pair_interval (the measured time between the pair's frames; a project frame until known).
 	`flow_smooth`: Flow Smoothing over it (a Feedback TOP). `flow_gate`, the result (TOP 1): the Noise
 	Floor (after the smoothing, which steadies the speeds it compares). `flow_color` (TOP 3):
-	direction as hue, speed as saturation (Color Full Speed on the Debug page)."""
+	direction as hue, speed as brightness (black = still; Color Full Speed on the Debug page)."""
 	flow = _glsl(comp, 'flow', FLOW_SHADER, comp.op('inference'))
 	stat = "op('inference_stats')['{}'].eval() if op('inference_stats')['{}'] is not None else 0"
 	flow.par.vec0name = 'uModelSize'
@@ -515,7 +515,7 @@ def _build_flow(comp):
 	flow_color.par.vec0valuex.expr = 'parent().par.Colorfullspeed'
 	debug = next(page for page in comp.customPages if page.name == 'Debug')
 	_page_par(debug, 'Float', 'Colorfullspeed', 'Color Full Speed', 1.0,
-		'TOP 3 (the flow as color): the speed, in screen widths per second, shown fully saturated.', 0.05, 5.0)
+		'TOP 3 (the flow as color): the speed, in screen widths per second, shown at full brightness.', 0.05, 5.0)
 	output = comp.create('outTOP', 'out_color')
 	output.par.connectorder = 3
 	_connect(output, flow_color)
@@ -1194,7 +1194,7 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 			menu.help = f"Which of {spec.get('label', spec['name'])}'s outputs is its layer."
 			views[spec['name']] = menu.name
 		elif spec.get('flow'):
-			# The flow data (TOP 1) is signed, so it reads as mostly black; the color view is the default.
+			# The color view (TOP 3) by default; Flow Data is TOP 1 (signed, so negative motion reads black).
 			menu = models.appendMenu(spec['name'].capitalize() + 'show', label='    Show')[0]
 			menu.menuNames = ['color', 'result']
 			menu.menuLabels = ['Color', 'Flow Data']
