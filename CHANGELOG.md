@@ -13,7 +13,10 @@
   TOP 1, and the demo composites in 32-bit float (8-bit clamped the flow's
   negative values).
 - **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
-  its depth, normals or matte.
+  its depth, normals or matte, and its depth is also TOP 3 of the demo.
+- **Relight Demo** (`RelightDemo.tox`): relights a person with two colored point lights (PBR: GGX
+  highlights, Fresnel, roughness, distance falloff), using DAViD's normals, depth and matte. Each
+  light follows a hand (MediaPipe Hands) and eases back to its own position when there's none.
 
 ## v0.5.0 (2026-11-13)
 

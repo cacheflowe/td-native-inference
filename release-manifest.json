@@ -28,6 +28,7 @@
 		"tox/MediaPipeSpeechToText.tox",
 		"tox/MediaPipeTextToSpeech.tox",
 		"tox/AudioDemo.tox",
+		"tox/RelightDemo.tox",
 		"tox/VisionDemo.tox",
 		"tox/MoveNet.tox",
 		"tox/Yolo26Detect.tox",

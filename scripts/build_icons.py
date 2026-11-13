@@ -40,6 +40,7 @@ ENGINES = {
 DEMOS = {
 	'VisionDemo': ('Vision Demo', 'All video models'),
 	'AudioDemo': ('Audio Demo', 'All audio models'),
+	'RelightDemo': ('Relight Demo', 'DAViD + MediaPipe Hands'),
 	'MixamoPuppet': ('Mixamo Puppet', 'Pose tracking'),
 	'HandsGeometry': ('Hands Geometry', 'MediaPipe Hands'),
 }

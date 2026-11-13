@@ -367,7 +367,31 @@ surprise. **Classify Interval** runs the classifier every Nth frame to save GPU 
 
 Every video model in one COMP for trying them side by side. Wire a video TOP in and switch models on
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
-overlay composited together (image results behind the overlays); TOP 2 is the input.
+overlay composited together (image results behind the overlays); TOP 2 is the input; TOP 3 is DAViD
+Depth + Normals + Matte's depth on its own (transparent while that model is off).
+
+## Relight Demo (`RelightDemo.tox`)
+
+Lights a person with two point lights, each following a hand. DAViD Depth + Normals + Matte gives
+the surface direction (normals), where each pixel sits in depth, and the matte; MediaPipe Hands
+gives the hands. The shading is physically based (GGX highlights, Fresnel, roughness, light falling
+off with distance) in linear light, with the camera image as the surface color.
+
+- **Lights page:** **Follow Hands** (Light 1 takes the hand MediaPipe calls Right, Light 2 the Left
+  one; MediaPipe names hands as in a mirrored selfie image, so swap the colors if yours read
+  reversed. Two hands always get a light each. Off, MediaPipe Hands doesn't run), **Follow Lag**
+  (seconds to ease to a hand or back), then per light: on/off, **Color**, **Intensity**,
+  **Position** (where it sits with no hand, 0 to 1, origin bottom left) and **Distance** (how far
+  in front of the person, in image heights: small = side light, large = flat front light).
+  **Light Radius** is the falloff distance.
+- **Material page:** **Ambient** (unlit share of the image), **Roughness**, **Metallic**,
+  **Specular**, **Depth Scale** (how deep the person is), **Exposure**, **Background**
+  (brightness of everything else), **Transparent Background** (alpha = the matte) and **Show
+  Lights** (a ring at each light).
+
+TOP 1 is the relit image, TOP 2 the input, TOP 3 the normals, TOP 4 the matte; CHOP 1 the lights'
+positions (`light1_x`, `light1_y`, `light1_hand`: 1 while following a hand). About 25 ms of GPU
+(DAViD ViT-L) plus MediaPipe Hands on the CPU.
 
 ## Audio models
 

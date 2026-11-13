@@ -102,7 +102,8 @@ speech takes text from its **Text** parameter or a DAT. Each one's outputs are l
 [docs/MODELS.md](docs/MODELS.md#audio-models).
 
 To try models side by side, use `VisionDemo.tox` or `AudioDemo.tox` and switch models on their
-**Models** page.
+**Models** page. `RelightDemo.tox` relights a person with two point lights that follow their hands
+(DAViD normals and depth, MediaPipe Hands; see [docs/MODELS.md](docs/MODELS.md#relight-demo-relightdemotox)).
 
 The first run of each ONNX model builds a TensorRT engine in the background (a few minutes, lower
 frame rate meanwhile); after that it loads in seconds.
