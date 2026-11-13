@@ -6,7 +6,7 @@ deliberate change, regenerate and review:
 	python tests/test_puppet_cpp.py --golden
 	python -m unittest tests.test_puppet_cpp
 
-Rigs: the synthetic Mixamo rig from test_retarget (committed); build/ybot_rest.json (Y Bot) and
+Rigs: a synthetic Mixamo-named T-pose rig (below); build/ybot_rest.json (Y Bot) and
 build/hand_rest.json (the rigged hand) when present (Mixamo / Blender files aren't committed; their
 references are kept with the others and skipped without them).
 """
@@ -22,10 +22,6 @@ from pathlib import Path
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / 'python'))
-sys.path.insert(0, str(ROOT / 'tests'))
-import mixamo_retarget as mr  # noqa: E402
-from test_retarget import synthetic_rig  # noqa: E402
 
 DLL = ROOT / 'cpp' / 'Puppet' / 'build' / 'puppet_replay.dll'
 FIXTURES = ROOT / 'tests' / 'data' / 'tracking'
@@ -41,6 +37,98 @@ PLAIN = dict(DEFAULTS, cutoff=0.0, twist=0.0, limits=0, relax=0)
 BODY_SETTINGS = {'defaults': DEFAULTS, 'center_mirror': dict(DEFAULTS, placement='center', mirror=1), 'plain': PLAIN}
 HAND_SETTINGS = {f'{hand}_{placement}': dict(DEFAULTS, hand=hand, placement=placement)
 	for hand in ('any', 'right', 'left') for placement in ('image', 'center')}
+
+
+# ---------------------------------------------------------------- the synthetic rig
+
+def euler_xyz(rx, ry, rz):
+	"""Rotation matrix for TD's rotate order xyz (x applied first): Rz @ Ry @ Rx, degrees."""
+	x, y, z = math.radians(rx), math.radians(ry), math.radians(rz)
+	cx, sx, cy, sy, cz, sz = math.cos(x), math.sin(x), math.cos(y), math.sin(y), math.cos(z), math.sin(z)
+	return np.array([
+		[cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+		[sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+		[-sy, cy * sx, cy * cx],
+	])
+
+
+def to_euler_xyz(m):
+	"""Inverse of euler_xyz: (rx, ry, rz) degrees."""
+	sy = -m[2, 0]
+	if abs(sy) < 0.99999:
+		rx, ry, rz = math.atan2(m[2, 1], m[2, 2]), math.asin(sy), math.atan2(m[1, 0], m[0, 0])
+	else:
+		rx, ry, rz = math.atan2(-m[1, 2], m[1, 1]), math.copysign(math.pi / 2, sy), 0.0
+	return math.degrees(rx), math.degrees(ry), math.degrees(rz)
+
+
+def _unit(v):
+	n = math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+	return v / n if n > 1e-9 else None
+
+
+def _frame(primary, hint):
+	"""Orthonormal frame (columns x, y, z), y along primary, x toward hint."""
+	y = _unit(primary)
+	h = np.asarray(hint, dtype=float)
+	x = h - y * np.dot(h, y)
+	x = x / math.sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2])
+	z = np.array([x[1] * y[2] - x[2] * y[1], x[2] * y[0] - x[0] * y[2], x[0] * y[1] - x[1] * y[0]])
+	return np.column_stack([x, y, z])
+
+
+def _side(sign, s):
+	"""One side's arm and leg: (bone, parent, position) with x mirrored by sign."""
+	x = lambda v: sign * v	# noqa: E731
+	bones = [
+		(f'{s}Shoulder', 'Spine2', (x(6), 145, 0)), (f'{s}Arm', f'{s}Shoulder', (x(18), 145, 0)),
+		(f'{s}ForeArm', f'{s}Arm', (x(45), 145, 0)), (f'{s}Hand', f'{s}ForeArm', (x(72), 145, 0)),
+		(f'{s}UpLeg', 'Hips', (x(9), 93, 0)), (f'{s}Leg', f'{s}UpLeg', (x(9), 53, 1)),
+		(f'{s}Foot', f'{s}Leg', (x(9), 10, -1)), (f'{s}ToeBase', f'{s}Foot', (x(9), 2, 12)),
+		(f'{s}Toe_End', f'{s}ToeBase', (x(9), 2, 20)),
+	]
+	for i in range(1, 5):
+		bones.append((f'{s}HandThumb{i}', f'{s}HandThumb{i - 1}' if i > 1 else f'{s}Hand', (x(73 + 3 * i), 145 - 0.5 * i, 2 + 2 * i)))
+	for finger, z in (('Index', 2.5), ('Middle', 0.5), ('Ring', -1.5), ('Pinky', -3.5)):
+		for i in range(1, 5):
+			bones.append((f'{s}Hand{finger}{i}', f'{s}Hand{finger}{i - 1}' if i > 1 else f'{s}Hand',
+				(x(80 + 4 * i - abs(z)), 145 - 0.3 * i, z)))
+	return bones
+
+
+SPEC = [
+	('Hips', None, (0, 100, 0)), ('Spine', 'Hips', (0, 110, -1)), ('Spine1', 'Spine', (0, 122, -1)),
+	('Spine2', 'Spine1', (0, 135, 0)), ('Neck', 'Spine2', (0, 150, 1)), ('Head', 'Neck', (0, 160, 3)),
+	('HeadTop_End', 'Head', (0, 178, 5)),
+] + _side(1, 'Left') + _side(-1, 'Right')
+
+
+def synthetic_rig():
+	"""A Mixamo-named T-pose rig, bones as {'parent', 't', 'r'}: each bone's +Y aims at its first
+	child (Mixamo-style), with a different roll per bone so nothing relies on simple rest rotations."""
+	P = 'mixamorig_'
+	pos = {n: np.array(p, dtype=float) for n, _, p in SPEC}
+	first_child = {}
+	for n, parent, _ in SPEC:
+		if parent:
+			first_child.setdefault(parent, n)
+	first_child.update(Hips='Spine', Spine2='Neck', LeftHand='LeftHandMiddle1', RightHand='RightHandMiddle1')
+	world, bones = {}, {}
+	for i, (n, parent, _) in enumerate(SPEC):
+		child = first_child.get(n)
+		if child:
+			y = _unit(pos[child] - pos[n])
+			roll = euler_xyz(*(37 * i % 90 - 45, 0, 0)) @ np.array([1.0, 0.0, 0.0])
+			if abs(np.dot(roll, y)) > 0.9:
+				roll = np.array([0.0, 0.0, 1.0])
+			world[n] = _frame(y, roll)
+		else:
+			world[n] = world[parent]
+		pw = world[parent] if parent else np.eye(3)
+		pp = pos[parent] if parent else np.zeros(3)
+		bones[P + n] = {'parent': P + parent if parent else None,
+			't': list(pw.T @ (pos[n] - pp)), 'r': list(to_euler_xyz(pw.T @ world[n]))}
+	return bones
 
 
 def load_rig(path):
@@ -155,7 +243,7 @@ def _bone_matrices(channels):
 	for name, value in channels:
 		if name[-3:] in ('_rx', '_ry', '_rz'):
 			out.setdefault(name[:-3], [0.0, 0.0, 0.0])['xyz'.index(name[-1])] = value
-	return {bone: mr.euler_xyz(*r) for bone, r in out.items()}
+	return {bone: euler_xyz(*r) for bone, r in out.items()}
 
 
 @unittest.skipUnless(DLL.exists(), f'{DLL} not built (cpp\\Puppet\\build.cmd)')

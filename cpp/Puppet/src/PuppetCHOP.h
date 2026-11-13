@@ -28,6 +28,8 @@ public:
 	void setupParameters(OP_ParameterManager* manager, void*) override;
 
 private:
+	bool cook(CHOP_OutputInfo* info, const OP_Inputs* inputs);
+
 	puppet::Solver solver_;
 	std::string warning_;
 	double cookMs_ = 0.0;

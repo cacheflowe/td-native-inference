@@ -72,12 +72,7 @@ def rest_rows(fbx):
 
 
 def capture_rest(comp):
-	"""Re-read the character's rest pose into `rest_pose` (the C++ solver), or the Script CHOP
-	solver's own storage (the Python one)."""
-	solver = comp.op('solver')
-	if solver.OPType == 'scriptCHOP':
-		solver.par.Capturerest.pulse()
-		return
+	"""Re-read the character's rest pose into `rest_pose`, the Puppet CHOP's rig."""
 	table = comp.op('rest_pose')
 	table.clear()
 	for row in rest_rows(comp.op('fbx')):

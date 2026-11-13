@@ -1,7 +1,7 @@
 # Puppet CHOP
 
-`PuppetCHOP.dll` (custom CHOP type `PuppetCHOP`, label "Puppet"): the puppet solver in C++, a port of
-`python/puppet_solver.py`, `mixamo_retarget.py` and `hand_retarget.py`. How the solver works:
+`PuppetCHOP.dll` (custom CHOP type `PuppetCHOP`, label "Puppet"): the puppet solver. It began as an exact port
+of the original Python solver (deleted Nov 13, 2026; in git history before then). How it works:
 [docs/PUPPETS.md](../../docs/PUPPETS.md). `MixamoPuppet.tox` uses it as its `solver`.
 
 Build: `cpp\Puppet\build.cmd`. It needs MSVC v142, like the other plugins, and no CUDA. The build
@@ -22,8 +22,8 @@ copies the DLL into `plugins/` and also builds `puppet_replay.dll` for the tests
 
 ## Parameters (Smoothing page)
 
-None of these are in the Python solver; with all of them off the CHOP matches it exactly.
-[docs/PUPPETS.md](../../docs/PUPPETS.md#smoothing-and-limits-c-solver-only) explains them and
+With all of them off, the CHOP is the plain solve (the original Python solver's output).
+[docs/PUPPETS.md](../../docs/PUPPETS.md#smoothing-and-limits) explains them and
 has the measurements.
 
 | Parameter | Default | What |
@@ -71,8 +71,7 @@ A cook whose tracks row and settings are the same as last time keeps the channel
   After a deliberate change, `python tests/test_puppet_cpp.py --golden`, and review. The test also
   checks that the default smoothing calms the forearms and hands.
 
-The C++ solver began as an exact port of the Python one (`puppet_solver.py`), checked offline and
-in TD to 1e-14 on rotations. Since Nov 13 the Python solver is no longer the reference.
+The port was checked against the Python solver, offline and in TD, to 1e-14 on rotations.
 
 **Nov 13 timing** (before the additions), per frame in TD:
 

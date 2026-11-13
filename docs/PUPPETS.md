@@ -2,13 +2,20 @@
 
 Developer notes on `MixamoPuppet.tox` and the rigged-hand lab: how tracked landmarks become bone
 rotations on a skinned FBX character, the conventions that make it work, where the time goes, and
-the plan for the C++ solver. User-facing setup is in [MANUAL.md](MANUAL.md#puppets).
+how the solver moved from Python to C++. User-facing setup is in [MANUAL.md](MANUAL.md#puppets).
 
-Code: `python/mixamo_retarget.py` (the solver: rig, targets, solve, place), `python/hand_retarget.py`
-(the hand rig's bone map), `python/puppet_solver.py` (the Script CHOP: tracks table in, channels
-out), `python/puppet_runtime.py` (inside the tox: import the FBX, bind the bones),
-`python/puppet_builder.py` (builds the tox). Tests: `tests/test_retarget.py`,
-`tests/test_hand_retarget.py`, `tests/test_puppet_solver.py`.
+Code (`cpp/Puppet`, [README](../cpp/Puppet/README.md)):
+- `src/Retarget.cpp`: the solver (rig, targets, solve, place, the hand rig's bone map, twist
+  smoothing);
+- `src/Puppet.cpp`: the cook (reading the tracks row, landmark smoothing, relaxing unseen limbs,
+  placement smoothing, the channels);
+- `src/PuppetCHOP.cpp`: the CHOP.
+
+In Python: `python/puppet_runtime.py` (inside the tox: import the FBX, capture the rest pose, bind
+the bones) and `python/puppet_builder.py` (builds the tox). Tests: `tests/test_puppet_cpp.py`.
+
+Until Nov 13, 2026 the solver was Python (`puppet_solver.py`, `mixamo_retarget.py`,
+`hand_retarget.py`, in git history); the names below are the C++ ones, which follow it.
 
 ## The pipeline
 
@@ -18,10 +25,10 @@ video -> Holistic / Pose tox (World Landmark Columns on)
               |
               v
 MixamoPuppet.tox
-  in_tracks -> solver (Script CHOP, puppet_solver.cook)
-                 1. read the person's row         -> {landmark: [x, y, z]}, {landmark: (u, v, conf)}
-                 2. solve (mixamo_retarget.solve) -> {bone: (rx, ry, rz)} local Euler, every bone
-                 3. place (mixamo_retarget.place) -> root_tx/ty/tz (Over Image)
+  in_tracks -> solver (the Puppet CHOP, Solver::cook)
+                 1. read the person's row -> {landmark: [x, y, z]}, {landmark: (u, v, conf)}
+                 2. solve                  -> {bone: (rx, ry, rz)} local Euler, every bone
+                 3. place                  -> root_tx/ty/tz (Over Image)
               -> rotations (Null CHOP): <bone>_rx/ry/rz, root_tx/ty/tz, mirror
   fbx (FBX COMP): every bone's rx/ry/rz is an expression on `rotations`; the COMP's tx/ty/tz too
   render: camera_image (at the origin, horizontal FOV = Image FOV) or a fixed Center camera
@@ -39,10 +46,10 @@ parameters are its *rest* local transform: `t` (offset from the parent, in the p
 `r` (Euler degrees, rotate order xyz), and `s` (scale, which matters for Blender's armature at 100).
 TD composes a bone's local transform as `T * Rz * Ry * Rx`, with column vectors.
 
-**Capture** (`puppet_solver.capture`, once per character) reads those constant values before they
-are bound, into `{bone: {'parent', 't', 'r', 's'}}`, stored on the solver. Binding the bones to the
-CHOP replaces their values with expressions, so the capture must come first; `puppet_runtime.bind`
-does it in that order.
+**Capture** (`puppet_runtime.capture_rest`, once per character) reads those constant values before
+they are bound, into the `rest_pose` table (`name, parent, tx, ty, tz, rx, ry, rz, s`) the CHOP
+reads. Binding the bones to the CHOP replaces their values with expressions, so the capture must
+come first; `puppet_runtime.bind` does it in that order.
 
 **`Rig`** runs forward kinematics once on the rest pose. Per bone it keeps:
 - `rest_local`, the rest local rotation matrix;
@@ -63,7 +70,7 @@ a different roll to prove it.
 
 ## Landmarks
 
-**Columns read.** `puppet_solver.read` takes one tracks row and returns world landmarks by name,
+**Columns read.** `Solver::read` takes one tracks row and returns world landmarks by name,
 with the column prefix dropped:
 - body: `left_shoulder`, ... from the `pose_` columns;
 - Holistic's hands keep their names (`left_hand_index_finger_mcp`), since the fingers use them;
@@ -83,7 +90,7 @@ on the rig; nothing is scaled.
 
 ## Solving one bone
 
-Every driven bone is one row of `TARGETS`:
+Every driven bone is one row of the target table (`mixamoTargets()`):
 
 ```
 (bone, target primary, target hint, rest primary, rest hint)
@@ -111,7 +118,7 @@ is converted to Euler xyz for the channels.
 
 **Weak hints.** A straight arm has no bend, so the hint is parallel to the primary and says nothing
 about roll. The hint's usefulness is the sine of its angle to the primary, the smaller of target
-and rest. Below `HINT_FADE` (0.05 to 0.3) the solver blends (slerp) from the full frame turn toward a
+and rest. Below `kHintFade` (0.05 to 0.3) the solver blends (slerp) from the full frame turn toward a
 **plain turn**: the parent's turn (`base`) plus the shortest swing onto the primary. A straight arm
 then keeps the chest's twist instead of spinning at random.
 
@@ -145,7 +152,7 @@ waist turns the chest against the hips, and the spine bones split that twist bet
 - **Mirror** swaps every `left_` / `right_` name and negates x before solving. The left bones then
   follow the person's right side, as a mirror image would.
 - **Unseen hands.** When Holistic doesn't see a hand, its finger bones keep their *last* solved
-  local rotation (`_hold_fingers`). Finger rotations are local to the hand bone, so they still
+  local rotation (`Solver::holdFingers`). Finger rotations are local to the hand bone, so they still
   follow the wrist, which the pose landmarks keep driving.
 - **Nobody tracked.** The whole last pose holds; before the first solve, the rest pose.
 
@@ -175,26 +182,25 @@ depth as the person moves.
 
 ## The rigged hand
 
-`hand_retarget.spec(rig)` recognizes a Blender-style hand rig (`handRig_02.fbx`: `pulse_R`, `hand_R`,
+`handSpec(rig)` recognizes a Blender-style hand rig (`handRig_02.fbx`: `pulse_R`, `hand_R`,
 `<finger>_base_R`, `<finger>_01.._03_R`). It returns its own target list for the same `solve()`, plus
 the joints `place()` uses and the palm point that Center keeps at the origin.
 
 - **Root.** The rig's root (`pulse`) carries the whole hand: wrist → middle knuckle, rolled by the
   knuckle line. The metacarpals ride along rigidly; driving each from its own noisy landmark line
   creased the skin.
-- **Phalanges are hinges** (`_hinge`). The target direction, seen from the parent's posed frame,
+- **Phalanges are hinges** (`hinge()`). The target direction, seen from the parent's posed frame,
   is split into a bend about the knuckle line and a sideways spread. Each is clamped to
-  `FINGER_LIMITS` (the first joint bends -30..95° and spreads ±25°; the others bend only). There is
+  the finger limits (the first joint bends -30..95° and spreads ±25°; the others bend only). There is
   no roll of their own. This is the only joint-limit code so far.
 - **One model, either hand.** The model is one hand. The other hand is solved mirrored and the
   render flipped back (the `mirror` channel), because mirroring the model itself (sx = -1) turns its
   shading inside out.
 
-## Smoothing and limits (C++ solver only)
+## Smoothing and limits
 
-The Puppet CHOP adds three things the Python solver doesn't have. They're on its Smoothing page,
-with all of them off it matches the Python solver exactly. The defaults were chosen by measuring
-the recorded Holistic GPU dancer clip.
+The Puppet CHOP adds these over the original solver, on its Smoothing page; with all of them off it
+is the plain solve. The defaults were chosen by measuring the recorded Holistic GPU dancer clip.
 
 **Why it was jittery.** CPU MediaPipe Holistic smooths its world landmarks inside MediaPipe (a One
 Euro filter); the GPU port of Holistic doesn't, so the puppet got raw per-frame landmarks. The
@@ -273,25 +279,19 @@ Body lag, measured against a centred (zero-lag) smoothing of the raw motion, goe
 8.4°. The hands remain the weakest part: their direction comes from a 9 cm wrist-to-knuckle line
 whose depth is noisy.
 
-## Cost and caching (Python)
+## Cost and caching
 
-The Script CHOP cooks every frame, but a tracker row only changes on a new model result. So
-`cook()` keys on the row's text plus the settings and returns early when nothing changed. That is
-why the tracker's number formatting is behavior: the C++ Tracker DAT writes byte-identical text.
+The CHOP cooks whenever the bones pull it, but a tracker row only changes on a new model result. So
+`Solver::cook` keys on the row's text plus the settings and keeps its channels when nothing changed.
 
-A body solve with fingers (65 bones, ~50 driven) costs about **2.7 ms** in TD. Three things grow
-with the bone count:
-- small numpy operations, which carry microseconds of overhead each;
-- `slerp`'s matrix-quaternion round trips;
-- writing ~200 channels, done in place once they exist.
+A body solve with fingers (65 bones, ~50 driven) costs about 0.3 ms in TD (the Python solver took
+2.7 ms: small numpy operations carry microseconds of overhead each).
 
 Each bone parameter's expression (`op('../rotations')['bone_rx']`, about 200 of them) is evaluated
 by TD's Python on every change. That cost is outside the solver and hasn't been measured.
 
 ## Known limits
 
-- **Smoothing and knee limits are in the C++ solver only** (see above). The Python solver has
-  only the tracker's position smoothing.
 - **No elbow or arm-twist limits.** An elbow can't bend backward, because the upper arm's roll
   comes from its bend, but bad depth can twist the upper arm instead.
 - **Side-on people:** MediaPipe can swap left and right, and the character turns 180° for a frame.
@@ -311,9 +311,8 @@ awkward in per-frame Python (rotation smoothing, joint limits).
   within 5e-12 offline (24 combinations of rig, clip and settings), and every channel the same in
   TD over 300 frames, body and hand.
 - **Speed, per frame:** body 2.19 → 0.34 ms, rigged hand 1.10 → 0.26 ms.
-- **The C++ output is now its own reference** (`tests/data/puppet/reference.json`, see
-  [cpp/Puppet/README.md](../cpp/Puppet/README.md#tests)); the Python solver is no longer
-  compared against.
+- **The C++ output is its own reference** (`tests/data/puppet/reference.json`, see
+  [cpp/Puppet/README.md](../cpp/Puppet/README.md#tests)); the Python solver was deleted Nov 13.
 
 Plugin reference: [cpp/Puppet/README.md](../cpp/Puppet/README.md).
 
@@ -366,4 +365,4 @@ Placement Smoothing at 0.
      tracker's);
    - body joint limits (elbow and knee hinges, as the fingers have);
    - side-on flip rejection.
-5. Retire the Python solver together with the Python tracker, once the release has been in use.
+5. Retire the Python solver together with the Python tracker (done Nov 13).

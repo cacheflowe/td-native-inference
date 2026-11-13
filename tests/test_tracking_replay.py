@@ -23,7 +23,7 @@ class ReplayTests(unittest.TestCase):
 			with self.subTest(fixture=path.name):
 				meta, _ = tracking_replay.load(path)
 				self.assertTrue(tracking_replay.is_cpp_reference(meta), 'not a C++ reference: run --golden')
-				report = tracking_replay.replay(str(path), 'cpp', show=3)
+				report = tracking_replay.replay(str(path), show=3)
 				self.assertFalse(report.get('skipped'), report)
 				self.assertGreater(report['compared'], 0)
 				self.assertEqual(report['differing_frames'], 0, report['diffs'])

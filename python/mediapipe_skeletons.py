@@ -147,7 +147,7 @@ MP_HOLISTIC_BODY = Skeleton(
 	MP_HOLISTIC.names[:HOLISTIC_FACE],
 	POSE_EDGES + _offset(HAND_EDGES, HOLISTIC_LEFT_HAND) + _offset(HAND_EDGES, HOLISTIC_RIGHT_HAND),
 	_stable(POSE_NAMES), 0.5 * 15 / 9, hide_missing=True, world_count=HOLISTIC_FACE)
-# RTMW3D (OnnxTOP Pose Crops, converted by rtmw_convert.py): Holistic's pose and both hands, no face mesh.
+# RTMW3D (OnnxTOP Pose Crops, converted by the Tracker DAT's Convert RTMW3D table): Holistic's pose and both hands, no face mesh.
 RTMW_BODY = Skeleton(
 	'rtmw_body',
 	[f'pose_{n}' for n in POSE_NAMES] + [f'left_hand_{n}' for n in HAND_NAMES] + [f'right_hand_{n}' for n in HAND_NAMES],

@@ -255,33 +255,31 @@ void Solver::relaxUnseen(Landmarks& world) {
 		auto it = world.find(name);
 		return it == world.end() ? nullptr : &it->second;
 	};
-	const Vec3 *ls = get("left_shoulder"), *rs = get("right_shoulder");
-	if (!ls || !rs) return;
-	const Vec3 mid = {(ls->at(0) + rs->at(0)) / 2, (ls->at(1) + rs->at(1)) / 2, (ls->at(2) + rs->at(2)) / 2};
+	// Values, not pointers into `world`: inserting into it can rehash and move every entry.
+	const Vec3* lsp = get("left_shoulder");
+	const Vec3* rsp = get("right_shoulder");
+	if (!lsp || !rsp) return;
+	const Vec3 ls = *lsp, rs = *rsp;
+	const Vec3 mid = {(ls[0] + rs[0]) / 2, (ls[1] + rs[1]) / 2, (ls[2] + rs[2]) / 2};
 	// Hips: under the shoulders, a little narrower. The torso then turns with the shoulder line
 	// (which also rolls the hips) instead of standing at the rig's rest.
 	if (!get("left_hip") || !get("right_hip")) {
-		for (const auto& [hip, shoulder] : {std::pair<const char*, const Vec3*>{"left_hip", ls}, {"right_hip", rs}}) {
-			const Vec3& s = *shoulder;
+		for (const auto& [hip, s] : {std::pair<const char*, Vec3>{"left_hip", ls}, {"right_hip", rs}})
 			world[hip] = {mid[0] + 0.6 * (s[0] - mid[0]), mid[1] + 0.6 * (s[1] - mid[1]) - 0.5, mid[2] + 0.6 * (s[2] - mid[2])};
-		}
 	}
 	// Arms: an elbow between the shoulder and a tracked wrist (bent a little down and back, the way
 	// elbows bend), so the hand stays where it was tracked; with no wrist either, hanging from the
 	// shoulder with the forearm a little forward (so the upper arm's roll is set).
-	for (const char* side : {"left", "right"}) {
-		const std::string s(side);
-		const Vec3* shoulder = get((s + "_shoulder").c_str());
-		if (!get((s + "_elbow").c_str())) {
-			const Vec3& p = *shoulder;
-			if (const Vec3* w = get((s + "_wrist").c_str()))
-				world[s + "_elbow"] = {(p[0] + (*w)[0]) / 2, (p[1] + (*w)[1]) / 2 - 0.06, (p[2] + (*w)[2]) / 2 - 0.04};
-			else
-				world[s + "_elbow"] = {p[0], p[1] - 0.27, p[2]};
+	for (const auto& [side, p] : {std::pair<std::string, Vec3>{"left", ls}, {"right", rs}}) {
+		if (!get((side + "_elbow").c_str())) {
+			Vec3 elbow = {p[0], p[1] - 0.27, p[2]};
+			if (const Vec3* w = get((side + "_wrist").c_str()))
+				elbow = {(p[0] + (*w)[0]) / 2, (p[1] + (*w)[1]) / 2 - 0.06, (p[2] + (*w)[2]) / 2 - 0.04};
+			world[side + "_elbow"] = elbow;
 		}
-		if (!get((s + "_wrist").c_str())) {
-			const Vec3& e = world[s + "_elbow"];
-			world[s + "_wrist"] = {e[0], e[1] - 0.24, e[2] + 0.06};
+		if (!get((side + "_wrist").c_str())) {
+			const Vec3 e = world[side + "_elbow"];
+			world[side + "_wrist"] = {e[0], e[1] - 0.24, e[2] + 0.06};
 		}
 	}
 }
@@ -427,9 +425,12 @@ bool Solver::cook(const TableView* tracks, const Settings& s) {
 	if (!s.overImage) {
 		root_.reset();
 		root.reset();
-		if (hand_ && solved) {	// a hand turns about its forearm: keep the palm at the origin instead
-			const Vec3& a = positions[rig_->index.at(hand_->center[0])];
-			const Vec3& b = positions[rig_->index.at(hand_->center[1])];
+		auto ia = hand_ ? rig_->index.find(hand_->center[0]) : rig_->index.end();
+		auto ib = hand_ ? rig_->index.find(hand_->center[1]) : rig_->index.end();
+		if (hand_ && solved && ia != rig_->index.end() && ib != rig_->index.end()) {
+			// A hand turns about its forearm: keep the palm at the origin instead.
+			const Vec3& a = positions[ia->second];
+			const Vec3& b = positions[ib->second];
 			root = Vec3{-(a[0] + b[0]) / 2, -(a[1] + b[1]) / 2, -(a[2] + b[2]) / 2};
 			center_ = root;
 		} else if (hand_) {

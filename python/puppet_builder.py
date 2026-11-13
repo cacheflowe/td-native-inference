@@ -2,10 +2,9 @@
 scripts/build_puppet_tox.py). Build output: change this file, never the COMP.
 
     In TOP (the tracked image) + In DAT (a Holistic / Pose tox's out_tracks, World Landmark
-    Columns on) -> solver (the Puppet CHOP, cpp/Puppet: bone rotations + placement; or with
-    engine 'python' a Script CHOP running puppet_solver.py) -> rotations -> the FBX COMP's bones
-    -> render (Center camera or an Over Image camera) -> outputs.
-The C++ solver reads the rig's rest pose from `rest_pose`, which puppet_runtime.capture_rest
+    Columns on) -> solver (the Puppet CHOP, cpp/Puppet: bone rotations + placement) -> rotations
+    -> the FBX COMP's bones -> render (Center camera or an Over Image camera) -> outputs.
+The solver reads the rig's rest pose from `rest_pose`, which puppet_runtime.capture_rest
 fills from the FBX COMP's bones when the character loads.
 Outputs: TOP 1 the puppet render (transparent background), TOP 2 the same over the input image
 (Over Image placement; Center: the render alone), CHOP the bone rotations.
@@ -14,25 +13,8 @@ The exported tox contains no character: the FBX is imported at runtime from the 
 
 import wrapper_builder as wb
 
-MODULES = ('puppet_solver', 'mixamo_retarget', 'hand_retarget')	# the Python engine only
 NAME = 'MixamoPuppet'
-DEFAULT_ENGINE = 'cpp'
 PUPPET_CHOP_PLUGIN = 'plugins/PuppetCHOP.dll'
-CALLBACKS = '''# Puppet solver: see puppet_solver.py (local/modules).
-import puppet_solver
-
-
-def onSetupParameters(scriptOp):
-	puppet_solver.setup(scriptOp)
-
-
-def onPulse(par):
-	puppet_solver.pulse(par)
-
-
-def onCook(scriptOp):
-	puppet_solver.cook(scriptOp)
-'''
 PAR_EXEC = '''def onValueChange(par, prev):
 	if par.name == 'Fbxfile':
 		parent().op('component').module.load_character(parent())
@@ -43,8 +25,6 @@ def onPulse(par):
 		parent().op('component').module.load_character(parent())
 	elif par.name == 'Capturerest':
 		parent().op('component').module.capture_rest(parent())
-	elif par.name == 'Reloadmodules':
-		parent().op('solver').par.Reloadmodule.pulse()
 '''
 STARTUP = '''def onCreate():
 	run("args[0].module.load_character(args[0].parent())", parent().op('component'), delayFrames=1)
@@ -58,7 +38,7 @@ POSITIONS = {
 	'out_rotations': (600, -100), 'fbx': (400, 100), 'light': (400, 300), 'camera': (400, 450),
 	'camera_image': (400, 600), 'render': (600, 100), 'over': (800, 0), 'stage': (1000, 0),
 	'puppet': (800, 200), 'over_image': (1200, 0), 'component': (0, -300), 'par_exec': (0, -450),
-	'startup': (0, -600), 'local': (200, -300), 'rest_pose': (200, 100),
+	'startup': (0, -600), 'rest_pose': (200, 100),
 }
 
 
@@ -100,7 +80,7 @@ def _puppet_chop(comp, name):
 		return node
 
 
-def _pages(comp, engine):
+def _pages(comp):
 	page = comp.appendCustomPage('Puppet')
 	wb._page_par(page, 'File', 'Fbxfile', 'FBX File', '', 'A Mixamo character (FBX, with skin). Loads when set.')
 	page.appendPulse('Loadcharacter', label='Load Character')
@@ -119,21 +99,17 @@ def _pages(comp, engine):
 	size[0].default = size[0].val = 1280
 	size[1].default = size[1].val = 720
 	page.appendPulse('Capturerest', label='Capture Rest Pose')
-	if engine == 'python':
-		page.appendPulse('Reloadmodules', label='Reload Solver Modules')
-	else:
-		smoothing = comp.appendCustomPage('Smoothing')
-		for name, label, default, lo, hi, text in SMOOTHING:
-			wb._page_par(smoothing, 'Float', name, label, default, text, lo, hi)
-		for name, label, text in SMOOTHING_TOGGLES:
-			wb._page_par(smoothing, 'Toggle', name, label, True, text)
+	smoothing = comp.appendCustomPage('Smoothing')
+	for name, label, default, lo, hi, text in SMOOTHING:
+		wb._page_par(smoothing, 'Float', name, label, default, text, lo, hi)
+	for name, label, text in SMOOTHING_TOGGLES:
+		wb._page_par(smoothing, 'Toggle', name, label, True, text)
 	about = comp.appendCustomPage('About')
 	wb._page_par(about, 'Str', 'Version', 'Version', wb.version(),
 		'The td-native-inference release this tox was built with.').readOnly = True
 
 
-def build(parent_comp, engine=DEFAULT_ENGINE):
-	"""engine: 'cpp' (the Puppet CHOP) or 'python' (a Script CHOP running puppet_solver)."""
+def build(parent_comp):
 	old = parent_comp.op(NAME)
 	# The input wires as connectors: a TOP and a DAT out of other COMPs can't be rewired by owner.
 	wires = [[c for c in connector.connections] for connector in old.inputConnectors] if old is not None else []
@@ -141,11 +117,8 @@ def build(parent_comp, engine=DEFAULT_ENGINE):
 	comp = parent_comp.create('baseCOMP', NAME)
 	if position is not None:
 		comp.nodeX, comp.nodeY = position
-	modules = comp.create('baseCOMP', 'local').create('baseCOMP', 'modules')
-	for module_name in MODULES if engine == 'python' else ():
-		wb._synced_dat(modules, module_name, f'python/{module_name}.py')
 	wb._synced_dat(comp, 'component', 'python/puppet_runtime.py')
-	_pages(comp, engine)
+	_pages(comp)
 
 	image = comp.create('inTOP', 'in_image')
 	image.par.connectorder = 1
@@ -153,21 +126,11 @@ def build(parent_comp, engine=DEFAULT_ENGINE):
 	tracks.par.connectorder = 2
 
 	fbx = comp.create('fbxCOMP', 'fbx')
-	if engine == 'python':
-		solver = comp.create('scriptCHOP', 'solver')
-		callbacks = comp.op('solver_callbacks') or comp.create('textDAT', 'solver_callbacks')
-		callbacks.text = CALLBACKS
-		solver.par.callbacks = callbacks.name
-		callbacks.dock = solver
-		solver.destroyCustomPars()
-		modules.op('puppet_solver').module.setup(solver)
-		solver.par.Rig = 'fbx'
-	else:
-		solver = _puppet_chop(comp, 'solver')
-		comp.create('tableDAT', 'rest_pose').clear()
-		solver.par.Restpose = 'rest_pose'
-		for name in SMOOTHING_PARS:
-			_expr(solver.par[name], f'parent().par.{name}')
+	solver = _puppet_chop(comp, 'solver')
+	comp.create('tableDAT', 'rest_pose').clear()
+	solver.par.Restpose = 'rest_pose'
+	for name in SMOOTHING_PARS:
+		_expr(solver.par[name], f'parent().par.{name}')
 	solver.par.Tracks, solver.par.Image = 'in_tracks', 'in_image'
 	for name in ('Placement', 'Fov', 'Mirror', 'Placesmoothing'):
 		_expr(solver.par[name], f'parent().par.{name}')
@@ -209,7 +172,7 @@ def build(parent_comp, engine=DEFAULT_ENGINE):
 	par_exec = comp.create('parameterexecuteDAT', 'par_exec')
 	par_exec.text = PAR_EXEC
 	_expr(par_exec.par.op, 'parent()')
-	par_exec.par.pars = 'Fbxfile Loadcharacter Capturerest Reloadmodules'
+	par_exec.par.pars = 'Fbxfile Loadcharacter Capturerest'
 	par_exec.par.valuechange = True
 	par_exec.par.onpulse = True
 	startup = comp.create('executeDAT', 'startup')
@@ -246,9 +209,7 @@ def export(comp, destination):
 		solver = copy.op('solver')
 		assert solver.OPType != 'cplusplusCHOP', ('[PuppetBuilder] the solver is a CPlusPlus CHOP loading a DLL by '
 			'path: restart TouchDesigner so it registers the Puppet CHOP, then rebuild')
-		solver.unstore('rest_bones')
-		if copy.op('rest_pose') is not None:	# the character's skeleton: Mixamo's too
-			copy.op('rest_pose').clear()
+		copy.op('rest_pose').clear()	# the character's skeleton: Mixamo's too
 		return wb.export(copy, destination)
 	finally:
 		holder.destroy()

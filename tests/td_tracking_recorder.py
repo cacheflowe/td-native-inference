@@ -1,7 +1,11 @@
 """Records tracker fixtures in TouchDesigner: per frame, a wrapper's Info DAT (what the tracker
-reads), its `results` / `result_delay` channels, whether each tracker script cooked, and the
-tables the Python tracker wrote. tests/tracking_replay.py replays a fixture through the Python
-tracker (and later TrackerDAT's replay tool) and diffs the tables.
+reads), its `results` / `result_delay` channels, how many times each Tracker DAT cooked, and the
+tables it wrote. The tables are only a record: track ids are process-wide in TD, so they continue
+from earlier trackers. Make a recording a fixture with
+
+	python tests/tracking_replay.py build/tracking/<session>.jsonl.gz --golden
+
+which replays the Info DATs through the C++ tracker from fresh ids and stores its tables.
 
 Driven by tests/td_record_tracking.py (POST it to the bridge's /run). Runs one session at a time
 in /project1/TrackingLab, one frame per step via run() (never a background thread). The movie is
@@ -71,13 +75,13 @@ def _move(lab, session, frame):
 
 
 def _wrapper(lab, session):
-	"""The session's wrapper, built from its spec on first use (live python/ modules)."""
+	"""The session's wrapper, rebuilt from its spec (live python/ modules) so its tracker starts
+	empty; built in place of an earlier one, at its position."""
 	name = session.get('instance') or session['wrapper']
-	comp = lab.op(name)
-	if comp is None:
-		builder = _builder()
-		# The Python tracker: the fixtures' reference while the C++ port is checked against it.
-		comp = builder.build(builder.load_spec(session['wrapper']), lab, name=name, tracker_engine='python')
+	builder = _builder()
+	fresh = lab.op(name) is None
+	comp = builder.build(builder.load_spec(session['wrapper']), lab, name=name)
+	if fresh:
 		index = len([c for c in lab.children if c.fetch('wrapper_spec', None)]) - 1
 		comp.nodeX, comp.nodeY = 300, -index * 200
 	if not comp.inputConnectors[0].connections or comp.inputConnectors[0].connections[0].owner != lab.op('motion'):
@@ -92,10 +96,6 @@ def start(sessions):
 	_state.clear()
 	_state.update(queue=list(sessions), done=[], step=None)
 	run('args[0]()', _begin, delayFrames=1)
-
-
-def _modules(comp):
-	return comp.op('local/modules/onnxtop_tables').module, comp.op('local/modules/object_tracker').module
 
 
 def _begin():
@@ -122,17 +122,10 @@ def _begin():
 	run('args[0]()', _step, delayFrames=1)
 
 
-def _reset(comp):
-	"""A known starting state: no tracks, ids from 1, no skip memory. Done in the first step,
-	after the session's image and motion are set: a cook in between would otherwise run on the
-	previous session's image, unrecorded."""
+def _counts(comp):
+	"""The Tracker DATs' cook counts, the baseline for the first recorded step (the wrapper is fresh:
+	no tracks yet)."""
 	tracker = comp.op('tracker')
-	tables, objects = _modules(comp)
-	tables.reset(tracker)
-	objects.Track._next_id = 1
-	objects.KeypointTrack._next_id = 1
-	for key in [k for k in tables._written if k[1] == tracker.path]:
-		del tables._written[key]
 	return [tracker.op('script_' + t).totalCooks for t in TABLES]
 
 
@@ -151,7 +144,7 @@ def _step():
 	source.par.index = session.get('start', 0) + max(frame, 0)
 	_move(lab, session, frame)
 	if frame == -WARMUP:
-		step['counts'] = _reset(comp)
+		step['counts'] = _counts(comp)
 	scripts = [tracker.op('script_' + t) for t in TABLES]
 	comp.op('debug').cook(force=True)
 	for t in TABLES:
@@ -165,14 +158,14 @@ def _step():
 	step['counts'] = counts
 
 	if frame == -WARMUP:
-		tables, _ = _modules(comp)
+		frame_top = comp.op('null_passthrough')
 		meta = {
 			'session': session['name'], 'wrapper': session['wrapper'], 'source': session['source'],
 			'start': session.get('start', 0), 'frames': session['frames'], 'pars': session.get('pars', {}),
 			'motion': session.get('motion', 0.0), 'view': session.get('view'),
 			'mode': tracker.par.Trackermode.eval(),
 			'tracker_pars': {p.name: p.eval() for p in tracker.customPars if not p.isPulse},
-			'frame_size': list(tables._frame_size(tracker)),
+			'frame_size': [frame_top.width, frame_top.height],
 			'td_build': app.build,
 		}
 		step['file'] = str(OUT_DIR / f"{session['name']}.jsonl.gz")

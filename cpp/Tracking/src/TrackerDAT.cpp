@@ -258,12 +258,21 @@ void TrackerDAT::execute(DAT_Output* output, const OP_Inputs* inputs, void*) {
 	warning_.clear();
 	inputMs_ = 0.0;
 	tableKind_ = tableOf(inputs);
-	switch (tableKind_) {
-		case Output::Tracks: cookTracks(inputs); break;
-		case Output::Joints: cookFollower(TableKind::Joints, inputs); break;
-		case Output::Bones: cookFollower(TableKind::Bones, inputs); break;
-		case Output::Scores: cookScores(inputs); break;
-		case Output::ConvertRtmw: cookConvertRtmw(inputs); break;
+	// Nothing may escape into TouchDesigner: an uncaught exception there aborts the whole process.
+	try {
+		switch (tableKind_) {
+			case Output::Tracks: cookTracks(inputs); break;
+			case Output::Joints: cookFollower(TableKind::Joints, inputs); break;
+			case Output::Bones: cookFollower(TableKind::Bones, inputs); break;
+			case Output::Scores: cookScores(inputs); break;
+			case Output::ConvertRtmw: cookConvertRtmw(inputs); break;
+		}
+	} catch (const std::exception& e) {
+		error_ = std::string("Tracker DAT: ") + e.what();
+		table_.clear();
+	} catch (...) {
+		error_ = "Tracker DAT: unexpected error";
+		table_.clear();
 	}
 	trackMs_ = msSince(start);
 	const auto writeStart = std::chrono::steady_clock::now();

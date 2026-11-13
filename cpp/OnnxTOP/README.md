@@ -125,13 +125,13 @@ the YuNet node above:
 
 1. Output Mode **Classify Crops**, Input Normalize **ImageNet**, Channel Order **RGB**, input =
    the same video as the YuNet node.
-2. **Crop DAT** = `OnnxTopTables_Face/script_tracks` (tracked faces with stable IDs),
+2. **Crop DAT** = the face tracker's Tracks Tracker DAT (tracked faces with stable IDs),
    **Class Names** = `anger disgust fear happiness neutral sadness surprise`.
-3. Wire the node's Info DAT into `OnnxTopTables_Face`'s **2nd input**. Its `script_scores`
-   (`onnxtop_tables.write_scores`) joins the scores onto the tracks by `track_id`, smoothed per
-   track (Setup page: **Class Score Smoothing**, **Class Column Prefix** = `emotion`). `out_tracks`
-   gains `emotion_label` + `emotion_anger` … `emotion_surprise` (the Python HSEmotion script's
-   columns), and the label cell reads e.g. `22 NEUTRAL`, so DebugBB shows it.
+3. A Tracker DAT with **Table** = Class Scores, the tracks on its first input and this node's Info
+   DAT on its second, joins the scores onto the tracks by `track_id`, smoothed per track (**Class
+   Score Smoothing**, **Class Column Prefix** = `emotion`). The tracks gain `emotion_label` +
+   `emotion_anger` ... `emotion_surprise`, and the label cell reads e.g. `22 NEUTRAL`, so DebugBB
+   shows it. `HSEmotion.tox` is built this way.
 
 The node's image output is a contact sheet of the crops it classified (128 px tiles), for checking
 what the model sees. Batch 16 at 260²: about 4.2 ms per frame with TensorRT FP16 (engine build
@@ -211,8 +211,8 @@ Runs any single-image model on rotated crops: the Crop DAT holds MediaPipe Norma
 (`id, roi_x, roi_y, roi_w, roi_h, roi_angle`: center and size as fractions of the image, top-down,
 radians); outside the image the edge pixels repeat, like MediaPipe's ImageToTensor. Every output
 with at most 4096 values per crop goes to the Info DAT raw (`o{k}_{i}`: value i of output k), one row
-per crop, for Python to decode. `python/holistic_onnx.py` drives Holistic's models this way; the
-Holistic mode above replaced it for speed.
+per crop, for decoding elsewhere. A Python prototype of Holistic drove its models this way before
+the Holistic mode above replaced it.
 
 ### Outputs
 
@@ -237,59 +237,28 @@ Holistic mode above replaced it for speed.
 
 ### Tracking and visualizers
 
-The node itself outputs raw per-frame detections; tracking stays in Python, where it's cheap
-(a dozen numbers per person) and already tuned:
+The node itself outputs raw per-frame detections. Tracking is the **Tracker DAT** (`cpp/Tracking`,
+[README](../Tracking/README.md)), which reads the Info DAT. In each generated model tox, the
+`tracker` COMP holds `in_info`, then a Tracks Tracker DAT (it advances the tracker), then Joints and
+Bones Tracker DATs wired after it, so they format the same result. The outputs are 0 tracks,
+1 joints and 2 bones, the tables `DebugBB` and `DebugKeypoints` read (joints in Pose, MoveNet and
+Face modes; bones only for poses).
 
-- [python/pose_tracker_pipeline.py](../../python/pose_tracker_pipeline.py) holds
-  `PoseTrackerPipeline`, the backend-agnostic half of YOLO26 pose post-processing:
-  - `KeypointTracker` matching
-  - keypoint and box smoothing
-  - visibility hysteresis
-  - the display gate
-  - the `table_output` / `table_joints` / `table_bones` writers
-  - the shared custom-parameter definitions
-
-  Both haxlib's `onnx_yolo26_pose.py` (the Python ONNX Runtime
-  backend) and this node use it.
-- [python/box_tracker_pipeline.py](../../python/box_tracker_pipeline.py) holds
-  `BoxTrackerPipeline`, the same thing for detect and seg models: ByteTrack, box smoothing, the
-  seg presence ramp, and the tracks table (its label reads `<id> <class name> <score>%`, e.g.
-  `161 person 94%`). haxlib's `onnx_yolo26_obj_det.py`
-  and haxlib's `onnx_yolo26_seg.py` use it too.
-- [python/face_tracker_pipeline.py](../../python/face_tracker_pipeline.py) holds
-  `FaceTrackerPipeline` for YuNet: ByteTrack, box and keypoint smoothing, head direction
-  (yaw/pitch/roll, geometric or solvePnP), and the tracks/joints tables.
-  haxlib's `onnx_yunet.py` uses it too. OnnxTOP letterboxes, so the
-  C++ path skips the Python script's square-input box-aspect correction (`size_aspect=1`), and
-  solvePnP's frame size comes from the COMP's `null_passthrough` TOP, or else from the input
-  of the OnnxTOP its Info DAT reads. In td-native-inference.toe, `OnnxTopTables_Face` (Tracker Mode Face, fed by
-  `info3` → `Onnx_YuNet`) is the YuNet copy; `OnnxTopTables1` does the same for MoveNet.
-- [python/onnxtop_tables.py](../../python/onnxtop_tables.py) turns the Info DAT into
-  pipeline detections. It keeps one pipeline per COMP, so tracker state survives between cooks.
-  The COMP's **Setup** page has **Tracker Mode** (Pose / MoveNet / Face / Detect / Segment;
-  MoveNet is the pose pipeline with `MOVENET_DEFAULTS`), which must match the
-  model; on a mismatch the tracks table shows an error row naming the mode to pick. Switching
-  mode rebuilds the **Tracking** page and remembers each mode's tuned values separately. A
-  Parameter Execute DAT (`parexec_mode`) calls `onnxtop_tables.setup_parameters()` on change.
-
-In each generated model tox, the `tracker` COMP contains `in_info`, then `script_tracks`
-(advances the tracker), then `script_joints` / `script_bones`. Those two are wired after
-`script_tracks` so they format the same frame. The outputs are 0 tracks, 1 joints and 2 bones,
-in the same formats the Python COMPs write, so `DebugBB` and `DebugKeypoints` work unchanged
-(joints are written in Pose, MoveNet and Face modes; bones only for poses). The **Tracking** page has the same parameters
-as the matching Python script.
+The COMP's **Setup** page has **Tracker Mode**, which must match the model; on a mismatch the tracks
+table shows an error row naming the mode to pick. Its **Tracking** page holds that mode's parameters
+(`python/tracking_pars.py`), and the Tracker DATs are bound to them.
 
 `DebugKeypoints` also expects its parent to provide an `Inputaspectratio` parameter and a
-`null_passthrough` TOP, the same contract the Python pose COMP satisfied.
+`null_passthrough` TOP. YuNet's solvePnP head pose takes its frame size from `null_passthrough`.
 
 Two thresholds apply in series. The node's **Confidence Threshold** decides what reaches the
 Info DAT; for detect/seg, set it at or below the Tracking page's `Lowconfthreshold` so ByteTrack
-still sees its low-confidence second-pass detections. The COMP's `Confthreshold` is the tracker's
+still sees its low-confidence second-pass detections. The tracker's `Confthreshold` is its
 admission and display gate.
 
 In Segment mode, a track that lost its detection keeps coasting on its Kalman velocity for up to
-`Tracklossframes` while `presence` fades out, so its box can drift past 0–1. That matches the
-Python seg script. Not ported: per-track masks (the node's matte is one combined mask).
+`Tracklossframes` while `presence` fades out, so its box can drift past 0-1. Not done: per-track
+masks (the node's matte is one combined mask).
 
 ## Roadmap
 

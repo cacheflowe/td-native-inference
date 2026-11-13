@@ -28,6 +28,9 @@
 - **Fix: YOLO26 Pose joint confidence.** It was always about 0.0016 (the export divides it by the
   input size); it's now 0-1.
 - [docs/PUPPETS.md](docs/PUPPETS.md): how the puppet solver drives a rigged character.
+- **Removed the Python tracker and puppet solver** (no tox has used them since v0.4.0 / the Puppet
+  CHOP). The wrapper builder builds the Tracking pages from `python/tracking_pars.py`; the tests
+  check the C++ tracker and solver against their own recorded output.
 
 ## v0.4.0 (2026-11-12)
 

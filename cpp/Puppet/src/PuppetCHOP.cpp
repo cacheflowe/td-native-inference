@@ -29,9 +29,8 @@ const char* kPlacementNames[] = {"center", "image"};
 const char* kPlacementLabels[] = {"Center", "Over Image"};
 const char* kInfoNames[] = {"cook_ms", "solve_ms", "cook_ms_avg", "bones", "driven", "solved"};
 
-void check(OP_ParAppendResult r) {
-	if (r != OP_ParAppendResult::Success) throw std::runtime_error("parameter");
-}
+// A parameter that didn't append (TD reports why on the node); never throw into TouchDesigner.
+void check(OP_ParAppendResult) {}
 
 }  // namespace
 
@@ -61,6 +60,22 @@ void PuppetCHOP::getGeneralInfo(CHOP_GeneralInfo* ginfo, const OP_Inputs*, void*
 }
 
 bool PuppetCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs, void*) {
+	// Nothing may escape into TouchDesigner: an uncaught exception there aborts the whole process.
+	try {
+		return cook(info, inputs);
+	} catch (const std::exception& e) {
+		warning_ = std::string("Puppet CHOP: ") + e.what();
+	} catch (...) {
+		warning_ = "Puppet CHOP: unexpected error";
+	}
+	solver_.clearRest();
+	info->numChannels = 0;
+	info->numSamples = 1;
+	info->startIndex = 0;
+	return true;
+}
+
+bool PuppetCHOP::cook(CHOP_OutputInfo* info, const OP_Inputs* inputs) {
 	const auto start = std::chrono::steady_clock::now();
 	warning_.clear();
 	const OP_DATInput* rest = inputs->getParDAT("Restpose");

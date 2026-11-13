@@ -35,7 +35,7 @@ def seen_rates(name, gate=True, window=None, legs_out=False):
 	meta, frames = tr.load(fixture(name))
 	if window is None and meta.get('start') == 240:	# the first chest-up recordings: frames 30-95 are the clean framing
 		window = (30, 95)
-	engine = tr.CppEngine(meta, cpp_only={} if gate else None)
+	engine = tr.CppEngine(meta, None if gate else tr.GATE_OFF)
 	prefix = 'pose_' if meta['mode'] == 'mp_holistic' else ''
 	info = None
 	counts = {j: [0, 0] for j in LEGS + UPPER}	# tracks conf > 0, in joints table
@@ -132,7 +132,7 @@ class JointGate(unittest.TestCase):
 		header = ['id', 'class', 'conf', 'u1', 'v1', 'u2', 'v2'] + [f'kp{i}_{c}' for i in range(17) for c in 'uvc']
 		row = ['0', '0', '0.9', '0.3', '0.0', '0.7', '0.9'] + [f'{x:.4f}' for n in names for x in points[n]]
 		info = tr.InfoDat([header, row], '/replay/info')
-		engine = tr.CppEngine({'mode': 'pose', 'tracker_pars': {}, 'frame_size': [1280, 720]}, cpp_only={})
+		engine = tr.CppEngine({'mode': 'pose', 'tracker_pars': {}, 'frame_size': [1280, 720]})
 		for _ in range(5):
 			engine.cook('tracks', info, None, None)
 			joints = engine.cook('joints', info, None, None)

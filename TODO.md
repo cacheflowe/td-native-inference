@@ -14,21 +14,23 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 
 ## Now
 
-- [ ] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
+- [x] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
       [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd).
       - Done (Nov 13): `cpp/Puppet` and `PuppetCHOP.dll`, identical to the Python solver offline and
         in the PuppetLab. `tox/MixamoPuppet.tox` is regenerated on it, with no Python solver inside
         (35 → 22 KB).
       - Left: a fresh-process check of the tox (at the next release's package test).
       - Done (Nov 13, C++ only): landmark smoothing, hand-roll smoothing and knee limits
-        ([docs/PUPPETS.md](docs/PUPPETS.md#smoothing-and-limits-c-solver-only)).
+        ([docs/PUPPETS.md](docs/PUPPETS.md#smoothing-and-limits)).
       - Next: side-on flip rejection (needs a recorded side-on clip first) and arm-twist limits.
 - [x] Python is no longer the reference (Nov 13): the fixtures hold the C++ tracker's and puppet's
       own output (`--golden`), the Python comparison labs are gone.
-- [ ] Delete the Python tracker and puppet solver modules: build the Tracking pages without
-      importing `onnxtop_tables`, switch the recorder to the Tracker DAT, drop the lab's Python
-      solver switch.
-- [ ] Remove `python/holistic_onnx.py` (the Landmark Crops prototype; the C++ Holistic mode replaced it).
+- [x] Deleted the Python tracker, the Python puppet solver and `holistic_onnx.py` (Nov 13): the
+      Tracking pages come from `python/tracking_pars.py`, the recorder runs the Tracker DAT, the
+      PuppetLab has only the C++ solver.
+- [ ] **DAViD: depth alone in the VisionDemo** (asked Nov 13): an option to show just DAViDHuman's
+      depth.
+- [ ] **NeuFlow v2** first steps (see Models).
 
 ## Speed
 

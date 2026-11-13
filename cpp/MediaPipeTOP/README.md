@@ -50,14 +50,14 @@ matching tag: the struct layouts must agree.
 | Segment Output | Segmenter: **Foreground** = the only mask (selfie models) or 1 − background (multi-class models); **One Class** = Segment Class's confidence; **Category Index** = per-pixel class index as a float. The selfie model's category map is 0 = person, 255 = background. |
 | Segment Class | Class index for One Class. The Info DAT lists the classes in order. |
 | Landmark Z Columns | Adds `kp{i}_z`: MediaPipe's relative depth, in roughly the same units as u. |
-| World Landmark Columns | Hands / pose / holistic: adds `w{i}_x/y/z` in meters, MediaPipe's axes (y down, z away from the camera). Origin at the hand center (Hands) or the hips (Pose, Holistic). Holistic gets them for its 75 body and hand landmarks only (its hands share the body's space; the face mesh has none). `onnxtop_tables` turns them to TD axes (y up, +z toward the camera) as `<joint>_wx/_wy/_wz`. |
+| World Landmark Columns | Hands / pose / holistic: adds `w{i}_x/y/z` in meters, MediaPipe's axes (y down, z away from the camera). Origin at the hand center (Hands) or the hips (Pose, Holistic). Holistic gets them for its 75 body and hand landmarks only (its hands share the body's space; the face mesh has none). The Tracker DAT turns them to TD axes (y up, +z toward the camera) as `<joint>_wx/_wy/_wz`. |
 | Wait for Result | Waits in the cook (up to Max Wait) for this frame's result, so the landmarks match the image (`result_delay` 0). Worth it for fast models (Face Detector, Hands); a slow one (Holistic) costs TD frame rate. Off by default: the cook never waits. |
 | Max Wait (ms) | Longest a cook waits with Wait for Result on; past it the result lands on a later cook. Default 20. |
 
 ## Outputs
 
 **Info DAT** has one row per face, hand or pose, with the same base layout as OnnxTOP's, so
-DebugBB and the `kp{i}_*` readers in `onnxtop_tables` work unchanged:
+DebugBB and the Tracker DAT read it the same way:
 
 ```
 id, class, conf, u1, v1, u2, v2, label, kp{i}_u, kp{i}_v, kp{i}_c ..., [kp{i}_z ...],
@@ -110,7 +110,7 @@ Mode. The shared keypoint tracker then gives stable track ids, plus `table_outpu
 | Holistic | MediaPipe Holistic (553) | `pose_*`, `left_hand_*`, `right_hand_*`, `face_*`; missing parts are left out |
 | Face Detector | MediaPipe Face Detector (6) | the 6 BlazeFace points |
 
-- **Defaults** (`MEDIAPIPE_DEFAULTS` in `onnxtop_tables.py`): no extra smoothing, since MediaPipe
+- **Defaults** (the Tracker DAT's MediaPipe modes, `python/tracking_pars.py`): no extra smoothing, since MediaPipe
   already smooths; tracks confirm on the first frame; Confidence Threshold 0.1; **Track Loss
   Frames 3**. That last one is lower than YOLO's 15 because a lost MediaPipe track means MediaPipe
   itself dropped it. With two dancers, Pose (Max 2) and Holistic (one person) switch between people

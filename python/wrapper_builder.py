@@ -13,9 +13,7 @@ bones, CHOP per-track values plus native stats.
 The spec decides what differs:
 	plugin, preset   the custom OP type and its fixed settings (member names like Dynamicsize1 ok)
 	kind             landmarks | boxes | image | classifier (second stage on a nested detector)
-	tracker          onnxtop_tables tracker mode (omit for image models)
-	tracker_engine   'python' runs the Python tracker (Script DATs, onnxtop_tables) instead of the
-	                 default Tracker DAT (cpp/Tracking)
+	tracker          the Tracker DAT's mode (tracking_pars.MODES; omit for image models)
 	tracker_defaults tracker parameter values that differ from the mode's defaults (e.g. smoothing
 	                 for Holistic GPU, which unlike MediaPipe's own Holistic has no landmark filter)
 	result           'inference' makes TOP 1 the native image (e.g. a seg matte); boxes go to TOP 3
@@ -27,18 +25,16 @@ The spec decides what differs:
 Everything not exposed stays preset on the inner nodes.
 """
 
-import importlib
 import json
 from pathlib import Path
 
 import td	# imported modules don't get TD's globals (project, op)
 
-# The Python tracker, embedded only in wrappers built with tracker_engine 'python'.
-MODULES = ('object_tracker', 'mediapipe_skeletons', 'box_tracker_pipeline',
-	'face_tracker_pipeline', 'pose_tracker_pipeline', 'onnxtop_tables')
-DEFAULT_TRACKER_ENGINE = 'cpp'	# the Tracker DAT
+import tracking_pars
+
 # A landmarks spec with a "detector" nests a person detector before OnnxTOP (Pose Crops, Holistic);
-# its optional "converter" module (e.g. rtmw_convert) reshapes the Info DAT for the tracker.
+# its optional "converter" (RTMW3D: "rtmw_convert", the Tracker DAT's Convert RTMW3D table) reshapes
+# the Info DAT for the tracker.
 DEBUG_BB = 'tox/shared/DebugBB.tox'
 DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
 KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript', 'scores', 'speech')
@@ -65,11 +61,6 @@ LAYOUT = {
 	'tracker/in_info': (0, 0), 'tracker/script_tracks': (1, 0), 'tracker/out_tracks': (3, 0),
 	'tracker/script_joints': (2, -150), 'tracker/out_joints': (3, -150),
 	'tracker/script_bones': (2, -300), 'tracker/out_bones': (3, -300),
-	'local/modules': (0, 0),
-	'local/modules/object_tracker': (0, 0), 'local/modules/mediapipe_skeletons': (0, -150),
-	'local/modules/box_tracker_pipeline': (1, 0), 'local/modules/face_tracker_pipeline': (1, -150),
-	'local/modules/pose_tracker_pipeline': (1, -300), 'local/modules/onnxtop_tables': (2, -150),
-	'local/modules/rtmw_convert': (2, -300),
 	'detector': (1, -20), 'crop_boxes': (2, 320), 'rtmw_info': (2, 60), 'detector_gate': (0, 320),
 }
 LAYOUT_KIND = {
@@ -217,18 +208,10 @@ def _restrict_menu(parameter, choices):
 		parameter.default = names[0]
 
 
-def _add_code(comp, module_names=MODULES):
+def _add_code(comp):
 	_synced_dat(comp, 'component', 'python/wrapper_runtime.py')
-	if not module_names:
-		return
-	modules = comp.create('baseCOMP', 'local').create('baseCOMP', 'modules')
-	for module_name in module_names:
-		_synced_dat(modules, module_name, f'python/{module_name}.py')
 
 
-# Tracker modes the C++ Tracker DAT runs (cpp/Tracking); the others stay on the Python tracker.
-TRACKER_DAT_MODES = ('pose', 'movenet', 'face', 'detect', 'segment', 'mp_pose', 'mp_hands', 'mp_face', 'mp_holistic',
-	'mp_facedet', 'rtmw')
 TRACKER_DAT_PLUGIN = 'plugins/TrackerDAT.dll'
 
 
@@ -245,44 +228,30 @@ def _tracker_dat(parent_comp, name, table):
 	return node
 
 
-def _build_tracker(comp, mode, source='detections', engine='python', defaults=None):
-	"""The tracker COMP: its Setup / Tracking pages (onnxtop_tables.setup_parameters) and three
-	nodes writing tracks, joints and bones. engine 'python': Script DATs calling onnxtop_tables;
-	'cpp': Tracker DATs, their parameters bound to the COMP's."""
+def _build_tracker(comp, mode, source='detections', defaults=None):
+	"""The tracker COMP: its Setup / Tracking pages (tracking_pars) and three Tracker DATs writing
+	tracks, joints and bones, the Tracks node's parameters bound to the COMP's."""
+	assert mode in tracking_pars.MODES, f'[WrapperBuilder] no tracker mode {mode}'
 	tracker = comp.create('baseCOMP', 'tracker')
-	# The Tracking page is built by the Python tracker's setup code: the wrapper's own copy when it
-	# embeds the Python tracker, else the builder's import (python/ is on sys.path in the project).
-	embedded = comp.op('local/modules/onnxtop_tables')
-	tables = embedded.module if embedded is not None else importlib.import_module('onnxtop_tables')
-	tables.setup_parameters(tracker)
-	tracker.par.Trackermode = mode
-	tables.setup_parameters(tracker)
+	tracking_pars.build_pages(tracker, mode)
 	for name, value in (defaults or {}).items():
 		parameter = getattr(tracker.par, name)
 		parameter.default = value
 		parameter.val = value
 	info = tracker.create('inDAT', 'in_info')
-	cpp = engine == 'cpp'
-	assert not cpp or mode in TRACKER_DAT_MODES, f'[WrapperBuilder] the Tracker DAT does not run {mode} yet'
 	tracks = None
 	for index, suffix in enumerate(('tracks', 'joints', 'bones'), 1):
-		if cpp:
-			script = _tracker_dat(tracker, 'script_' + suffix, suffix)
-			if suffix == 'tracks':
-				for par in script.pars():
-					if par.page is None or par.page.name not in ('Tracker', 'Tracking'):
-						continue
-					if par.name == 'Trackermode' or (par.page.name == 'Tracking' and hasattr(tracker.par, par.name)):
-						par.expr = f'parent().par.{par.name}'
-				if comp.op('inference_stats') is not None:
-					script.par.Resultschop = '../inference_stats'
-				if comp.op('null_passthrough') is not None:
-					script.par.Frametop = '../null_passthrough'	# solvePnP's frame size
-		else:
-			script = tracker.create('scriptDAT', 'script_' + suffix)
-			arguments = 'scriptOp, parent(), scriptOp.inputs[0]' if suffix == 'tracks' else 'scriptOp, parent()'
-			tracker.op('script_' + suffix + '_callbacks').text = (
-				f'import onnxtop_tables\ndef onCook(scriptOp):\n\tonnxtop_tables.write_{suffix}({arguments})\n')
+		script = _tracker_dat(tracker, 'script_' + suffix, suffix)
+		if suffix == 'tracks':
+			for par in script.pars():
+				if par.page is None or par.page.name not in ('Tracker', 'Tracking'):
+					continue
+				if par.name == 'Trackermode' or (par.page.name == 'Tracking' and hasattr(tracker.par, par.name)):
+					par.expr = f'parent().par.{par.name}'
+			if comp.op('inference_stats') is not None:
+				script.par.Resultschop = '../inference_stats'
+			if comp.op('null_passthrough') is not None:
+				script.par.Frametop = '../null_passthrough'	# solvePnP's frame size
 		_connect(script, info if suffix == 'tracks' else tracks)
 		if suffix == 'tracks':
 			tracks = script
@@ -293,7 +262,7 @@ def _build_tracker(comp, mode, source='detections', engine='python', defaults=No
 	return tracker
 
 
-def _build_classifier(comp, spec, engine='python'):
+def _build_classifier(comp, spec):
 	"""Second stage: a nested detector wrapper finds and tracks faces; this node classifies their
 	crops and `scores` joins the class scores onto the detector's tracks."""
 	detector = build(load_spec(spec['detector']), comp, name='detector')
@@ -302,19 +271,14 @@ def _build_classifier(comp, spec, engine='python'):
 	_connect(detector, comp.op('input'))
 	# script_tracks, not out_tracks: the crops must not depend on the scored table.
 	comp.create('selectDAT', 'crop_boxes').par.dat = 'detector/tracker/script_tracks'
-	if engine == 'cpp':
-		scores = _tracker_dat(comp, 'scores', 'scores')
-		for name in ('Classprefix', 'Classsmoothing'):	# created with the pages, after this
-			scores.par[name].expr = f'parent().par.{name}'
-	else:
-		scores = comp.create('scriptDAT', 'scores')
-		comp.op('scores_callbacks').text = ('import onnxtop_tables\ndef onCook(scriptOp):\n'
-			'\tonnxtop_tables.write_scores(scriptOp, parent(), scriptOp.inputs[0], scriptOp.inputs[1])\n')
+	scores = _tracker_dat(comp, 'scores', 'scores')
+	for name in ('Classprefix', 'Classsmoothing'):	# created with the pages, after this
+		scores.par[name].expr = f'parent().par.{name}'
 	_connect(scores, comp.op('crop_boxes'), comp.op('detections'))
 	return detector
 
 
-def _build_posecrops(comp, spec, engine='python'):
+def _build_posecrops(comp, spec):
 	"""A landmarks wrapper with a nested person detector: the detector finds and tracks the people,
 	`inference` (OnnxTOP Pose Crops / Holistic) takes their boxes from `crop_boxes`. With a
 	"converter" (RTMW3D: rtmw_convert), `rtmw_info` reshapes the keypoints into the tracker's
@@ -346,15 +310,10 @@ def _build_posecrops(comp, spec, engine='python'):
 			"\tif bool(detector.par.Active.eval()) != need:\n"
 			"\t\tdetector.par.Active = need\n")
 	converter = spec.get('converter')
-	if converter and engine == 'cpp':
-		assert converter == 'rtmw_convert', f'[WrapperBuilder] no C++ version of {converter}'
+	if converter:
+		assert converter == 'rtmw_convert', f'[WrapperBuilder] no converter {converter}'
 		convert = _tracker_dat(comp, 'rtmw_info', 'convert_rtmw')
 		convert.par.Frametop = 'input'
-		_connect(convert, comp.op('detections'))
-	elif converter:
-		convert = comp.create('scriptDAT', 'rtmw_info')
-		comp.op('rtmw_info_callbacks').text = (f'import {converter}\ndef onCook(scriptOp):\n'
-			f"\t{converter}.convert(scriptOp, scriptOp.inputs[0], parent().op('input'))\n")
 		_connect(convert, comp.op('detections'))
 	return detector
 
@@ -601,11 +560,8 @@ def _restore_wires(comp, inputs, outputs):
 			comp.outputConnectors[index].connect(owner.inputConnectors[input_index])
 
 
-def build(spec, parent_comp, name=None, tracker_engine=None):
-	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires.
-	tracker_engine: 'cpp' (the Tracker DAT) or 'python', else the spec's "tracker_engine", else
-	DEFAULT_TRACKER_ENGINE. Only the wrapper's own tracker; a nested detector keeps its spec's.
-	C++-engine wrappers don't embed the Python tracker modules."""
+def build(spec, parent_comp, name=None):
+	"""(Re)build one wrapper inside parent_comp, keeping an existing one's position and wires."""
 	name = name or spec['name']
 	position, inputs, outputs = _take_place(parent_comp, name)
 	comp = parent_comp.create('baseCOMP', name)
@@ -619,8 +575,7 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 		return comp
 	posecrops = spec['kind'] == 'landmarks' and bool(spec.get('detector'))
 	converter = spec.get('converter') if posecrops else None
-	engine = tracker_engine or spec.get('tracker_engine', DEFAULT_TRACKER_ENGINE)
-	_add_code(comp, MODULES + ((converter,) if converter else ()) if engine == 'python' else ())
+	_add_code(comp)
 	comp.create('inTOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
@@ -633,9 +588,9 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 	passthrough = comp.create('nullTOP', 'null_passthrough')
 	_connect(passthrough, comp.op('input'))
 	kind = spec['kind']
-	detector = (_build_classifier(comp, spec, engine) if kind == 'classifier'
-		else _build_posecrops(comp, spec, engine) if posecrops else None)
-	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections', engine,
+	detector = (_build_classifier(comp, spec) if kind == 'classifier'
+		else _build_posecrops(comp, spec) if posecrops else None)
+	tracker = _build_tracker(comp, spec['tracker'], 'rtmw_info' if converter else 'detections',
 		spec.get('tracker_defaults')) if spec.get('tracker') else None
 	_build_pages(comp, spec, plugin, tracker)
 	if tracker is not None:
@@ -658,8 +613,8 @@ def build(spec, parent_comp, name=None, tracker_engine=None):
 		output = comp.create('outDAT', 'out_' + suffix)
 		output.par.connectorder = index
 		_connect(output, comp.op(suffix))
-	_connect(comp.create('outCHOP', 'out_channels'), _build_channels(comp, engine))
-	_build_performance(comp, spec, engine)
+	_connect(comp.create('outCHOP', 'out_channels'), _build_channels(comp))
+	_build_performance(comp, spec)
 	for node in comp.findChildren():
 		node.viewer = False
 	_layout(comp, spec)
@@ -699,24 +654,18 @@ def _track_node(comp):
 	return comp.op('scores')
 
 
-def _build_channels(comp, engine):
-	"""`channels`: t{id}_{column} for every numeric tracks cell, then the plugin's Info CHOP stats.
-	Python: wrapper_runtime.write_channels in a Script CHOP. C++: the Tracker DAT publishes the track
-	values on its Info CHOP (built only when asked; see track_channels); a Merge adds the plugin's
-	stats."""
+def _build_channels(comp):
+	"""`channels`: t{id}_{column} for every numeric tracks cell, then the plugin's Info CHOP stats. The
+	Tracker DAT publishes the track values on its Info CHOP (built only when asked; see
+	track_channels); a Merge adds the plugin's stats."""
 	track = _track_node(comp)
-	if engine == 'cpp' and track is None:
-		# Image models: no tracks, so the channels are the plugin's stats (all write_channels gave).
+	if track is None:
+		# Image models: no tracks, so the channels are the plugin's stats.
 		channels = comp.create('nullCHOP', 'channels')
 		_connect(channels, comp.op('inference_stats'))
 		return channels
-	if engine == 'cpp' and track.OPType != 'scriptDAT':
-		channels = comp.create('mergeCHOP', 'channels')
-		_connect(channels, track_channels(comp, track.path[len(comp.path) + 1:]), comp.op('inference_stats'))
-		return channels
-	channels = comp.create('scriptCHOP', 'channels')
-	comp.op('channels_callbacks').text = (
-		"def onCook(scriptOp):\n\tparent().op('component').module.write_channels(scriptOp, parent())\n")
+	channels = comp.create('mergeCHOP', 'channels')
+	_connect(channels, track_channels(comp, track.path[len(comp.path) + 1:]), comp.op('inference_stats'))
 	return channels
 
 
@@ -740,7 +689,7 @@ def _perf(page, name, label, expression, help_text):
 	return parameter
 
 
-def _build_performance(comp, spec, engine):
+def _build_performance(comp, spec):
 	"""The Performance page: read-only timings, evaluated only while something shows them (the
 	parameter dialog on this page), so they cost nothing otherwise. Plugin and tracker numbers are
 	the plugins' own running averages; Info DAT and overlay are TouchDesigner's cook times."""
@@ -764,18 +713,12 @@ def _build_performance(comp, spec, engine):
 		"Writing the detections into the Info DAT (TD's cook time, last frame).")
 	track = _track_node(comp)
 	if track is not None:
-		if track.OPType == 'scriptDAT':
-			names = [n for n in ('tracker/script_tracks', 'tracker/script_joints', 'tracker/script_bones', 'scores')
-				if comp.op(n) is not None]
-			expression = ' + '.join(_cooked_ms(n) for n in names) + FRESH
-			help_text = "The Python tracker's three Script DATs (TD's cook times, last frame)."
-		else:
-			# A second Info CHOP, unscoped: track_values only carries the track channels.
-			stats = comp.create('infoCHOP', 'tracker_stats')
-			stats.par.op = track.path[len(comp.path) + 1:]
-			stats.par.iscope = 'tracker_ms_avg'
-			expression = "me.op('tracker_stats')['tracker_ms_avg'].eval() if me.op('tracker_stats')['tracker_ms_avg'] is not None else 0.0"
-			help_text = 'The Tracker DAT: tracking and writing the tracks, joints and bones tables (its own timing).'
+		# A second Info CHOP, unscoped: track_values only carries the track channels.
+		stats = comp.create('infoCHOP', 'tracker_stats')
+		stats.par.op = track.path[len(comp.path) + 1:]
+		stats.par.iscope = 'tracker_ms_avg'
+		expression = "me.op('tracker_stats')['tracker_ms_avg'].eval() if me.op('tracker_stats')['tracker_ms_avg'] is not None else 0.0"
+		help_text = 'The Tracker DAT: tracking and writing the tracks, joints and bones tables (its own timing).'
 		_perf(page, 'Perftracker', 'Tracker ms', expression, help_text)
 	if comp.op('detector') is not None:
 		_perf(page, 'Perfdetector', 'Detector ms', "me.op('detector').par.Perftotal.eval()",
@@ -839,7 +782,7 @@ def _build_audio(comp, spec):
 	"""Audio wrapper: input (an audio CHOP, or for text input an optional DAT) -> the MediaPipe audio
 	CHOP (`inference`, cooked every frame), `info` (its Info DAT), the Model page, then the kind's
 	own outputs (_build_transcript, _build_scores, _build_speech) and the About page."""
-	_add_code(comp, ())
+	_add_code(comp)
 	text_input = spec['input'] == 'text'
 	comp.create('inDAT' if text_input else 'inCHOP', 'input')
 	plugin = comp.create(spec['plugin'], 'inference')
