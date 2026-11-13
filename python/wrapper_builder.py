@@ -20,8 +20,10 @@ The spec decides what differs:
 	instances        seg only: TOP 4 colors each tracked object's pixels (Matte Encoding = Instances)
 	extra_outputs    image only: the inference node's other color buffers as TOPs 3, 4, ...; the
 	                 VisionDemo then gets a Show menu, its first entry labelled "result_label"
+	demo_outputs     [{"name", "top"}]: a node inside the wrapper that VisionDemo also outputs as its
+	                 own TOP (out_<name>, after TOP 2)
 	flow             image only: an optical flow model (frame pair): TOP 1 the flow in the Optical
-	                 Flow TOP's format, TOP 3 the flow as color (_build_flow)
+	                 Flow TOP's format, TOP 3 the flow scaled for viewing (_build_flow)
 	model, tracking  the native / tracker parameters the user sees, in order; menus narrows menus
 	detector, classes  classifier only: the nested detector spec and the score column settings
 	input            'audio' builds an audio wrapper instead (_build_audio): audio CHOP in, the
@@ -1233,6 +1235,21 @@ def build_demo(parent_comp, names, name='VisionDemo'):
 	passthrough = demo.create('outTOP', 'out_input')
 	passthrough.par.connectorder = 2
 	_connect(passthrough, frame)
+	# A spec's "demo_outputs": [{"name", "top"}]: that node inside the wrapper as its own TOP output
+	# (TOP 3, 4, ...), transparent while the model is off.
+	order = 3
+	for index, spec in enumerate(specs):
+		toggle = next(key for key, value in controls.items() if value == spec['name'])
+		for extra in spec.get('demo_outputs', ()):
+			select = demo.create('selectTOP', 'select_' + extra['name'])
+			select.par.top.expr = f"'{spec['name']}/{extra['top']}' if parent().par.{toggle} else 'transparent'"
+			select.nodeX, select.nodeY = 4 * COLUMN, -index * DEMO_ROW + 20
+			select.viewer = False
+			out = demo.create('outTOP', 'out_' + extra['name'])
+			out.par.connectorder = order
+			order += 1
+			_connect(out, select)
+			out.nodeX, out.nodeY = 5 * COLUMN, -index * DEMO_ROW + 20
 	gate, startup = _model_gate(demo, controls)
 	middle = -(len(specs) - 1) * DEMO_ROW // 2
 	for node, (column, y) in {source: (0, 200), frame: (1, 200), passthrough: (5, 200), transparent: (3, 200),
