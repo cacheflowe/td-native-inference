@@ -392,8 +392,9 @@ off with distance) in linear light, with the camera image as the surface color.
 - The light colors are shader uniforms (`uLight1Color`, `uLight2Color`: color × intensity) driven
   by the Light Color / Intensity parameters, so animating them, or exporting a CHOP to them, changes
   the light live.
-- **Material page:** **Ambient** (unlit share of the image), **Roughness**, **Metallic**,
-  **Specular**, **Depth Scale** (how deep the person is), **Exposure**, **Background**
+- **Material page:** **Shading** (PBR, or Simple: just the light, its color × how directly the
+  surface faces it × falloff, no highlights or Fresnel), **Ambient** (unlit share of the image),
+  **Roughness**, **Metallic**, **Specular** (PBR only), **Depth Scale** (how deep the person is), **Exposure**, **Background**
   (brightness of everything else), **Transparent Background** (alpha = the matte) and **Show
   Lights** (a ring at each light).
 

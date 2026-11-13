@@ -17,7 +17,8 @@
 - **Relight Demo** (`RelightDemo.tox`): relights a person with two colored point lights (PBR: GGX
   highlights, Fresnel, roughness, distance falloff), using DAViD's normals, depth and matte. Each
   light follows a hand (MediaPipe Hands: the palm or the index fingertip) and eases back to its own
-  position when there's none. **Light Type** Spot aims each light along its index finger.
+  position when there's none. **Light Type** Spot aims each light along its index finger;
+  **Shading** Simple drops the highlights and Fresnel for plain diffuse light.
 
 ## v0.5.0 (2026-11-13)
 

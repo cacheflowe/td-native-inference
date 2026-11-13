@@ -1294,7 +1294,7 @@ uniform vec4 uLight2Dir;
 uniform vec4 uSpot;			// x: 1 = spot lights, y: aim into the scene, z: cos(outer half angle), w: cos(inner)
 uniform vec4 uMaterial;		// x: roughness, y: metallic, z: specular, w: ambient
 uniform vec4 uScene;		// x: depth scale, y: light radius, z: background level, w: transparent background
-uniform vec4 uView;			// x: aspect (w / h), y: exposure, z: show lights
+uniform vec4 uView;			// x: aspect (w / h), y: exposure, z: show lights, w: 1 = simple shading
 out vec4 fragColor;
 const float PI = 3.14159265;
 
@@ -1318,8 +1318,10 @@ vec3 pointLight(vec3 P, vec3 N, vec3 V, vec3 albedo, vec4 light, vec4 color, vec
 	float falloff = 1.0 / (1.0 + dist * dist / max(uScene.y * uScene.y, 1e-4));
 	if (uSpot.x > 0.5)
 		falloff *= smoothstep(uSpot.z, uSpot.w, dot(-L, spotAxis(dir)));
-	vec3 H = normalize(L + V);
 	float NoL = max(dot(N, L), 0.0);
+	if (uView.w > 0.5)	// Simple shading: diffuse only, no highlights or Fresnel
+		return albedo * color.rgb * NoL * falloff * light.w;
+	vec3 H = normalize(L + V);
 	float NoV = max(dot(N, V), 1e-3);
 	float NoH = max(dot(N, H), 0.0);
 	float VoH = max(dot(V, H), 0.0);
@@ -1474,10 +1476,17 @@ def build_relight_demo(parent_comp, name='RelightDemo'):
 	_page_par(lights, 'Float', 'Lightradius', 'Light Radius', 0.6,
 		'Falloff distance (image heights): at this distance a light is at half strength.', 0.05, 2.0)
 	material = demo.appendCustomPage('Material')
+	shading = material.appendMenu('Shading', label='Shading')[0]
+	shading.menuNames, shading.menuLabels = ['pbr', 'simple'], ['PBR', 'Simple']
+	shading.val = shading.default = 'pbr'
+	shading.help = ('PBR: diffuse plus highlights (Roughness, Metallic, Specular, Fresnel). Simple: just the light: '
+		'color x how directly the surface faces it x falloff.')
 	_page_par(material, 'Float', 'Ambient', 'Ambient', 0.15, 'How much of the camera image shows unlit.', 0.0, 1.0)
 	_page_par(material, 'Float', 'Roughness', 'Roughness', 0.5, 'Low = sharp, glossy highlights; high = broad, matte ones.', 0.02, 1.0)
 	_page_par(material, 'Float', 'Metallic', 'Metallic', 0.0, '0 for skin and cloth; 1 tints the highlights with the image color.', 0.0, 1.0)
 	_page_par(material, 'Float', 'Specular', 'Specular', 0.5, 'Strength of the highlights (0.5 = 4% reflectance, like skin).', 0.0, 1.0)
+	for pbr_only in ('Roughness', 'Metallic', 'Specular'):
+		demo.par[pbr_only].enableExpr = "me.par.Shading == 'pbr'"
 	_page_par(material, 'Float', 'Depthscale', 'Depth Scale', 0.3,
 		'How deep the person is, in image heights: more depth gives the lights more shape to wrap around.', 0.0, 1.0)
 	_page_par(material, 'Float', 'Exposure', 'Exposure', 1.0, 'Multiplies the lit person.', 0.0, 4.0)
@@ -1533,7 +1542,8 @@ def build_relight_demo(parent_comp, name='RelightDemo'):
 			f'math.cos({half} * (0.98 - 0.97 * parent().par.Spotsoftness))')),	# inner edge; never equal to outer
 		('uMaterial', ('parent().par.Roughness', 'parent().par.Metallic', 'parent().par.Specular', 'parent().par.Ambient')),
 		('uScene', ('parent().par.Depthscale', 'parent().par.Lightradius', 'parent().par.Background', 'float(parent().par.Transparentbg)')),
-		('uView', ("op('input_frame').width / max(1, op('input_frame').height)", 'parent().par.Exposure', 'float(parent().par.Showlights)', '0')),
+		('uView', ("op('input_frame').width / max(1, op('input_frame').height)", 'parent().par.Exposure', 'float(parent().par.Showlights)',
+			"float(parent().par.Shading == 'simple')")),
 	]
 	relight.seq.vec.numBlocks = len(uniforms)
 	for index, (uniform, exprs) in enumerate(uniforms):
