@@ -247,6 +247,41 @@ Solver::ReadResult Solver::read(const TableView* t, const std::string* hand) {
 	return out;
 }
 
+// ---------------------------------------------------------------- unseen limbs
+
+void Solver::relaxUnseen(Landmarks& world) {
+	// World landmarks: metres, hip origin, y up, +z toward the camera.
+	auto get = [&](const char* name) -> const Vec3* {
+		auto it = world.find(name);
+		return it == world.end() ? nullptr : &it->second;
+	};
+	const Vec3 *ls = get("left_shoulder"), *rs = get("right_shoulder");
+	if (!ls || !rs) return;
+	const Vec3 mid = {(ls->at(0) + rs->at(0)) / 2, (ls->at(1) + rs->at(1)) / 2, (ls->at(2) + rs->at(2)) / 2};
+	// Hips: under the shoulders, a little narrower. The torso then turns with the shoulder line
+	// (which also rolls the hips) instead of standing at the rig's rest.
+	if (!get("left_hip") || !get("right_hip")) {
+		for (const auto& [hip, shoulder] : {std::pair<const char*, const Vec3*>{"left_hip", ls}, {"right_hip", rs}}) {
+			const Vec3& s = *shoulder;
+			world[hip] = {mid[0] + 0.6 * (s[0] - mid[0]), mid[1] + 0.6 * (s[1] - mid[1]) - 0.5, mid[2] + 0.6 * (s[2] - mid[2])};
+		}
+	}
+	// Arms: hanging from the shoulder, the forearm a little forward (so the upper arm's roll is set
+	// by an elbow bending the way elbows bend).
+	for (const char* side : {"left", "right"}) {
+		const std::string s(side);
+		const Vec3* shoulder = get((s + "_shoulder").c_str());
+		if (!get((s + "_elbow").c_str())) {
+			const Vec3& p = *shoulder;
+			world[s + "_elbow"] = {p[0], p[1] - 0.27, p[2]};
+		}
+		if (!get((s + "_wrist").c_str())) {
+			const Vec3& e = world[s + "_elbow"];
+			world[s + "_wrist"] = {e[0], e[1] - 0.24, e[2] + 0.06};
+		}
+	}
+}
+
 // ---------------------------------------------------------------- smoothing
 
 void Solver::filter(ReadResult& r, const Settings& s) {
@@ -348,7 +383,7 @@ bool Solver::cook(const TableView* tracks, const Settings& s) {
 	std::string key = r.line + '\x1f' + (s.overImage ? "1" : "0") + s.hand + (s.mirror ? "1" : "0") + g17(s.fov) + ' ' +
 		g17(s.placeSmoothing) + ' ' + std::to_string(s.imageW) + 'x' + std::to_string(s.imageH) + ' ' + g17(s.cutoff) + ' ' +
 		g17(s.speedCoefficient) + ' ' + g17(s.slopeCutoff) + ' ' + g17(s.twistCutoff) + ' ' + g17(s.twistSpeedCoefficient) +
-		(s.limits ? "L" : "");
+		(s.limits ? "L" : "") + (s.relaxUnseen ? "R" : "");
 	if (r.ok && key_ && *key_ == key && !names_.empty()) {
 		solveMs_ = 0.0;
 		return false;
@@ -363,6 +398,7 @@ bool Solver::cook(const TableView* tracks, const Settings& s) {
 	std::vector<Vec3> positions, rotations;
 	const bool solved = r.ok && !r.world.empty();
 	if (solved) {
+		if (s.relaxUnseen && !hand_) relaxUnseen(r.world);
 		filter(r, s);
 		TwistFilter* twist = s.twistCutoff > 0.0 ? &twist_ : nullptr;
 		twist_.unseenHands.clear();

@@ -21,6 +21,8 @@
 	],
 	"tracking": [
 		"Tracklossframes",
-		"Outputsmoothing"
+		"Outputsmoothing",
+		"Jointthreshold",
+		"Hideoffimage"
 	]
 }

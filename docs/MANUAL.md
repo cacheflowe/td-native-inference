@@ -88,6 +88,17 @@ What the tracker does between model results:
   face that goes missing and returns is hidden for 3 frames while its smoothing settles.
 - **Presence.** Some modes add a 0 to 1 `presence` column that fades in and out, handy for fading
   a graphic.
+- **Unseen joints.** Body models report every joint even when part of the body is outside the
+  picture. A person at a desk webcam, framed from the chest up, still gets knees and ankles, guessed
+  below the image or squashed onto its bottom edge. On the body toxes (Pose, Holistic, Holistic GPU,
+  YOLO26 Pose, MoveNet, RTMW3D) the tracker outputs such joints as unseen: `conf` 0 in the tracks
+  table, left out of the `joints` and `bones` tables (so the debug overlay doesn't draw them). It
+  uses two settings on the Tracking page:
+  - **Joint Confidence Threshold:** joints the model scores below this (0 = off).
+  - **Hide Off-Image Joints:** joints outside the image or on its edge.
+
+  A joint whose parent is unseen is unseen too: no knee without a hip, no wrist without an elbow.
+  Tracking itself still uses every joint, so ids don't change.
 
 The `tracks` table always begins with `track_id, label, score, cx, cy, w, h, x_left, x_right,
 y_top, y_bottom, vx, vy, lost_frames, total_frames`. After those come model-specific columns
@@ -355,6 +366,7 @@ input image (Over Image) or the render alone (Center); the CHOP carries every bo
 | Slope Cutoff | Smooths the speed the filter reacts to; rarely needs changing |
 | Hand Roll Cutoff | Extra smoothing for the twist of the forearms, hands and fingers, the noisiest part of the tracking. The twist also holds while a hand is seen edge-on or not at all. 0 turns it off |
 | Knee Limits | Knees bend only like knees, so bad depth can't bend them backward or sideways |
+| Relax Unseen Limbs | For a person framed from the chest up (a desk webcam): joints the tracker reports as unseen relax instead of jumping to the character's rest pose. The hips go under the shoulders, so the torso still turns, the arms hang and the legs stand straight |
 
 **Notes**
 

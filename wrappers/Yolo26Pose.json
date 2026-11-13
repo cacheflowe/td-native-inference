@@ -20,6 +20,8 @@
 		"Confthreshold",
 		"Tracklossframes",
 		"Relmatchdist",
-		"Outputsmoothing"
+		"Outputsmoothing",
+		"Jointthreshold",
+		"Hideoffimage"
 	]
 }

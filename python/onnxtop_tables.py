@@ -110,15 +110,32 @@ FACE_MESH_PARAMETERS = [
 ]
 
 
+# The joint gate: the C++ Tracker DAT's (cpp/Tracking PoseTracker::gateJoints), on the body modes'
+# Tracking pages; the Python tracker ignores these. Thresholds per mode from the chest-up recordings
+# (tests/test_joint_gate.py): visible joints score >= 0.6 (YOLO26), >= 0.26 (MoveNet), ~1
+# (MediaPipe, which places out-of-frame joints outside the image); RTMW3D's scores are uncalibrated.
+JOINT_GATE_DEFAULTS = {'pose': 0.3, 'movenet': 0.2, 'mp_pose': 0.5, 'mp_holistic': 0.5, 'rtmw': 0.0}
+JOINT_GATE_PARAMETERS = [
+	('Jointthreshold', 'Joint Confidence Threshold', 0.3, 0.0, 1.0, True,
+		"Body joints scoring under this are output as unseen (confidence 0 in the tracks table, left out "
+		"of the joints and bones tables), and so are the joints further down the limb (no knee without "
+		"a hip). For people framed from the chest up: the models still report their legs. 0 = off."),
+	('Hideoffimage', 'Hide Off-Image Joints', True, 0.0, 1.0, False,
+		"Body joints outside the image, or squashed onto its edge (YOLO and MoveNet can't place a point "
+		"outside it), are output as unseen, and so are the joints further down the limb."),
+]
+
+
 def pose_extra_parameters(mode):
 	"""Par lists added to PoseTrackerPipeline's Tracking page for this mode."""
+	gate = tuple(JOINT_GATE_PARAMETERS) if mode in JOINT_GATE_DEFAULTS else ()
 	if mode == 'mp_hands':
 		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *pose_tracker_pipeline.LABEL_PARAMETERS)
 	if mode == 'mp_holistic':
-		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *FACE_MESH_PARAMETERS)
+		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *FACE_MESH_PARAMETERS, *gate)
 	if mode in MP_SKELETONS:
-		return tuple(pose_tracker_pipeline.PERSISTENCE_PARAMETERS)
-	return ()
+		return (*pose_tracker_pipeline.PERSISTENCE_PARAMETERS, *gate)
+	return gate
 
 
 def expected_keypoints(mode):
@@ -210,7 +227,10 @@ def setup_parameters(comp):
 		page.destroy()
 	page = comp.appendCustomPage(TRACKING_PAGE)
 	if mode in POSE_MODES:
-		pose_tracker_pipeline.append_parameters(page, comp, defaults=pose_defaults(mode), extra=pose_extra_parameters(mode))
+		defaults = dict(pose_defaults(mode) or {})
+		if mode in JOINT_GATE_DEFAULTS:
+			defaults['Jointthreshold'] = JOINT_GATE_DEFAULTS[mode]
+		pose_tracker_pipeline.append_parameters(page, comp, defaults=defaults, extra=pose_extra_parameters(mode))
 	elif mode == 'face':
 		face_tracker_pipeline.append_parameters(page, comp)
 	else:
@@ -413,7 +433,7 @@ def write_tracks(out, comp, info_dat):
 		dets = pose_tracker_pipeline.filter_detections(
 			dets, p['Confthreshold'], p['Minboxwidth'], p['Minboxheight'])
 		persist = {}
-		if extra:
+		if mode in MP_SKELETONS:	# PERSISTENCE_PARAMETERS
 			persist = {'coast': p['Coastwhilelost'], 'presence': (p['Presencerise'], p['Presencefall'])}
 		if mode == 'mp_hands':
 			persist.update(label_hold=int(p['Gestureholdframes']), label_min_score=p['Gestureminscore'])

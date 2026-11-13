@@ -57,12 +57,15 @@ def _lab():
 
 
 def _move(lab, session, frame):
-	"""A session with 'motion': the still photo drifts, scales and turns, the same every run."""
+	"""A session with 'motion': the still photo drifts, scales and turns, the same every run. A
+	session with 'view' (zoom, cx, cy) shows a fixed part of the image: (cx, cy) in 0-1 UV (v up)
+	at the centre, zoomed in (a chest-up framing of a full-body clip, say)."""
 	motion = lab.op('motion')
 	amount = session.get('motion', 0.0) if frame >= 0 else 0.0
-	motion.par.tx = 0.25 * amount * math.sin(frame * 0.045)
-	motion.par.ty = 0.1 * amount * math.sin(frame * 0.07 + 1.0)
-	s = 1.0 + 0.35 * amount * math.sin(frame * 0.03)
+	zoom, cx, cy = session.get('view', (1.0, 0.5, 0.5))
+	motion.par.tx = -(cx - 0.5) * zoom + 0.25 * amount * math.sin(frame * 0.045)
+	motion.par.ty = -(cy - 0.5) * zoom + 0.1 * amount * math.sin(frame * 0.07 + 1.0)
+	s = zoom * (1.0 + 0.35 * amount * math.sin(frame * 0.03))
 	motion.par.sx = motion.par.sy = s
 	motion.par.rotate = 15.0 * amount * math.sin(frame * 0.05)
 
@@ -166,7 +169,7 @@ def _step():
 		meta = {
 			'session': session['name'], 'wrapper': session['wrapper'], 'source': session['source'],
 			'start': session.get('start', 0), 'frames': session['frames'], 'pars': session.get('pars', {}),
-			'motion': session.get('motion', 0.0),
+			'motion': session.get('motion', 0.0), 'view': session.get('view'),
 			'mode': tracker.par.Trackermode.eval(),
 			'tracker_pars': {p.name: p.eval() for p in tracker.customPars if not p.isPulse},
 			'frame_size': list(tables._frame_size(tracker)),

@@ -36,6 +36,10 @@ struct Settings {
 	// Twist smoothing (TwistFilter): each bone's roll, One Euro on degrees. Off when <= 0.
 	double twistCutoff = 0.0, twistSpeedCoefficient = 0.0;
 	bool limits = false;	// knee hinges (mixamoTargets(true))
+	// Body rigs: limbs the tracker reports as unseen (its joint gate: a person framed from the
+	// chest up) relax instead of falling back to the rig's rest pose: hips under the shoulders,
+	// arms hanging. Legs stay at rest (straight down from the hips).
+	bool relaxUnseen = false;
 	double time = -1.0;		// seconds (the cook's frame / rate); < 0 unknown: 1/30 s per solve
 };
 
@@ -86,6 +90,7 @@ private:
 	};
 
 	void filter(ReadResult& r, const Settings& s);
+	static void relaxUnseen(Landmarks& world);
 
 	const Layout& layout(const TableView& t);
 	int pickRow(const TableView& t, const Layout& l, const std::vector<int>& rows) const;

@@ -42,6 +42,9 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 
 - [x] Smoothing and knee limits (Nov 13, the Puppet CHOP's Smoothing page).
+- [x] Chest-up framing (Nov 13): the tracker's joint gate and Relax Unseen Limbs; the YOLO26 Pose
+      visibility fix. Left: a limb jumps once when it switches between tracked and relaxed (blend
+      over a few frames); one forearm spike remains on the chest-up clip.
 - [ ] Arm-twist limits: elbows can't bend backward (the upper arm's roll comes from the bend), but
       bad depth can twist the upper arm instead.
 - [ ] The hands are still the noisiest part (their direction comes from a 9 cm line): try a

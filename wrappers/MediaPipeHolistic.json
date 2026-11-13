@@ -22,6 +22,8 @@
 		"Tracklossframes",
 		"Relmatchdist",
 		"Outputsmoothing",
-		"Facemesh"
+		"Facemesh",
+		"Jointthreshold",
+		"Hideoffimage"
 	]
 }

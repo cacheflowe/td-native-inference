@@ -232,11 +232,15 @@ def cpp_lib():
 class CppEngine:
 	"""The C++ port (cpp/Tracking, tracker_replay.dll): same cooks, tables back as text."""
 
-	def __init__(self, meta):
+	# The C++ tracker's additions over the Python one, off for the comparison (C++-only behavior is
+	# tested on its own: tests/test_joint_gate.py).
+	CPP_ONLY_OFF = {'Jointthreshold': 0.0, 'Hideoffimage': 0.0}
+
+	def __init__(self, meta, cpp_only=None):
 		self.lib = cpp_lib()
 		self.lib.trk_reset_ids()
 		self.handle = self.lib.trk_create(meta['mode'].encode())
-		for name, value in meta['tracker_pars'].items():
+		for name, value in {**meta['tracker_pars'], **(self.CPP_ONLY_OFF if cpp_only is None else cpp_only)}.items():
 			if name == 'Posemethod':
 				value = 1.0 if value == 'solvepnp' else 0.0
 			if isinstance(value, (bool, int, float)):

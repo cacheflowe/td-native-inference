@@ -14,7 +14,7 @@ import importlib
 import sys
 from pathlib import Path
 
-ONLY = []
+ONLY = ['holistic_gpu_chestup', 'pose_chestup', 'yolopose_chestup', 'movenet_chestup']
 MEDIA = (Path(project.folder) / 'media').as_posix()
 PHOTOS = (Path(project.folder) / 'docs' / 'images' / 'sources').as_posix()
 
@@ -32,6 +32,13 @@ SESSIONS = [
 	{'name': 'yolopose_walking', 'wrapper': 'Yolo26Pose', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
 	{'name': 'movenet_walking', 'wrapper': 'MoveNet', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
 	{'name': 'rtmw_dancer', 'wrapper': 'RTMW3D', 'source': f'{MEDIA}/dancer.mp4', 'frames': 300},
+	# Chest-up framing (a desk webcam): the dancer's close-up, zoomed so the legs are out of the image
+	# and the hips at its bottom edge (clip frames 270-335; before and after, the knees are at the
+	# edge). The models still report legs; the tracker's joint gate (tests/test_joint_gate.py) and
+	# the puppet are judged on these.
+	*[{'name': f'{name}_chestup', 'wrapper': wrapper, 'source': f'{MEDIA}/dancer.mp4', 'start': 270, 'frames': 66,
+		'view': (1.8, 0.54, 0.55)} for name, wrapper in (('holistic_gpu', 'MediaPipeHolisticGPU'), ('pose', 'MediaPipePose'),
+		('yolopose', 'Yolo26Pose'), ('movenet', 'MoveNet'))],
 	# Box and face modes (phase 3).
 	{'name': 'detect_walking', 'wrapper': 'Yolo26Detect', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
 	{'name': 'segment_walking', 'wrapper': 'Yolo26Seg', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},

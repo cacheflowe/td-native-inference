@@ -77,6 +77,32 @@ Tuning, if ids swap or tracks break:
   After switching the video source, old tracks linger for this many frames.
 - **Output Smoothing**: steadier keypoints at the cost of lag.
 
+**Joints outside the picture.** Body models report every joint even when the person is framed from
+the chest up, and each model fails differently:
+
+| Model | Out-of-frame knees and ankles | Their confidence |
+|---|---|---|
+| MediaPipe Pose / Holistic | Placed below the image | Often high (0.9 at the 90th percentile) |
+| YOLO26 Pose | Squashed onto the bottom edge | Mostly near 0 |
+| MoveNet | Squashed onto the bottom edge | Mostly near 0, sometimes 0.65 |
+
+The tracker outputs them as unseen (`conf` 0, left out of the joints and bones tables) when they
+fall under **Joint Confidence Threshold** or lie outside or on the image's edge (**Hide Off-Image
+Joints**). A joint whose parent is unseen is unseen too.
+
+Default thresholds, from the visible joints' scores:
+
+| Model | Visible joints score | Default |
+|---|---|---|
+| YOLO26 Pose | 0.6+ | 0.3 |
+| MoveNet | 0.26+ | 0.2 |
+| MediaPipe | about 1 | 0.5 |
+| RTMW3D | uncalibrated | edge check only |
+
+On a recorded chest-up clip the out-of-frame knees and ankles are drawn on 0-7% of frames (all of
+them before), while legs on full-body clips stay visible. Matching still uses every joint, so ids
+are unaffected.
+
 ## Hardware
 
 Both plugins need Windows and an NVIDIA GPU. **ONNX** models run on the GPU through

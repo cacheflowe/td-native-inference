@@ -153,7 +153,9 @@ bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float co
 			const float* kp = row + 6 + i * 3;
 			d.keypoints.push_back(toU(kp[0] * bx));
 			d.keypoints.push_back(toV(kp[1] * by));
-			d.keypoints.push_back(kp[2]);
+			// A normalized export (onnx-community's YOLO26 pose) divides every keypoint value by the
+			// input size, the 0-1 visibility too: it arrived as 0-0.0016 (x 640 = 0.13-1.0).
+			d.keypoints.push_back(std::clamp(kp[2] * bx, 0.f, 1.f));
 		}
 		myDetections.push_back(std::move(d));
 

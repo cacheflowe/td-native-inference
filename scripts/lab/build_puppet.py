@@ -140,11 +140,12 @@ for name, label, default, lo, hi, text in puppet_builder.SMOOTHING:
 	p = smoothing.appendFloat(name, label=label)[0]
 	p.default, p.normMin, p.normMax, p.help = default, lo, hi, text
 	p.clampMin, p.min = True, 0.0
-kl = smoothing.appendToggle('Kneelimits', label='Knee Limits')[0]
-kl.default = True
+for name, label, text in puppet_builder.SMOOTHING_TOGGLES:
+	t = smoothing.appendToggle(name, label=label)[0]
+	t.default, t.help = True, text
 for name, default in (('Source', 'dancer'), ('Placement', 'image'), ('Fov', 50.0), ('Handinput', 'clip'),
 		('Handfov', 50.0), ('Hand', 'any'), ('Bodytracker', 'holistic_gpu'), ('Solver', 'cpp'),
-		*[(s[0], s[2]) for s in puppet_builder.SMOOTHING], ('Kneelimits', True)):
+		*[(s[0], s[2]) for s in puppet_builder.SMOOTHING], *[(t[0], True) for t in puppet_builder.SMOOTHING_TOGGLES]):
 	try:
 		getattr(lab.par, name).val = kept.get(name, default)
 	except Exception:	# a menu entry that no longer exists
@@ -212,7 +213,7 @@ def puppet(prefix, tracks_dat, fbx, image, fov_par, row):
 	solver.par.Image = image.name
 	expr(solver.par.Placement, P + 'Placement')
 	expr(solver.par.Fov, P + fov_par)
-	for name in [s[0] for s in puppet_builder.SMOOTHING] + ['Kneelimits']:
+	for name in puppet_builder.SMOOTHING_PARS:
 		expr(solver.par[name], P + name)
 
 	solver_py = node(scriptCHOP, prefix + 'solver_py', 4, row + 1.4)

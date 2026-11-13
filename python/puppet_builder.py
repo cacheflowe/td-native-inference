@@ -77,6 +77,14 @@ SMOOTHING = [
 	('Twistcutoff', 'Hand Roll Cutoff (Hz)', 2.0, 0.0, 5.0, "Smooths the forearms', hands' and fingers' roll (from "
 		'the short knuckle line) and holds it while a hand is seen edge-on or not at all. 0 = off.'),
 ]
+# Its toggles (name, label, help), on by default.
+SMOOTHING_TOGGLES = [
+	('Kneelimits', 'Knee Limits', "Knees bend like hinges, within a natural range: depth noise can't bend them backward "
+		'or sideways.'),
+	('Relaxunseen', 'Relax Unseen Limbs', 'Joints the tracker reports as unseen (a person framed from the chest up): '
+		"the hips go under the shoulders and the arms hang, instead of the character's rest pose. Legs stay straight."),
+]
+SMOOTHING_PARS = [s[0] for s in SMOOTHING] + [t[0] for t in SMOOTHING_TOGGLES]
 
 
 def _puppet_chop(comp, name):
@@ -117,8 +125,8 @@ def _pages(comp, engine):
 		smoothing = comp.appendCustomPage('Smoothing')
 		for name, label, default, lo, hi, text in SMOOTHING:
 			wb._page_par(smoothing, 'Float', name, label, default, text, lo, hi)
-		wb._page_par(smoothing, 'Toggle', 'Kneelimits', 'Knee Limits', True,
-			"Knees bend like hinges, within a natural range: depth noise can't bend them backward or sideways.")
+		for name, label, text in SMOOTHING_TOGGLES:
+			wb._page_par(smoothing, 'Toggle', name, label, True, text)
 	about = comp.appendCustomPage('About')
 	wb._page_par(about, 'Str', 'Version', 'Version', wb.version(),
 		'The td-native-inference release this tox was built with.').readOnly = True
@@ -158,7 +166,7 @@ def build(parent_comp, engine=DEFAULT_ENGINE):
 		solver = _puppet_chop(comp, 'solver')
 		comp.create('tableDAT', 'rest_pose').clear()
 		solver.par.Restpose = 'rest_pose'
-		for name in [s[0] for s in SMOOTHING] + ['Kneelimits']:
+		for name in SMOOTHING_PARS:
 			_expr(solver.par[name], f'parent().par.{name}')
 	solver.par.Tracks, solver.par.Image = 'in_tracks', 'in_image'
 	for name in ('Placement', 'Fov', 'Mirror', 'Placesmoothing'):

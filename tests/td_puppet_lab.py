@@ -62,7 +62,7 @@ def setup():
 		for name in ('Hand', 'Mirror', 'Placement', 'Fov', 'Placesmoothing'):
 			cpp.par[name].expr = f"op('{py_name}').par.{name}"
 		# The C++ solver's additions (smoothing, knee limits) off: the Python solver has none.
-		for name in ('Smoothcutoff', 'Twistcutoff', 'Kneelimits'):
+		for name in ('Smoothcutoff', 'Twistcutoff', 'Kneelimits', 'Relaxunseen'):
 			cpp.par[name].mode = ParMode.CONSTANT
 			cpp.par[name].val = 0
 		cpp.nodeX, cpp.nodeY = py.nodeX, py.nodeY - 150

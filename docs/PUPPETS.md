@@ -240,6 +240,22 @@ filtering it only delayed real turns.
 character's left-right axis and ±10° of spread, with their twist following the thigh. They keep
 depth noise from bending a knee backward or sideways; on the dancer clip they change nothing.
 
+**4. Chest-up framing (Relax Unseen Limbs).** At a desk webcam the models still report legs, and
+those guesses are noisy: on a recorded chest-up clip the thighs and shins swung about 14° per solve,
+with jumps of up to 150°. The tracker's joint gate
+([MODELS.md](MODELS.md#tracking)) now reports them as unseen (`conf` 0), so they drop out of the
+landmarks.
+
+On its own that would leave undriven bones at the rig's rest pose, so the solver fills in instead:
+- hips missing but shoulders seen: hips go 0.5 m under the shoulders (a little narrower), so the
+  torso still turns with the shoulder line;
+- elbows or wrists missing: they hang, the forearm slightly forward so the upper arm's roll is
+  defined;
+- legs: left undriven, straight down from the hips.
+
+On that clip the shins now don't move, and the thighs move only while the knees really are in view.
+A limb still jumps once when it switches between tracked and relaxed.
+
 **Measured** on the dancer clip (Y Bot, 264 solves). Jitter is the RMS frame-to-frame angular
 acceleration, in degrees:
 

@@ -157,6 +157,15 @@ double Tracker::par(const char* name) const {
 		auto found = face.find(n);
 		return found != face.end() ? found->second : 0.0;
 	}
+	// The joint gate (C++ only, onnxtop_tables.JOINT_GATE_DEFAULTS): body modes. Thresholds from the
+	// chest-up recordings: visible joints score >= 0.6 (YOLO26), >= 0.26 (MoveNet), ~1 (MediaPipe).
+	if (n == "Jointthreshold" || n == "Hideoffimage") {
+		static const std::map<std::string, std::pair<double, double>> gate = {{"pose", {0.3, 1}}, {"movenet", {0.2, 1}},
+			{"mp_pose", {0.5, 1}}, {"mp_holistic", {0.5, 1}}, {"rtmw", {0.0, 1}}};
+		auto it = gate.find(mode_);
+		if (it == gate.end()) return 0.0;
+		return n == "Jointthreshold" ? it->second.first : it->second.second;
+	}
 	// Per-mode defaults (onnxtop_tables.pose_defaults), then pose_tracker_pipeline's PARAMETERS.
 	if (mode_ == "movenet") {
 		if (n == "Confthreshold") return 0.1;
@@ -471,6 +480,8 @@ bool Tracker::cook(TableKind kind, const InfoView* info, Table& out) {
 		p.labelHold = int(par("Gestureholdframes"));
 		p.labelMinScore = par("Gestureminscore");
 	}
+	p.jointThreshold = par("Jointthreshold");
+	p.hideOffImage = par("Hideoffimage") != 0.0;
 	pose.update(kept, p);
 	pose.writeTracks(out);
 	return true;

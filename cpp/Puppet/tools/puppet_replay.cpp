@@ -109,6 +109,8 @@ EXPORT void pup_set_extra(void* h, double cutoff, double speedCoefficient, doubl
 	e.time = time;
 }
 
+EXPORT void pup_set_relax(void* h, int relax) { ((Handle*)h)->extra.relaxUnseen = relax != 0; }
+
 EXPORT void pup_set_twist(void* h, double cutoff, double speedCoefficient) {
 	auto& e = ((Handle*)h)->extra;
 	e.twistCutoff = cutoff;

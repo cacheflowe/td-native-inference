@@ -65,6 +65,12 @@ const Par kPars[] = {
 	{"Gestureminscore", "Gesture Min Score", Kind::Float, 0.5, 0.0, 1.0, true, "MediaPipe Hands: weaker gestures count as None."},
 	{"Facemesh", "Face Mesh", Kind::Toggle, 1, 0, 1, true,
 		"MediaPipe Holistic: track and output the 478 face mesh points. Off: pose and hands only (75 points)."},
+	{"Jointthreshold", "Joint Confidence Threshold", Kind::Float, 0.3, 0.0, 1.0, true,
+		"Body joints scoring under this are output as unseen (confidence 0, left out of the joints and bones tables), "
+		"and so are the joints further down the limb (no knee without a hip). 0 = off."},
+	{"Hideoffimage", "Hide Off-Image Joints", Kind::Toggle, 1, 0, 1, true,
+		"Body joints outside the image, or squashed onto its edge, are output as unseen (a person framed from the "
+		"chest up: models still report legs)."},
 	{"Lowconfthreshold", "Low Confidence Threshold (Recovery)", Kind::Float, 0.1, 0.0, 1.0, true,
 		"Detect / Segment / Face: detections between this and Confidence Threshold can keep an existing track alive "
 		"but never start one."},

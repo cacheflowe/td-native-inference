@@ -14,6 +14,18 @@
 
   On a dance clip from Holistic GPU, frame-to-frame jumps of more than 30° drop from 21% to 0.4%
   of frames on the forearms and from 20% to 6% on the hands.
+- **Unseen joints** (Tracking page of the body toxes): joints outside the picture are output as
+  unseen (`conf` 0, not drawn), for people framed from the chest up. Models still report those
+  legs: MediaPipe places them below the image, YOLO26 and MoveNet squash them onto its edge.
+  Settings:
+  - **Joint Confidence Threshold** (per-model default);
+  - **Hide Off-Image Joints**;
+  - a joint whose parent is unseen is unseen too.
+
+  Mixamo Puppet's **Relax Unseen Limbs** then keeps the torso turning and lets the arms hang and
+  the legs stand.
+- **Fix: YOLO26 Pose joint confidence.** It was always about 0.0016 (the export divides it by the
+  input size); it's now 0-1.
 - [docs/PUPPETS.md](docs/PUPPETS.md): how the puppet solver drives a rigged character.
 
 ## v0.4.0 (2026-11-12)

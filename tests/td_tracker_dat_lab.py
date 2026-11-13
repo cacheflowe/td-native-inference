@@ -74,6 +74,12 @@ def build(session):
 	for par in cpp_tracker.customPars:
 		if hasattr(python_tracker.par, par.name):
 			par.expr = f"op('tracker').par.{par.name}"
+	# The C++ tracker's additions (the joint gate) off: the Python tracker has none.
+	for name, value in (('Jointthreshold', 0.0), ('Hideoffimage', False)):
+		par = getattr(cpp_tracker.par, name, None)
+		if par is not None:
+			par.mode = ParMode.CONSTANT
+			par.val = value
 	for t in TABLES:	# the plugin's own timing: cook_ms (all of it), track_ms (without writing the table)
 		info = cpp_tracker.create('infoCHOP', 'info_' + t)
 		info.par.op = 'script_' + t

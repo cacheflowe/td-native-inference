@@ -83,6 +83,7 @@ bool PuppetCHOP::getOutputInfo(CHOP_OutputInfo* info, const OP_Inputs* inputs, v
 	s.slopeCutoff = std::max(0.01, inputs->getParDouble("Smoothslope"));
 	s.twistCutoff = inputs->getParDouble("Twistcutoff");
 	s.limits = inputs->getParInt("Kneelimits") != 0;
+	s.relaxUnseen = inputs->getParInt("Relaxunseen") != 0;
 	if (const OP_TimeInfo* time = inputs->getTimeInfo())
 		if (time->rate > 0) s.time = double(time->absFrame) / time->rate;
 	if (const OP_TOPInput* top = inputs->getParTOP("Image")) {
@@ -241,6 +242,15 @@ void PuppetCHOP::setupParameters(OP_ParameterManager* manager, void*) {
 		np.page = "Smoothing";
 		np.defaultValues[0] = 1;
 		np.help = "Knees bend like hinges, within a natural range: depth noise can't bend them backward or sideways.";
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Relaxunseen");
+		np.label = "Relax Unseen Limbs";
+		np.page = "Smoothing";
+		np.defaultValues[0] = 1;
+		np.help = "Joints the tracker reports as unseen (a person framed from the chest up): the hips go under the "
+			"shoulders and the arms hang, instead of the character's rest pose. Legs stay straight.";
 		check(manager->appendToggle(np));
 	}
 }

@@ -27,6 +27,12 @@ struct PoseParams {
 	bool labels = false;	// gesture debounce (MediaPipe Hands)
 	int labelHold = 3;
 	double labelMinScore = 0.0;
+	// Joint gate (C++ only; off reproduces the Python tracker): after tracking, a body joint whose
+	// confidence is under jointThreshold, or (hideOffImage) that lies outside or on the image's
+	// edge, or whose parent is gated (no knee without a hip), is output as unseen: confidence 0 in
+	// the tracks table, left out of the joints and bones tables. Matching is unaffected.
+	double jointThreshold = 0.0;
+	bool hideOffImage = false;
 };
 
 class PoseTracker {
@@ -86,8 +92,14 @@ private:
 	void smoothWorld(State& s, const std::vector<Vec3>& rawWorld, const std::vector<Kp>& rawKpts, double smoothing);
 	std::string stableLabel(const KeypointTrack& t, std::optional<std::string> raw, int hold, double minScore, double smoothing);
 	std::vector<Kp> confirmedKeypoints(const State& s) const;
+	void gateJoints(Object& obj, const PoseParams& p) const;
 
 	Skeleton skeleton_;
+	// The joint gate's body joints (a "pose_" prefix dropped): which keypoints it applies to, and
+	// each one's parent keypoint (-1 for a root: shoulders, hips, the face points), parents first.
+	std::vector<char> gateBody_;
+	std::vector<int> gateParent_;
+	std::vector<int> gateOrder_;
 	KeypointTracker tracker_;
 	std::map<long long, State> state_;
 	std::map<long long, double> presence_;

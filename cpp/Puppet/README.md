@@ -33,6 +33,7 @@ has the measurements.
 | Slope Cutoff (Hz) | 1 | Smooths that speed |
 | Hand Roll Cutoff (Hz) | 2 | The forearms', hands' and fingers' roll, filtered on its own and held while the knuckle line is unreliable; 0 = off |
 | Knee Limits | on | Knees as hinges: -5° to 150° bend, ±10° spread |
+| Relax Unseen Limbs | on | Body rigs: joints with `conf` 0 (the tracker's joint gate) relax. Hips go under the shoulders, arms hang, legs stay at rest |
 
 The filters step with TD's frame time between solves.
 

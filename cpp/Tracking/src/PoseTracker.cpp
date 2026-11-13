@@ -33,7 +33,56 @@ const double* findExtra(const std::vector<std::pair<std::string, double>>& extra
 PoseTracker::PoseTracker(const Skeleton& skeleton)
 	: skeleton_(skeleton),
 	  tracker_(skeleton.maxMatchDist, skeleton.distance, kDupDistFactor, kDefaultTrackBuffer, kDefaultMinHits, 0.9, 50,
-		  skeleton.relMatchDist) {}
+		  skeleton.relMatchDist) {
+	// Body joints (COCO and MediaPipe pose names) and their limb chains, parents first.
+	static const char* kRoots[] = {"nose", "left_eye_inner", "left_eye", "left_eye_outer", "right_eye_inner", "right_eye",
+		"right_eye_outer", "left_ear", "right_ear", "mouth_left", "mouth_right", "left_shoulder", "right_shoulder", "left_hip",
+		"right_hip"};
+	static const char* kChains[][2] = {{"elbow", "shoulder"}, {"wrist", "elbow"}, {"pinky", "wrist"}, {"index", "wrist"},
+		{"thumb", "wrist"}, {"knee", "hip"}, {"ankle", "knee"}, {"heel", "ankle"}, {"foot_index", "ankle"}};
+	const size_t n = skeleton_.names.size();
+	gateBody_.assign(n, 0);
+	gateParent_.assign(n, -1);
+	auto bodyName = [](const std::string& name) { return name.compare(0, 5, "pose_") == 0 ? name.substr(5) : name; };
+	std::map<std::string, int> index;
+	for (size_t k = 0; k < n; ++k) index[bodyName(skeleton_.names[k])] = int(k);
+	auto find = [&](const std::string& name) {
+		auto it = index.find(name);
+		return it == index.end() ? -1 : it->second;
+	};
+	for (const char* root : kRoots)
+		if (int k = find(root); k >= 0) {
+			gateBody_[k] = 1;
+			gateOrder_.push_back(k);
+		}
+	for (const auto& link : kChains)
+		for (const char* side : {"left_", "right_"}) {
+			const int k = find(std::string(side) + link[0]), parent = find(std::string(side) + link[1]);
+			if (k < 0) continue;
+			gateBody_[k] = 1;
+			gateParent_[k] = parent;
+			gateOrder_.push_back(k);
+		}
+}
+
+void PoseTracker::gateJoints(Object& obj, const PoseParams& p) const {
+	if (p.jointThreshold <= 0.0 && !p.hideOffImage) return;
+	// Models that can't place a point outside the image (YOLO, MoveNet) squash out-of-frame joints
+	// onto its edge; MediaPipe places them outside it.
+	constexpr double kEdge = 0.005;
+	std::vector<char> gated(obj.keypoints.size(), 0);
+	for (int k : gateOrder_) {
+		if (k >= int(obj.keypoints.size())) continue;
+		const Kp& kp = obj.keypoints[k];
+		bool off = p.jointThreshold > 0.0 && kp.v[2] < p.jointThreshold;
+		if (p.hideOffImage && (kp.v[0] < kEdge || kp.v[0] > 1.0 - kEdge || kp.v[1] < kEdge || kp.v[1] > 1.0 - kEdge)) off = true;
+		if (gateParent_[k] >= 0 && gated[gateParent_[k]]) off = true;
+		if (!off) continue;
+		gated[k] = 1;
+		obj.visible[k] = 0;
+		obj.keypoints[k].v[2] = 0.0;
+	}
+}
 
 void PoseTracker::smoothWorld(State& s, const std::vector<Vec3>& rawWorld, const std::vector<Kp>& rawKpts, double smoothing) {
 	bool snap = s.snap;
@@ -227,6 +276,7 @@ void PoseTracker::update(const std::vector<std::shared_ptr<const Detection>>& de
 		obj.world = s.world;
 		obj.visible.resize(numKp);
 		for (int k = 0; k < numKp; ++k) obj.visible[k] = s.lost[k] <= tracker_.trackBuffer;
+		gateJoints(obj, p);
 		obj.vx = t.vx;
 		obj.vy = t.vy;
 		obj.lostFrames = t.lostFrames;

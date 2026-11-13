@@ -24,6 +24,8 @@
 		"Tracklossframes",
 		"Relmatchdist",
 		"Coastwhilelost",
-		"Outputsmoothing"
+		"Outputsmoothing",
+		"Jointthreshold",
+		"Hideoffimage"
 	]
 }
