@@ -137,8 +137,51 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
       converted to UV (dx / 768, -dy / 432). Then a wrapper spec, a flow-to-color visualization
       (GLSL), the lab test and a fetch / bundle entry. Also compare fp16 with fp32 output on real
       frames.
+- [ ] **Eye gaze** (looked at Nov 14):
+      - **First, what we already have:** MediaPipe Face's blendshapes include `eyeLookIn/Out/Up/Down`
+        per eye (a gaze proxy, 0-1), and its 478 points include the irises (468-477): iris centre
+        against the eye corners gives a 2D gaze direction. A `gaze_x` / `gaze_y` pair per face in
+        the tracks, from either, might be all most projects need. Cheapest; try this first.
+      - **Qualcomm AI Hub EyeGaze** ([model card](https://aihub.qualcomm.com/models/eyegaze)): EyeNet
+        from [david-wb/gaze-estimation](https://github.com/david-wb/gaze-estimation) (stacked
+        hourglass, 2.6M parameters). Input one eye crop, grayscale 160x96, histogram-equalized,
+        0-1 (crop 1.5x the eye-corner distance); outputs eye heatmaps, 34 eye landmarks and gaze
+        pitch / yaw (radians; flip yaw for the right eye). Float ONNX on
+        [Hugging Face](https://huggingface.co/qualcomm/EyeGaze) (`release_assets.json`); about 1-2 ms on
+        phones, so trivial here. Needs a crop-then-regress path from face landmarks (two crops per
+        face, like HSEmotion's). **Licence caveat:** Qualcomm labels it BSD-3, but the upstream
+        repo has no licence and was trained only on UnityEyes renders (UnityEyes' terms are
+        research-only, unchecked); its README reports ~14 (degrees?) error on MPIIGaze, weak by
+        today's standards. Check provenance before shipping; compare with the blendshape route.
 - [ ] Also exported by MediaPipe and cheap to add: text classifier / embedder, language detector,
       object detector, image classifier / embedder, interactive segmenter.
+
+## Ideas from the macOS libraries (Nov 14)
+
+[Apple Frameworks for TouchDesigner](https://github.com/sygnalinc/Apple-Frameworks-for-TouchDesigner)
+(60 Apple-framework custom OPs) and [AML](https://forum.derivative.ca/t/aml-a-new-touchdesigner-operator-family-for-ai-ml-on-macos/1014942)
+(Apple Vision + a Core ML collection; its Patreon post is login-only, not read). Worth borrowing:
+- [ ] **Stock-OP-compatible outputs:** they match the Body Track CHOP's and Face Track CHOP's channel
+      layouts, so existing networks swap in. We did this for NeuFlow (Optical Flow TOP format); a
+      Body Track-compatible CHOP option on the pose toxes and a Face Track one on the face toxes
+      would make us a drop-in for people moving off NVIDIA's Maxine OPs (or adding multi-person).
+- [ ] **In-TD model manager** (AML): see which models are installed, download missing ones from a
+      button, with a state per model, instead of `fetch_models.cmd` outside TD. Each tox could
+      also offer "download this model" when its file is missing.
+- [ ] **An agent skill for the toxes** (they ship `.claude/skills` describing how to wire their OPs):
+      a skill telling a coding agent which tox does what, their inputs / outputs and recipes.
+- [ ] **A minimal example per tox** (their `demo.toe` has one container per OP), besides VisionDemo.
+- Models / tasks we don't have yet, roughly by interest (licences unchecked):
+  - [ ] **Saliency + auto-framing:** a saliency map and a crop rectangle of the interesting region,
+        for automatic camera moves.
+  - [ ] **OCR** (text with boxes): PaddleOCR's ONNX models (Apache-2.0) would fit.
+  - [ ] **Point-prompted segmentation** (SAM 2): already listed under Models (MobileSAM /
+        EfficientSAM); they show the use: cut out whatever the audience touches.
+  - [ ] **Animal pose** (dogs and cats): e.g. an AP-10K-trained RTMPose (we run RTMPose crops).
+  - [ ] **QR / barcode reading** and **rectangle detection** (corners into a Corner Pin): classic
+        CV, small C++ (OpenCV is not a dependency yet).
+  - [ ] Single-person 3D pose: Holistic's world landmarks already cover it.
+  - Out of scope here: LLMs, translation, image generation, maps, MIDI and OS integrations.
 
 ## Audio
 
