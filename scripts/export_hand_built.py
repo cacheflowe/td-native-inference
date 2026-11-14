@@ -14,7 +14,8 @@ Three kinds of tox (see CLAUDE.md):
 
 The export makes each tox self-contained: DAT file syncs and external-tox links (the wrappers'
 shared debug overlays, a demo's link to a component) are cut in the saved copy only. It also
-loads the node icon if docs/images/icons/<Name>.png exists (scripts/build_icons.py, DEMOS).
+loads the node icon if docs/images/icons/<Name>.png exists (scripts/build_icons.py, DEMOS) and stamps
+an About page's Version with VERSION.
 
 REFRESH_WRAPPERS rebuilds the model wrappers inside each one from wrappers/*.json first (after a
 wrapper change), keeping their position, wires and the parameters you changed on them. Save the
@@ -48,6 +49,12 @@ for source, folder in SOURCES.items():
 		if REFRESH_WRAPPERS:
 			entry['refreshed'] = wrapper_builder.refresh_wrappers(comp)
 		entry['icon'] = wrapper_builder.set_demo_icon(comp) is not None
+		version = getattr(comp.par, 'Version', None)	# an About page's Version: stamp the release
+		if version is not None:
+			version.readOnly = False
+			version.val = version.default = wrapper_builder.version()
+			version.readOnly = True
+			entry['version'] = version.eval()
 		destination = Path(project.folder) / folder / f'{comp.name}.tox'
 		wrapper_builder.export(comp, destination)
 		entry['tox'] = destination.relative_to(Path(project.folder)).as_posix()
