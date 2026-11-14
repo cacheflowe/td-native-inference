@@ -76,6 +76,18 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 - **Don't commit** models, media, built plugins or TD's numbered `.toe` saves (`.gitignore`
   covers them).
 
+## Token budget (the user runs out)
+
+- Bridge scripts print one compact line or small dict: counts, a few values, the error's last
+  lines. Never print tables, headers, parameter lists or whole JSON reports; put big results in
+  `build/*.json` and read only the keys needed. Pipe `/run` output through `head -c`.
+- Delayed work (`run(..., delayFrames=)`) wraps its body in try/except and always writes its
+  result file (the error included) and restores anything it changed, so a failure isn't a silent
+  wait followed by a second probe.
+- Find node paths once (`findChildren(..., depth=2)`), then reuse them; don't re-explore networks.
+- Read files by line range or grep, not whole (TODO.md, the large .cpp files); `tail` build logs.
+- Don't re-read a file just edited or re-verify what a tool already confirmed.
+
 ## Style
 
 Python: tabs, PascalCase classes, snake_case functions, f-strings, `[Prefix]` logging. C++:
