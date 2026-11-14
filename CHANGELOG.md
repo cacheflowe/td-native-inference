@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Eye gaze** on MediaPipe Face and Holistic: `gaze_x` / `gaze_y` columns in the tracks (Eye Gaze,
+  on by default), from the irises against the eye corners. They give where the eyes look within the
+  head, in half eye-widths (+x image right, +y up), and work without Blendshapes.
+
 ## v0.6.0 (2026-11-14)
 
 - **NeuFlow v2 Optical Flow** (`NeuFlowV2.tox`): how every pixel moved since the previous frame, 5

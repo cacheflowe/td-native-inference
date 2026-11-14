@@ -51,6 +51,7 @@ private:
 		int		world = -1;			// first w{i}_x column
 		int		worldCount = 0;		// landmarks with world columns (holistic: body + hands)
 		int		scores = -1;		// first blendshape column
+		int		gaze = -1;			// gaze_x, gaze_y
 		int		matrix = -1;		// first m00 column
 		int		total = 0;
 	};
@@ -88,6 +89,7 @@ private:
 	MpTaskKind			myTask = MpTaskKind::Face;
 	bool				myOutputZ = false;
 	bool				myOutputWorld = false;
+	bool				myGaze = false;
 	bool				myActive = true;
 	int					myFrameW = 0, myFrameH = 0;
 	double				myExecuteMs = 0.0;

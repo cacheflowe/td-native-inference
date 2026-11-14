@@ -212,8 +212,10 @@ Apache-2.0.
 
 ### MediaPipe Face Landmarks (`MediaPipeFace.tox`)
 Up to N faces (default 2) with the 478-point face mesh. **Blendshapes** adds 52 expression scores
-(`jawOpen`, `eyeBlinkLeft`, ...) as columns; **Matrix** adds the face's 4×4 transform. MediaPipe,
-Apache-2.0.
+(`jawOpen`, `eyeBlinkLeft`, ...) as columns. **Eye Gaze** adds `gaze_x` / `gaze_y`, where the eyes
+look within the head, from the irises against the eye corners: in half eye-widths, +x toward the
+image's right, +y up. They're smoothed with the tracks. **Matrix** adds the face's 4×4 transform.
+MediaPipe, Apache-2.0.
 
 ### MediaPipe Face Detector (`MediaPipeFaceDetector.tox`)
 Fast face boxes with 6 keypoints (eyes, nose, mouth, ears), up to 4 faces. Use it when you need
@@ -221,7 +223,7 @@ where faces are, not their shape. MediaPipe (BlazeFace short range), Apache-2.0.
 
 ### MediaPipe Holistic (`MediaPipeHolistic.tox`)
 One person: body, both hands and the face mesh in one model (75 tracked joints plus face).
-**Blendshapes** adds the face expression scores. Heavier than Pose. **Face Mesh** (Tracking page)
+**Blendshapes** adds the face expression scores, **Eye Gaze** the face's `gaze_x` / `gaze_y`. Heavier than Pose. **Face Mesh** (Tracking page)
 off leaves the face out of the tables: MediaPipe still runs it, but the tracker drops from about
 1.4 ms to 0.5 ms per frame. MediaPipe, Apache-2.0.
 

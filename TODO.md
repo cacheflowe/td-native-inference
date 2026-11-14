@@ -142,6 +142,8 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
         per eye (a gaze proxy, 0-1), and its 478 points include the irises (468-477): iris centre
         against the eye corners gives a 2D gaze direction. A `gaze_x` / `gaze_y` pair per face in
         the tracks, from either, might be all most projects need. Cheapest; try this first.
+        **Done (iris route, Nov 14):** MediaPipeTOP's Eye Gaze toggle. Still open: a gaze direction in
+        camera space (combine with the head transform) and calibrating the range on real footage.
       - **Qualcomm AI Hub EyeGaze** ([model card](https://aihub.qualcomm.com/models/eyegaze)): EyeNet
         from [david-wb/gaze-estimation](https://github.com/david-wb/gaze-estimation) (stacked
         hourglass, 2.6M parameters). Input one eye crop, grayscale 160x96, histogram-equalized,

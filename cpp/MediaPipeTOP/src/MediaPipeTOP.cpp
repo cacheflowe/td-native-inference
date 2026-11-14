@@ -79,6 +79,37 @@ namespace
 
 	constexpr int kMaxInstances = 8;
 	constexpr int kBaseCols = 8;	// id, class, conf, u1, v1, u2, v2, label
+
+	// Eye-in-head gaze from the iris points of the 478-point mesh starting at landmark `at`: per eye,
+	// the iris centre's offset from the midpoint of its two corners, in half eye-widths, along the
+	// corner line (x) and across it (y), averaged over both eyes. TD UV directions: +x toward the
+	// image's right, +y up (for an upright face; the axes turn with the head). Pixels, so the
+	// frame's aspect doesn't skew it. False without iris points (no face, or a 468-point mesh).
+	bool irisGaze(const MpInstance& inst, int at, int frameW, int frameH, float out[2])
+	{
+		// image-left corner, image-right corner, iris centre: the subject's right eye, then left
+		const int eyes[2][3] = { { 33, 133, 468 }, { 362, 263, 473 } };
+		if ((int)inst.lm.size() < (at + 478) * kLmStride || frameW <= 0 || frameH <= 0)
+			return false;
+		float sx = 0.f, sy = 0.f;
+		for (const auto& e : eyes)
+		{
+			auto px = [&](int k) { return inst.lm[(size_t)(at + k) * kLmStride] * frameW; };
+			auto py = [&](int k) { return inst.lm[(size_t)(at + k) * kLmStride + 1] * frameH; };
+			if (px(e[2]) == 0.f && py(e[2]) == 0.f)
+				return false;	// holistic leaves a missing face at 0
+			float dx = px(e[1]) - px(e[0]), dy = py(e[1]) - py(e[0]);
+			float len2 = dx * dx + dy * dy;
+			if (len2 < 1e-6f)
+				return false;
+			float ox = px(e[2]) - 0.5f * (px(e[0]) + px(e[1])), oy = py(e[2]) - 0.5f * (py(e[0]) + py(e[1]));
+			sx += 2.f * (ox * dx + oy * dy) / len2;
+			sy += 2.f * (ox * dy - oy * dx) / len2;	// image y is down: above the corner line = +
+		}
+		out[0] = 0.5f * sx;
+		out[1] = 0.5f * sy;
+		return true;
+	}
 }
 
 extern "C"
@@ -192,6 +223,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	int detectWidth = inputs->getParInt("Detectwidth");
 	myOutputZ = !isSeg && !isFaceDet && inputs->getParInt("Outputz") != 0;
 	myOutputWorld = hasWorld(kind) && inputs->getParInt("Outputworld") != 0;
+	myGaze = (isFace || isHolistic) && inputs->getParInt("Gaze") != 0;
 	const bool waitResult = inputs->getParInt("Waitforresult") != 0;
 	const double maxWaitMs = std::max(0.0, inputs->getParDouble("Maxwait"));
 	MpSegOutput segOutput = (MpSegOutput)std::clamp(inputs->getParInt("Segoutput"), 0, 2);
@@ -204,6 +236,7 @@ void MediaPipeTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	inputs->enablePar("Minpresence", tracks || isHolistic);
 	inputs->enablePar("Mintracking", tracks);
 	inputs->enablePar("Blendshapes", isFace || isHolistic);
+	inputs->enablePar("Gaze", isFace || isHolistic);
 	inputs->enablePar("Matrix", isFace);
 	inputs->enablePar("Segmentation", kind == MpTaskKind::Pose || isHolistic);
 	inputs->enablePar("Outputz", !isSeg && !isFaceDet);
@@ -464,6 +497,11 @@ MediaPipeTOP::Columns MediaPipeTOP::columns() const
 		c.scores = at;
 		at += (int)myResult.scoreNames.size();
 	}
+	if (myGaze && (myTask == MpTaskKind::Face || myTask == MpTaskKind::Holistic))
+	{
+		c.gaze = at;
+		at += 2;
+	}
 	bool hasMatrix = false;
 	for (const MpInstance& inst : myResult.instances)
 		hasMatrix |= !inst.matrix.empty();
@@ -487,8 +525,8 @@ bool MediaPipeTOP::getInfoDATSize(OP_InfoDATSize* infoSize, void*)
 void MediaPipeTOP::headerRow(const Columns& c)
 {
 	char key[160];
-	snprintf(key, sizeof(key), "%d/%d/%d/%d/%d/%d/%d/%zu/%s", (int)myTask, c.total, c.landmarks, c.z, c.world,
-		c.worldCount, c.matrix, myResult.scoreNames.size(),
+	snprintf(key, sizeof(key), "%d/%d/%d/%d/%d/%d/%d/%d/%zu/%s", (int)myTask, c.total, c.landmarks, c.z, c.world,
+		c.worldCount, c.gaze, c.matrix, myResult.scoreNames.size(),
 		myResult.scoreNames.empty() ? "" : myResult.scoreNames.front().c_str());
 	if (myHeaderKey == key && (int)myHeader.size() == c.total)
 		return;
@@ -514,6 +552,8 @@ void MediaPipeTOP::headerRow(const Columns& c)
 			myHeader[(size_t)col] = myResult.scoreNames[(size_t)(col - c.scores)];
 			continue;
 		}
+		else if (c.gaze >= 0 && col >= c.gaze && col < c.gaze + 2)
+			snprintf(buf, sizeof(buf), "%s", col == c.gaze ? "gaze_x" : "gaze_y");
 		else if (c.matrix >= 0 && col >= c.matrix && col < c.matrix + 16)
 			snprintf(buf, sizeof(buf), "m%d%d", (col - c.matrix) / 4, (col - c.matrix) % 4);
 		myHeader[(size_t)col] = buf;
@@ -523,7 +563,7 @@ void MediaPipeTOP::headerRow(const Columns& c)
 void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDATEntries* entries, void*)
 {
 	// Columns: id, class, conf, u1, v1, u2, v2, label, kp{i}_u/v/c, [kp{i}_z], [w{i}_x/y/z],
-	//          [<blendshape names>], [m00..m33]. Same base layout as OnnxTOP's Info DAT, in TD UV
+	//          [<blendshape names>], [gaze_x, gaze_y], [m00..m33]. Same base layout as OnnxTOP's Info DAT, in TD UV
 	//          (origin bottom-left) of the input image.
 	const Columns c = columns();
 	char buf[64];
@@ -573,6 +613,9 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 	// kp_c: pose visibility for pose / holistic (holistic's face and hand points are 1 when
 	// present, 0 when missing), presence otherwise.
 	const int confField = myTask == MpTaskKind::Pose || myTask == MpTaskKind::Holistic ? 3 : 4;
+	float gaze[2] = {};
+	if (c.gaze >= 0)
+		irisGaze(inst, myTask == MpTaskKind::Holistic ? kHolisticFace : 0, myResult.frameW, myResult.frameH, gaze);
 
 	for (int col = 0; col < nEntries; col++)
 	{
@@ -615,6 +658,8 @@ void MediaPipeTOP::getInfoDATEntries(int32_t index, int32_t nEntries, OP_InfoDAT
 			size_t i = (size_t)(col - c.scores);
 			v = i < inst.scores.size() ? inst.scores[i] : 0.f;
 		}
+		else if (c.gaze >= 0 && col >= c.gaze && col < c.gaze + 2)
+			v = gaze[col - c.gaze];
 		else if (c.matrix >= 0 && col >= c.matrix && col < c.matrix + 16)
 		{
 			size_t i = (size_t)(col - c.matrix);
@@ -753,6 +798,15 @@ void MediaPipeTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.page = page;
 		np.defaultValues[0] = 1.0;
 		np.help = "Adds the 52 ARKit-style blendshape scores as Info DAT columns.";
+		check(manager->appendToggle(np));
+	}
+	{
+		OP_NumericParameter np("Gaze");
+		np.label = "Eye Gaze";
+		np.page = page;
+		np.defaultValues[0] = 1.0;
+		np.help = "Face / Holistic: adds gaze_x, gaze_y from the irises against the eye corners (eye-in-head, "
+			"in half eye-widths; +x image right, +y up). Doesn't need Blendshapes.";
 		check(manager->appendToggle(np));
 	}
 	{

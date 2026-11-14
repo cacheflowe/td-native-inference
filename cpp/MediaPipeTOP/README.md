@@ -45,6 +45,7 @@ matching tag: the struct layouts must agree.
 | Detect Width | The input is resized on the GPU to this width, keeping aspect, before the copy to the CPU. 0 = input size. MediaPipe's models run at 128–256 px internally, so a larger width mostly costs copy time. |
 | Min Detection / Presence / Tracking Confidence | MediaPipe's thresholds, 0.5 by default. |
 | Face Blendshapes | Face: adds 52 blendshape columns, named by category (`eyeBlinkLeft`, `jawOpen`, …). |
+| Eye Gaze | Face / Holistic: adds `gaze_x`, `gaze_y`, on by default. Each is the iris centre's offset from the midpoint of the eye corners, in half eye-widths, averaged over both eyes: x along the corner line (+ toward the image's right), y across it (+ up). This is the eyes' direction within the head; the axes turn with the head. Blendshapes aren't needed. 0 when the irises are missing. Looking straight ahead reads about (0, 0.15): the iris centre sits a little above the corner line. |
 | Face Transform Matrix | Face: adds `m00`..`m33`, row-major. This 4×4 maps MediaPipe's canonical face model to camera space. |
 | Pose Segmentation Mask | Pose / Holistic: the TOP outputs the person mask (Mono 32-bit float) instead of the frame. |
 | Segment Output | Segmenter: **Foreground** = the only mask (selfie models) or 1 − background (multi-class models); **One Class** = Segment Class's confidence; **Category Index** = per-pixel class index as a float. The selfie model's category map is 0 = person, 255 = background. |
@@ -61,7 +62,7 @@ DebugBB and the Tracker DAT read it the same way:
 
 ```
 id, class, conf, u1, v1, u2, v2, label, kp{i}_u, kp{i}_v, kp{i}_c ..., [kp{i}_z ...],
-[w{i}_x, w{i}_y, w{i}_z ...], [<52 blendshape names>], [m00 .. m33]
+[w{i}_x, w{i}_y, w{i}_z ...], [<52 blendshape names>], [gaze_x, gaze_y], [m00 .. m33]
 ```
 
 - All coordinates are TD UV of the input image (origin bottom-left). `u1 v1 u2 v2` is the bounding
