@@ -46,3 +46,10 @@ tmp/
 # RTMPose / mmdeploy download metadata next to the (already ignored) models
 models/onnx/rtmpose/
 models/onnx/rtmw3d/
+
+# Hand-built demos are private: their sources (demos/, saved with the project by Demos/save_demos)
+# and exports. The generated workbenches are public.
+/demos/
+tox/demos/*
+!tox/demos/VisionDemo.tox
+!tox/demos/AudioDemo.tox

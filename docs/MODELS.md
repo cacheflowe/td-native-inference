@@ -363,46 +363,6 @@ plus one `emotion_<name>` score for anger, disgust, fear, happiness, neutral, sa
 surprise. **Classify Interval** runs the classifier every Nth frame to save GPU time;
 **Class Score Smoothing** steadies the scores. GPU. HSEmotion enet_b2_7, Apache-2.0.
 
-## VisionDemo (`VisionDemo.tox`)
-
-Every video model in one COMP for trying them side by side. Wire a video TOP in and switch models on
-its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
-overlay composited together (image results behind the overlays); TOP 2 is the input; TOP 3 is DAViD
-Depth + Normals + Matte's depth on its own (transparent while that model is off).
-
-## Relight Demo (`RelightDemo.tox`)
-
-Lights a person with two point lights or spotlights, each following a hand. DAViD Depth + Normals + Matte gives
-the surface direction (normals), where each pixel sits in depth, and the matte; MediaPipe Hands
-gives the hands. The shading is physically based (GGX highlights, Fresnel, roughness, light falling
-off with distance) in linear light, with the camera image as the surface color.
-
-- **Lights page:** **Follow Hands** (Light 1 takes the hand MediaPipe calls Right, Light 2 the Left
-  one; MediaPipe names hands as in a mirrored selfie image, so swap the colors if yours read
-  reversed. Two hands always get a light each. Off, MediaPipe Hands doesn't run), **Follow Lag**
-  (seconds to ease to a hand or back), then per light: on/off, **Color**, **Intensity**,
-  **Position** (where it sits with no hand, 0 to 1, origin bottom left) and **Distance** (how far
-  in front of the person, in image heights: small = side light, large = flat front light).
-  **Light Radius** is the falloff distance.
-- **Follow** puts a light on the palm's centre or the index fingertip. **Light Type** Spot turns
-  both lights into cones aimed along the index finger (knuckle to tip; with no hand, at the image
-  centre): **Spot Angle** is the cone's width, **Spot Softness** its edge, and **Aim Into Scene**
-  tips the beam from the image plane toward the person (a finger pointing at the camera can't be
-  seen, so 0 is exactly along the finger).
-- The light colors are shader uniforms (`uLight1Color`, `uLight2Color`: color × intensity) driven
-  by the Light Color / Intensity parameters, so animating them, or exporting a CHOP to them, changes
-  the light live.
-- **Material page:** **Shading** (PBR, or Simple: just the light, its color × how directly the
-  surface faces it × falloff, no highlights or Fresnel), **Ambient** (unlit share of the image),
-  **Roughness**, **Metallic**, **Specular** (PBR only), **Depth Scale** (how deep the person is), **Exposure**, **Background**
-  (brightness of everything else), **Transparent Background** (alpha = the matte) and **Show
-  Lights** (a ring at each light).
-
-TOP 1 is the relit image, TOP 2 the input, TOP 3 the normals, TOP 4 the matte; CHOP 1 the lights'
-positions and aims (`light1_x`, `light1_y`, `light1_dx`, `light1_dy`, `light1_hand`: 1 while
-following a hand). About 25 ms of GPU
-(DAViD ViT-L) plus MediaPipe Hands on the CPU.
-
 ## Audio models
 
 The audio toxes run on the CPU through `MediaPipeCHOP.dll`:
@@ -490,7 +450,70 @@ Model page: **Window** (how much audio each classification hears) and **Hop** (h
 
 Model: YAMNet (Apache-2.0).
 
-## AudioDemo (`AudioDemo.tox`)
+## Components
+
+Components take models' outputs (tracks, joints, images) and build something from them; there's no
+model inside, so you can feed them from any matching model, a recording or your own network. They're
+in `tox/components/`.
+
+### Mixamo Puppet (`components/MixamoPuppet.tox`)
+Poses a Mixamo character from Holistic or Pose tracking (video + tracks in). See the
+[manual](MANUAL.md#puppets) and [PUPPETS.md](PUPPETS.md).
+
+### Hands Geometry (`components/HandsGeometry.tox`)
+Draws tracked hands as 3D spheres and cylinders from a MediaPipe Hands joints DAT. See the
+[manual](MANUAL.md#hands-geometry).
+
+### Relight (`components/Relight.tox`)
+Lights a person with two point lights or spotlights from DAViD's outputs, each light following a
+hand. Inputs:
+1. the color image (DAViD Depth + Normals + Matte's TOP 2, the input);
+2. the normals (its TOP 3, or DAViD Normals);
+3. the matte (its TOP 4, or DAViD Matte);
+4. the depth (its TOP 1, with **Show Result** on);
+5. optional: a hands `tracks` DAT (MediaPipe Hands' DAT 1). Without it the lights stay at their
+   positions.
+
+The shading is physically based (GGX highlights, Fresnel, roughness, light falling off with
+distance) in linear light, with the color image as the surface color.
+
+- **Lights page:** **Follow Hands** (Light 1 takes the hand MediaPipe calls Right, Light 2 the Left
+  one; MediaPipe names hands as in a mirrored selfie image, so swap the colors if yours read
+  reversed. Two hands always get a light each), **Follow Lag** (seconds to ease to a hand or back),
+  then per light: on/off, **Color**, **Intensity**, **Position** (where it sits with no hand, 0 to
+  1, origin bottom left) and **Distance** (how far in front of the person, in image heights: small
+  = side light, large = flat front light). **Light Radius** is the falloff distance.
+- **Follow** puts a light on the palm's centre or the index fingertip. **Light Type** Spot turns
+  both lights into cones aimed along the index finger (knuckle to tip; with no hand, at the image
+  centre): **Spot Angle** is the cone's width, **Spot Softness** its edge, and **Aim Into Scene**
+  tips the beam from the image plane toward the person (a finger pointing at the camera can't be
+  seen, so 0 is exactly along the finger).
+- The light colors are shader uniforms (`uLight1Color`, `uLight2Color`: color × intensity) driven
+  by the Light Color / Intensity parameters, so animating them, or exporting a CHOP to them, changes
+  the light live.
+- **Material page:** **Shading** (PBR, or Simple: just the light, its color × how directly the
+  surface faces it × falloff, no highlights or Fresnel), **Ambient** (unlit share of the image),
+  **Roughness**, **Metallic**, **Specular** (PBR only), **Depth Scale** (how deep the person is),
+  **Exposure**, **Background** (brightness of everything else), **Transparent Background** (alpha =
+  the matte) and **Show Lights** (a ring at each light).
+
+TOP 1 is the relit image; CHOP 1 the lights' positions and aims (`light1_x`, `light1_y`,
+`light1_dx`, `light1_dy`, `light1_hand`: 1 while following a hand). The shading itself is two
+small GLSL passes; the cost is in the models feeding it (DAViD Depth + Normals + Matte about 21 ms
+of GPU, MediaPipe Hands on the CPU).
+
+## Demos
+
+Demos wire models and components together to show what they can do. They're in `tox/demos/`.
+
+### VisionDemo (`demos/VisionDemo.tox`)
+
+Every video model in one COMP for trying them side by side. Wire a video TOP in and switch models on
+its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
+overlay composited together (image results behind the overlays); TOP 2 is the input; TOP 3 is DAViD
+Depth + Normals + Matte's depth on its own (transparent while that model is off).
+
+### AudioDemo (`demos/AudioDemo.tox`)
 
 The three audio models together. Wire an audio CHOP into input 1 and, optionally, a DAT of lines to speak into input 2. Switch models on its **Models** page; a model that's off doesn't cook at all.
 

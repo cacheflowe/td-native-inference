@@ -9,14 +9,14 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 
 | Path | What |
 |---|---|
-| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/Demos`: the hand-built demos (RelightDemo, ...), one camera in. `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
+| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/Components`: the hand-built components (Relight); `/project1/Demos`: the hand-built demos (private, see below), one camera in. `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
 | `wrappers/<Model>.json` | One spec per model tox: custom OP type, presets, output kind, tracker mode, and the curated parameters the wrapper exposes |
 | `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/`, `cpp/MediaPipeCHOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side. MediaPipeCHOP (audio: classify, transcribe) loads `libmediapipe.dll` from next to itself |
 | `cpp/Tracking/` | The tracker in C++ (`docs/TODO-tracking-cpp.md`): the core, the Tracker DAT (`TrackerDAT.dll`, every wrapper's tracker) and `tracker_replay.dll` for the replay tests. Its own output is the reference: `tests/test_tracking_replay.py` / `test_tracking_extras.py` replay the fixtures in `tests/data/tracking/`, `tests/test_joint_gate.py` checks the joint gate; after a deliberate change regenerate with `--golden` and review the diff |
 | `cpp/Puppet/` | The puppet solver in C++ (`docs/PUPPETS.md`): the core, the Puppet CHOP (`PuppetCHOP.dll`, MixamoPuppet's solver; it reads the rig from a `rest_pose` table that `puppet_runtime.capture_rest` fills) and `puppet_replay.dll`. Tested against its own stored output: `tests/test_puppet_cpp.py` (`--golden` to regenerate, then review) |
 | `plugins/` | Build output. On Windows this *is* the project's `Plugins/` folder, so TD registers the custom OPs (`OnnxTOP`, `MediapipeTOP`, `MediapipeaudioCHOP`, `TrackerDAT`, `PuppetCHOP`) from it at startup. `onnxtop_tool.exe` must sit next to `OnnxTOP.dll`, `libmediapipe.dll` next to `MediaPipeTOP.dll` / `MediaPipeCHOP.dll`. Gitignored |
 | `models/mediapipe/`, `models/onnx/<model>/` | Model files, gitignored. Sources and licenses: `models/README.md` |
-| `python/` | Build-time and runtime Python, no per-frame tracking (that's C++; the Python tracker and puppet solver were deleted Nov 13, 2026). `wrapper_builder.py` builds/exports wrappers; `tracking_pars.py` is the tracker COMP's Setup / Tracking pages as data (keep it in step with `cpp/Tracking`'s parameters); `mediapipe_skeletons.py` is the skeletons as data (`cpp/Tracking/tools/gen_skeletons.py` generates the C++ header from it); `wrapper_runtime.py` is embedded in each wrapper. `puppet_builder.py` + `puppet_runtime.py` build / run the `MixamoPuppet` tox (`scripts/build_puppet_tox.py`; the exported tox has no character: Mixamo's license). `tox/HandsGeometry.tox`: the geometry network is authored in the lab's `/project1/PuppetLab/HandsGeometry` (edit it there), `scripts/build_hands_tox.py` adds the render rig and exports. |
+| `python/` | Build-time and runtime Python, no per-frame tracking (that's C++; the Python tracker and puppet solver were deleted Nov 13, 2026). `wrapper_builder.py` builds/exports wrappers; `tracking_pars.py` is the tracker COMP's Setup / Tracking pages as data (keep it in step with `cpp/Tracking`'s parameters); `mediapipe_skeletons.py` is the skeletons as data (`cpp/Tracking/tools/gen_skeletons.py` generates the C++ header from it); `wrapper_runtime.py` is embedded in each wrapper. `puppet_builder.py` + `puppet_runtime.py` build / run the `MixamoPuppet` tox (`scripts/build_puppet_tox.py`; the exported tox has no character: Mixamo's license). `tox/components/HandsGeometry.tox`: the geometry network is authored in the lab's `/project1/PuppetLab/HandsGeometry` (edit it there), `scripts/build_hands_tox.py` adds the render rig and exports. |
 | `tox/shared/` | `DebugBB.tox`, `DebugKeypoints.tox`. Instances in the `.toe` reference these files: edit the shared tox, never an instance |
 | `media/` | Test clips used by the `.toe`'s Movie File In TOPs. Gitignored |
 | `docs/learnings/` | Write-ups carried over from haxlib (paths in them are haxlib's) |
@@ -37,15 +37,22 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   (keeping position and wires) and exports a self-contained tox: Python is embedded, file syncs and
   shared-tox links are stripped from the saved copy only. Wrappers use the registered custom OPs,
   so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`. Set
-  `DEMO = True` in the script to regenerate both demos and `tox/VisionDemo.tox` / `tox/AudioDemo.tox`. **Whenever a model is added
+  `DEMO = True` in the script to regenerate both demos and `tox/demos/VisionDemo.tox` / `tox/demos/AudioDemo.tox`. **Whenever a model is added
   (or a spec changes), regenerate the demos too** and commit the demo toxes with the wrapper.
-- **Demos:** VisionDemo and AudioDemo are generated (above). Every other demo is built by hand in
-  `/project1/Demos/<Name>`: edit it there like any network, never in a generator. POST
-  `scripts/export_demos.py` to export `tox/<Name>.tox` (cuts the wrappers' shared-tox links and file
-  syncs in the saved copy, loads the icon); `REFRESH_WRAPPERS = True` first rebuilds the wrappers
-  inside each demo from their specs, keeping position, wires and changed parameters (then save the
-  `.toe`). A new demo needs its tox in `release-manifest.json`, a card in `scripts/build_icons.py`'s
-  `DEMOS`, and a section in `docs/MODELS.md`.
+- **Three kinds of tox:** models (`tox/`, generated from specs), components (`tox/components/`:
+  built on models' outputs, no model inside; open source, tracked) and demos (`tox/demos/`: models
+  and components wired together). Components and demos other than MixamoPuppet / HandsGeometry
+  (own build scripts) and VisionDemo / AudioDemo (generated) are built by hand: in
+  `/project1/Components/<Name>` and `/project1/Demos/<Name>`. Edit them there like any network,
+  never in a generator. **Hand-built demos are private** (the user's IP): `Demos/save_demos` saves
+  each to `demos/<Name>.tox` (untracked) on project save and the `.toe` keeps only the path (Save
+  Backup of External off), so never commit `demos/` or `tox/demos/` beyond the two generated ones.
+  A demo links its components as external toxes (`tox/components/<Name>.tox`). POST
+  `scripts/export_hand_built.py` to export both kinds (cuts shared-tox links and file syncs in the
+  saved copy, loads the icon); `REFRESH_WRAPPERS = True` first rebuilds the wrappers inside each from
+  their specs, keeping position, wires and changed parameters (then save the `.toe`). A new
+  component needs its tox in `release-manifest.json`, a card in `scripts/build_icons.py`'s `DEMOS`
+  and a section in `docs/MODELS.md` (Components).
 - **Node icons:** `python scripts/build_icons.py` (outside TD; headless Chrome/Edge) renders each
   tox's card to `docs/images/icons/<Name>.png` (td-http-api's app-icon layout; logo in
   `docs/images/icons/logo.svg`). The builder loads it into a locked `icon` TOP as the COMP's

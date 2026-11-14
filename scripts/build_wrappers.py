@@ -6,8 +6,8 @@ Edit the settings below. NAMES empty = every spec. Wrappers are rebuilt in /proj
 keeping their position and wires; audio wrappers are wired to the lab's audio_source (TEST_AUDIO),
 text wrappers to text_source. DEMO rebuilds /project1/VisionDemo (every video spec) and
 /project1/AudioDemo (the audio wrappers), all models off, keeping their wires, and exports
-tox/VisionDemo.tox and tox/AudioDemo.tox. The project is not saved. The other demos are built by
-hand in /project1/Demos: scripts/export_demos.py.
+tox/demos/VisionDemo.tox and tox/demos/AudioDemo.tox. The project is not saved. The other demos are
+built by hand in /project1/Demos: scripts/export_hand_built.py.
 """
 
 import importlib
@@ -78,7 +78,7 @@ if DEMO:
 	demo = wrapper_builder.build_demo(op('/project1'), wrapper_builder.spec_names('video'))
 	entry = {'path': demo.path, 'nodes': len(demo.findChildren())}
 	if EXPORT:
-		destination = Path(project.folder) / 'tox' / 'VisionDemo.tox'
+		destination = Path(project.folder) / 'tox' / 'demos' / 'VisionDemo.tox'
 		wrapper_builder.export_demo(demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
 	report['VisionDemo'] = entry
@@ -88,7 +88,7 @@ if DEMO:
 		audio_demo.nodeX, audio_demo.nodeY = demo.nodeX, demo.nodeY - 200
 	entry = {'path': audio_demo.path, 'nodes': len(audio_demo.findChildren())}
 	if EXPORT:
-		destination = Path(project.folder) / 'tox' / 'AudioDemo.tox'
+		destination = Path(project.folder) / 'tox' / 'demos' / 'AudioDemo.tox'
 		wrapper_builder.export_demo(audio_demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
 	report['AudioDemo'] = entry

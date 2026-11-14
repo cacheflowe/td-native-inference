@@ -1,4 +1,4 @@
-"""Builds the MixamoPuppet COMP and exports tox/MixamoPuppet.tox (run inside TD through
+"""Builds the MixamoPuppet COMP and exports tox/components/MixamoPuppet.tox (run inside TD through
 scripts/build_puppet_tox.py). Build output: change this file, never the COMP.
 
     In TOP (the tracked image) + In DAT (a Holistic / Pose tox's out_tracks, World Landmark

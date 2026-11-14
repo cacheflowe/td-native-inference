@@ -203,6 +203,9 @@ the parameters on the model tox instead.
 
 ## 6. The toxes
 
+Models are in `tox/`, components (built on models' outputs, no model inside) in `tox/components/`,
+demos in `tox/demos/`.
+
 | Tox | Input | What it does | Main outputs |
 |---|---|---|---|
 | `MediaPipeHands` | video | Hands with 21 joints each; **Task** Gesture also names the hand shape | tracks with `gesture`, `gesture_onset`; joints, bones |
@@ -222,15 +225,16 @@ the parameters on the model tox instead.
 | `HSEmotion` | video | Finds faces and scores 7 emotions each | tracks with `emotion_label`, `emotion_<name>` |
 | `DepthAnything` | video | Relative depth of the whole frame (near is bright) | TOP 1 depth |
 | `MODNet` | video | Person alpha matte, hair detail included | TOP 1 matte |
-| `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow in the Optical Flow TOP's format (R right, G up, screen widths per second), TOP 3 flow as color |
-| `HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |
-| `MixamoPuppet` | video + tracks | Poses a Mixamo character from Holistic / Pose tracking (see Puppets) | TOP 1 character, TOP 2 over the input, CHOP rotations |
+| `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow in the Optical Flow TOP's format (R right, G up, screen widths per second), TOP 3 the same scaled for viewing |
+| `components/HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |
+| `components/MixamoPuppet` | video + tracks | Poses a Mixamo character from Holistic / Pose tracking (see Puppets) | TOP 1 character, TOP 2 over the input, CHOP rotations |
 | `RVM` | video | Person alpha matte that stays steady across frames (recurrent); **Reset State** after a cut | TOP 1 matte |
 | `MediaPipeSpeechToText` | audio CHOP | Speech to text with closed captions | TOP 1 captions; CHOP `speaking`, `new_segment`; DATs `transcript`, `latest` |
 | `MediaPipeTextToSpeech` | text or DAT | Speaks text in 54 voices | CHOP 1 audio; TOP 1 caption; DAT `lines` |
 | `MediaPipeSoundClassifier` | audio CHOP | Recognizes 521 sound classes | CHOP 1 scores, CHOP 2 `<name>_onset`; DAT `top` |
-| `VisionDemo` | video | All video models on toggles | TOP 1 composited overlays |
-| `AudioDemo` | audio, optional DAT | The three audio models on toggles | TOP 1, CHOP 1, DATs |
+| `components/Relight` | DAViD Depth + Normals + Matte's TOPs, optional hands tracks | Relights a person with two point / spot lights that can follow the hands | TOP 1 relit, CHOP 1 light positions |
+| `demos/VisionDemo` | video | All video models on toggles | TOP 1 composited overlays |
+| `demos/AudioDemo` | audio, optional DAT | The three audio models on toggles | TOP 1, CHOP 1, DATs |
 
 Licenses and fetched models:
 

@@ -1,4 +1,4 @@
-"""Build tox/HandsGeometry.tox from the lab's authored /project1/PuppetLab/HandsGeometry (joints DAT
+"""Build tox/components/HandsGeometry.tox from the lab's authored /project1/PuppetLab/HandsGeometry (joints DAT
 in -> sphere / cylinder hand geometry as a POP), adding a render rig so the tox shows the hands on
 its own. Run inside TD:
 
@@ -113,7 +113,7 @@ comp.allowCooking = True
 
 report = {'built': comp.path, 'children': len(comp.children), 'errors': {c.path: c.errors() for c in comp.findChildren() if c.errors()}}
 if EXPORT:
-	destination = Path(project.folder) / 'tox' / f'{NAME}.tox'
+	destination = Path(project.folder) / 'tox' / 'components' / f'{NAME}.tox'
 	wrapper_builder.export(comp, destination)
 	report['export_problems'] = wrapper_builder.check_export(destination)
 print(report)

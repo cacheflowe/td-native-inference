@@ -32,8 +32,8 @@ New-Item -ItemType Directory -Force "$CaseDir\package" | Out-Null
 Copy-Item "$repo\build\clean-wrapper\RunCleanWrapper.tox" $CaseDir
 $cases = @()
 for ($i = 0; $i -lt $Wrapper.Count; $i++) {
-	Copy-Item (Join-Path $toxDir "$($Wrapper[$i]).tox") "$CaseDir\package\"
-	$cases += @{ tox = "$CaseDir\package\$($Wrapper[$i]).tox"; image = (Join-Path $repo $Image[[Math]::Min($i, $Image.Count - 1)]) }
+	Copy-Item (Join-Path $toxDir "$($Wrapper[$i]).tox") "$CaseDir\package\"	# a name may include its folder: components\MixamoPuppet
+	$cases += @{ tox = "$CaseDir\package\$(Split-Path $Wrapper[$i] -Leaf).tox"; image = (Join-Path $repo $Image[[Math]::Min($i, $Image.Count - 1)]) }
 }
 
 $installed = $false

@@ -14,11 +14,14 @@
   negative values).
 - **VisionDemo:** models with several outputs get a **Show** menu; DAViD Depth + Normals + Matte shows
   its depth, normals or matte, and its depth is also TOP 3 of the demo.
-- **Relight Demo** (`RelightDemo.tox`): relights a person with two colored point lights (PBR: GGX
-  highlights, Fresnel, roughness, distance falloff), using DAViD's normals, depth and matte. Each
-  light follows a hand (MediaPipe Hands: the palm or the index fingertip) and eases back to its own
-  position when there's none. **Light Type** Spot aims each light along its index finger;
-  **Shading** Simple drops the highlights and Fresnel for plain diffuse light.
+- **Relight** component (`components/Relight.tox`): relights a person with two colored point lights
+  (PBR: GGX highlights, Fresnel, roughness, distance falloff) from DAViD Depth + Normals + Matte's
+  outputs. With MediaPipe Hands' tracks wired in, each light follows a hand (the palm or the index
+  fingertip) and eases back to its own position when there's none. **Light Type** Spot aims each
+  light along its index finger; **Shading** Simple drops the highlights and Fresnel.
+- **Three kinds of tox, three folders:** models stay in `tox/`; components (built on models'
+  outputs, no model inside) move to `tox/components/` (MixamoPuppet, HandsGeometry, Relight);
+  demos to `tox/demos/` (VisionDemo, AudioDemo). Update paths to the moved toxes.
 
 ## v0.5.0 (2026-11-13)
 

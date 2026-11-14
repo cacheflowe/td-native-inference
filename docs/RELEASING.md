@@ -14,7 +14,8 @@ td-native-inference-vX.Y.Z/
     OnnxTOP.dll  onnxtop_tool.exe  MediaPipeTOP.dll  MediaPipeCHOP.dll  TrackerDAT.dll  PuppetCHOP.dll  libmediapipe.dll
     fetch_models.cmd        (double-click: runs fetch_models.ps1, which downloads YOLO26, RVM, Kokoro and DAViD)
     models/mediapipe/...  models/asr/...  models/tts/...  models/onnx/...
-  tox/                      the model toxes + VisionDemo.tox, AudioDemo.tox
+  tox/                      the model toxes; components/ (MixamoPuppet, HandsGeometry, Relight) and
+                            demos/ (VisionDemo, AudioDemo)
   README.md  docs/MODELS.md  docs/MANUAL.md  LICENSE  NOTICE  CHANGELOG.md  VERSION  release.json
 ```
 

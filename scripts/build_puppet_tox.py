@@ -1,4 +1,4 @@
-"""Build the MixamoPuppet COMP in /project1/WrapperLab and export tox/MixamoPuppet.tox. Run inside TD:
+"""Build the MixamoPuppet COMP in /project1/WrapperLab and export tox/components/MixamoPuppet.tox. Run inside TD:
 
 	curl -X POST --data-binary @scripts/build_puppet_tox.py http://127.0.0.1:3031/run
 
@@ -24,7 +24,7 @@ comp = puppet_builder.build(op(LAB))
 comp.par.Fbxfile = FBX
 report = {'built': comp.path, 'status': comp.par.Status.eval()}
 if EXPORT:
-	destination = Path(project.folder) / 'tox' / 'MixamoPuppet.tox'
+	destination = Path(project.folder) / 'tox' / 'components' / 'MixamoPuppet.tox'
 	puppet_builder.export(comp, destination)
 	report['export_problems'] = wrapper_builder.check_export(destination)
 print(report)

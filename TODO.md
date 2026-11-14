@@ -7,8 +7,9 @@ v0.5.0 published Nov 13. It ships:
 - MixamoPuppet and HandsGeometry;
 - five plugins: OnnxTOP, MediaPipeTOP, MediaPipeCHOP, TrackerDAT and PuppetCHOP.
 
-Unreleased (CHANGELOG): NeuFlow v2 optical flow, the Relight Demo (hand-built demos in
-`/project1/Demos`, `scripts/export_demos.py`), VisionDemo's Show menu and DAViD depth output.
+Unreleased (CHANGELOG): NeuFlow v2 optical flow, the Relight component, models / components / demos
+in three folders (hand-built components and demos: `scripts/export_hand_built.py`; demos are private),
+VisionDemo's Show menu and DAViD depth output.
 
 Every tox's tracking runs in C++ on the Tracker DAT ([docs/TODO-tracking-cpp.md](docs/TODO-tracking-cpp.md)),
 and video toxes have a Performance page. Everything is generated from `wrappers/*.json`. Releases
@@ -20,7 +21,7 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 - [x] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
       [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd).
       - Done (Nov 13): `cpp/Puppet` and `PuppetCHOP.dll`, identical to the Python solver offline and
-        in the PuppetLab. `tox/MixamoPuppet.tox` is regenerated on it, with no Python solver inside
+        in the PuppetLab. `tox/components/MixamoPuppet.tox` is regenerated on it, with no Python solver inside
         (35 → 22 KB).
       - Left: a fresh-process check of the tox (at the next release's package test).
       - Done (Nov 13, C++ only): landmark smoothing, hand-roll smoothing and knee limits
@@ -34,8 +35,9 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 - [x] **DAViD: depth alone in the VisionDemo** (Nov 13): the Show menu, and its depth as TOP 3.
 - [x] **NeuFlow v2** (Nov 13): a frame-pair mode in OnnxTOP, `NeuFlowV2.tox` in the Optical Flow
       TOP's format, cut detection, smoothing and a noise floor. Unreleased.
-- [x] **Relight Demo** (Nov 13): two point / spot lights following the hands on DAViD's normals.
-- [ ] **Next release (v0.6.0):** NeuFlow, the Relight Demo and the demo changes are unreleased;
+- [x] **Relight** (Nov 13-14): the Relight component (two point / spot lights following the hands on
+      DAViD's outputs) and a private RelightDemo; models / components / demos in three folders.
+- [ ] **Next release (v0.6.0):** NeuFlow, the Relight component and the folder move are unreleased;
       follow docs/RELEASING.md (the package test also covers MixamoPuppet's fresh-process check).
 
 ## Speed
@@ -95,7 +97,7 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 - [ ] RVM: fp16 / TensorRT with a fixed-size state export, `rvm_resnet50`, and `fgr` (foreground
       color) as a second output.
 - [ ] DAViD on a person crop (YOLO box), so small people get the full 512 px. Also: mask normals and
-      depth with the matte inside the wrapper. (The relighting example is the Relight Demo.)
+      depth with the matte inside the wrapper. (Relighting is the Relight component.)
 - [ ] **Other normal models** (compared Nov 13, `build/normals_compare/`, not shipped):
       - **Sapiens Normal 0.3B** (Meta, CC BY-NC 4.0, onnx-community fp16 ONNX, 1024x768 in,
         512x384 out, not unit length): a bit crisper on people, but 185 ms on CUDA and its TensorRT
