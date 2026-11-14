@@ -4,9 +4,10 @@
 
 Edit the settings below. NAMES empty = every spec. Wrappers are rebuilt in /project1/WrapperLab,
 keeping their position and wires; audio wrappers are wired to the lab's audio_source (TEST_AUDIO),
-text wrappers to text_source. DEMO rebuilds /project1/VisionDemo (every video spec),
-/project1/AudioDemo (the audio wrappers), all models off, and /project1/RelightDemo, keeping their
-wires, and exports tox/VisionDemo.tox, tox/AudioDemo.tox and tox/RelightDemo.tox. The project is not saved.
+text wrappers to text_source. DEMO rebuilds /project1/VisionDemo (every video spec) and
+/project1/AudioDemo (the audio wrappers), all models off, keeping their wires, and exports
+tox/VisionDemo.tox and tox/AudioDemo.tox. The project is not saved. The other demos are built by
+hand in /project1/Demos: scripts/export_demos.py.
 """
 
 import importlib
@@ -91,18 +92,6 @@ if DEMO:
 		wrapper_builder.export_demo(audio_demo, destination)
 		entry['export_problems'] = wrapper_builder.check_export(destination)
 	report['AudioDemo'] = entry
-	existed = op('/project1/RelightDemo') is not None
-	relight = wrapper_builder.build_relight_demo(op('/project1'))
-	if not existed:
-		relight.nodeX, relight.nodeY = demo.nodeX, demo.nodeY - 400
-		if demo.inputs:
-			relight.inputConnectors[0].connect(demo.inputs[0])
-	entry = {'path': relight.path, 'nodes': len(relight.findChildren())}
-	if EXPORT:
-		destination = Path(project.folder) / 'tox' / 'RelightDemo.tox'
-		wrapper_builder.export(relight, destination)
-		entry['export_problems'] = wrapper_builder.check_export(destination)
-	report['RelightDemo'] = entry
 if WRAPPERS:
 	# With the lab's Cooking flag off, wrappers just rebuilt (and force-cooked) inside it can keep
 	# cooking every frame anyway; switching the flag on and off again stops them.

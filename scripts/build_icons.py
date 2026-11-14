@@ -40,7 +40,7 @@ ENGINES = {
 DEMOS = {
 	'VisionDemo': ('Vision Demo', 'All video models'),
 	'AudioDemo': ('Audio Demo', 'All audio models'),
-	'RelightDemo': ('Relight Demo', 'DAViD + MediaPipe Hands'),
+	'RelightDemo': ('Relight Demo', 'DAViD + MediaPipe Hands'),	# hand-built demos (scripts/export_demos.py) too
 	'MixamoPuppet': ('Mixamo Puppet', 'Pose tracking'),
 	'HandsGeometry': ('Hands Geometry', 'MediaPipe Hands'),
 }

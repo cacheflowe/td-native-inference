@@ -9,7 +9,7 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 
 | Path | What |
 |---|---|
-| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/RelightDemo`: two hand-following point lights on DAViD's normals (`build_relight_demo`). `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
+| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/Demos`: the hand-built demos (RelightDemo, ...), one camera in. `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
 | `wrappers/<Model>.json` | One spec per model tox: custom OP type, presets, output kind, tracker mode, and the curated parameters the wrapper exposes |
 | `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/`, `cpp/MediaPipeCHOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side. MediaPipeCHOP (audio: classify, transcribe) loads `libmediapipe.dll` from next to itself |
 | `cpp/Tracking/` | The tracker in C++ (`docs/TODO-tracking-cpp.md`): the core, the Tracker DAT (`TrackerDAT.dll`, every wrapper's tracker) and `tracker_replay.dll` for the replay tests. Its own output is the reference: `tests/test_tracking_replay.py` / `test_tracking_extras.py` replay the fixtures in `tests/data/tracking/`, `tests/test_joint_gate.py` checks the joint gate; after a deliberate change regenerate with `--golden` and review the diff |
@@ -39,6 +39,13 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   so a release user installs the plugins in `Documents/Derivative/Plugins/<folder>/`. Set
   `DEMO = True` in the script to regenerate both demos and `tox/VisionDemo.tox` / `tox/AudioDemo.tox`. **Whenever a model is added
   (or a spec changes), regenerate the demos too** and commit the demo toxes with the wrapper.
+- **Demos:** VisionDemo and AudioDemo are generated (above). Every other demo is built by hand in
+  `/project1/Demos/<Name>`: edit it there like any network, never in a generator. POST
+  `scripts/export_demos.py` to export `tox/<Name>.tox` (cuts the wrappers' shared-tox links and file
+  syncs in the saved copy, loads the icon); `REFRESH_WRAPPERS = True` first rebuilds the wrappers
+  inside each demo from their specs, keeping position, wires and changed parameters (then save the
+  `.toe`). A new demo needs its tox in `release-manifest.json`, a card in `scripts/build_icons.py`'s
+  `DEMOS`, and a section in `docs/MODELS.md`.
 - **Node icons:** `python scripts/build_icons.py` (outside TD; headless Chrome/Edge) renders each
   tox's card to `docs/images/icons/<Name>.png` (td-http-api's app-icon layout; logo in
   `docs/images/icons/logo.svg`). The builder loads it into a locked `icon` TOP as the COMP's
