@@ -29,6 +29,7 @@ $toxDir = if ($Package) { Join-Path $Package 'tox' } else { Join-Path $repo 'tox
 
 if (Test-Path $CaseDir) { Remove-Item -Recurse -Force $CaseDir }
 New-Item -ItemType Directory -Force "$CaseDir\package" | Out-Null
+$CaseDir = (Resolve-Path $CaseDir).Path	# TD starts in $CaseDir, so a relative path would resolve twice
 Copy-Item "$repo\build\clean-wrapper\RunCleanWrapper.tox" $CaseDir
 $cases = @()
 for ($i = 0; $i -lt $Wrapper.Count; $i++) {
