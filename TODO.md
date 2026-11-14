@@ -160,7 +160,8 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 
 [Apple Frameworks for TouchDesigner](https://github.com/sygnalinc/Apple-Frameworks-for-TouchDesigner)
 (60 Apple-framework custom OPs) and [AML](https://forum.derivative.ca/t/aml-a-new-touchdesigner-operator-family-for-ai-ml-on-macos/1014942)
-(Apple Vision + a Core ML collection; its Patreon post is login-only, not read). Worth borrowing:
+(Apple Vision + a Core ML collection: 3D, audio, Core ML, LLM and Vision node groups; node list from the
+user, Nov 14). Worth borrowing:
 - [ ] **Stock-OP-compatible outputs:** they match the Body Track CHOP's and Face Track CHOP's channel
       layouts, so existing networks swap in. We did this for NeuFlow (Optical Flow TOP format); a
       Body Track-compatible CHOP option on the pose toxes and a Face Track one on the face toxes
@@ -181,6 +182,18 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
   - [ ] **QR / barcode reading** and **rectangle detection** (corners into a Corner Pin): classic
         CV, small C++ (OpenCV is not a dependency yet).
   - [ ] Single-person 3D pose: Holistic's world landmarks already cover it.
+  - [ ] **Metric depth** (AML's Depth Metric): depth in metres instead of relative, for placing 3D
+        content or measuring distances. Depth Anything V2's metric variants (Small is Apache-2.0,
+        Base / Large CC-BY-NC) would drop into the existing DepthAnything spec; also Depth Pro.
+  - [ ] **Track any object** (AML's Object Tracker, Apple's VNTrackObjectRequest): seed a box (or a
+        click) and follow that one thing, whatever it is. A small Siamese tracker (NanoTrack,
+        OSTrack-lite; ONNX) per tracked box, through the crop path; the box out as a track row.
+  - [ ] **Image similarity / zero-shot labels** (AML's Image Similarity, YOLO Classify): CLIP-style
+        embeddings (MobileCLIP) as CHOP channels; with text embeddings, "how much does this look
+        like <prompt>" scores for installations. MediaPipe's image classifier / embedder is the
+        cheap version (listed under Models).
+  - Image or photos to 3D mesh (AML's Geo Gen, Object Capture): heavy offline work (TripoSR,
+    photogrammetry), not a live-inference fit.
   - Out of scope here: LLMs, translation, image generation, maps, MIDI and OS integrations.
 
 ## Audio
