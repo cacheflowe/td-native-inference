@@ -1,11 +1,14 @@
 # TODO: td-native-inference
 
-## Status (Nov 13, 2026)
+## Status (Nov 14, 2026)
 
-v0.4.0 published Nov 12. It ships:
+v0.5.0 published Nov 13. It ships:
 - 14 video toxes plus VisionDemo, and three audio toxes plus AudioDemo;
 - MixamoPuppet and HandsGeometry;
-- four plugins: OnnxTOP, MediaPipeTOP, MediaPipeCHOP, and the new TrackerDAT.
+- five plugins: OnnxTOP, MediaPipeTOP, MediaPipeCHOP, TrackerDAT and PuppetCHOP.
+
+Unreleased (CHANGELOG): NeuFlow v2 optical flow, the Relight Demo (hand-built demos in
+`/project1/Demos`, `scripts/export_demos.py`), VisionDemo's Show menu and DAViD depth output.
 
 Every tox's tracking runs in C++ on the Tracker DAT ([docs/TODO-tracking-cpp.md](docs/TODO-tracking-cpp.md)),
 and video toxes have a Performance page. Everything is generated from `wrappers/*.json`. Releases
@@ -28,9 +31,12 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 - [x] Deleted the Python tracker, the Python puppet solver and `holistic_onnx.py` (Nov 13): the
       Tracking pages come from `python/tracking_pars.py`, the recorder runs the Tracker DAT, the
       PuppetLab has only the C++ solver.
-- [ ] **DAViD: depth alone in the VisionDemo** (asked Nov 13): an option to show just DAViDHuman's
-      depth.
-- [x] **NeuFlow v2** first steps (Nov 13, see Models): licensed, timed, plan for a frame-pair mode.
+- [x] **DAViD: depth alone in the VisionDemo** (Nov 13): the Show menu, and its depth as TOP 3.
+- [x] **NeuFlow v2** (Nov 13): a frame-pair mode in OnnxTOP, `NeuFlowV2.tox` in the Optical Flow
+      TOP's format, cut detection, smoothing and a noise floor. Unreleased.
+- [x] **Relight Demo** (Nov 13): two point / spot lights following the hands on DAViD's normals.
+- [ ] **Next release (v0.6.0):** NeuFlow, the Relight Demo and the demo changes are unreleased;
+      follow docs/RELEASING.md (the package test also covers MixamoPuppet's fresh-process check).
 
 ## Speed
 
@@ -89,7 +95,20 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 - [ ] RVM: fp16 / TensorRT with a fixed-size state export, `rvm_resnet50`, and `fgr` (foreground
       color) as a second output.
 - [ ] DAViD on a person crop (YOLO box), so small people get the full 512 px. Also: mask normals and
-      depth with the matte inside the wrapper, and a relighting example.
+      depth with the matte inside the wrapper. (The relighting example is the Relight Demo.)
+- [ ] **Other normal models** (compared Nov 13, `build/normals_compare/`, not shipped):
+      - **Sapiens Normal 0.3B** (Meta, CC BY-NC 4.0, onnx-community fp16 ONNX, 1024x768 in,
+        512x384 out, not unit length): a bit crisper on people, but 185 ms on CUDA and its TensorRT
+        build stalled (15 of 16 GB in use with TD open). Worth one retry with the fp32 ONNX and TD
+        closed; DAViD (MIT, 6 ms) stays the default.
+      - **DSINE** (CVPR 2024; Imperial College licence: personal, non-commercial, no
+        redistribution, so a local experiment only; the user downloads `dsine.pt` from the GitHub
+        README). Read through the code: EfficientNet-B5 + a ConvGRU refinement (5 passes, 5x5
+        neighbours at 1/8 size), ImageNet input, padding to a multiple of 32, intrinsics from an
+        assumed 60° FOV (bake in). Export fixes: in-place masked assignments to `torch.where`,
+        maybe `F.unfold` to slices, the 1e-8 epsilons for fp16. Output axes likely OpenCV (flip
+        y, z; needs a per-channel remap). Estimate 10-15 ms fp16 / 20-25 ms fp32 at 640x480.
+        About half a day; quality on people is the open question.
 - [ ] Other ONNX candidates (check each license before bundling):
       - RF-DETR (Apache-2.0);
       - Real-ESRGAN upscaling and fast style transfer (Raw mode);
