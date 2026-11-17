@@ -14,6 +14,34 @@ namespace
 		float uni = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter;
 		return uni > 0.f ? inter / uni : 0.f;
 	}
+
+
+	bool ensurePinnedHost(float*& buffer, size_t& capacity, size_t bytes, std::string& err)
+	{
+		if (bytes == 0 || (buffer && capacity >= bytes))
+			return true;
+		if (buffer)
+		{
+			cudaError_t freed = cudaFreeHost(buffer);
+			if (freed != cudaSuccess)
+			{
+				err = std::string("Pinned-memory release failed: ") + cudaGetErrorString(freed);
+				return false;
+			}
+			buffer = nullptr;
+			capacity = 0;
+		}
+		void* memory = nullptr;
+		cudaError_t allocated = cudaMallocHost(&memory, bytes);
+		if (allocated != cudaSuccess)
+		{
+			err = std::string("Pinned-memory allocation failed: ") + cudaGetErrorString(allocated);
+			return false;
+		}
+		buffer = static_cast<float*>(memory);
+		capacity = bytes;
+		return true;
+	}
 }
 
 YoloDecoder::~YoloDecoder()
@@ -88,12 +116,10 @@ bool YoloDecoder::decode(const OnnxEngine& engine, const Letterbox& lb, float co
 
 	// The only device->host copy in the pipeline: 300 x 38 floats ~ 45 KB for seg.
 	size_t bytes = (size_t)N * S * sizeof(float);
-	if (bytes > myHostDetBytes)
+	if (!ensurePinnedHost(myHostDet, myHostDetBytes, bytes, err))
 	{
-		if (myHostDet)
-			cudaFreeHost(myHostDet);
-		cudaMallocHost(&myHostDet, bytes);
-		myHostDetBytes = bytes;
+		launchClear(outSurf, outW, outH, 8, stream);
+		return false;
 	}
 	cudaMemcpyAsync(myHostDet, det.device, bytes, cudaMemcpyDeviceToHost, stream);
 	cudaStreamSynchronize(stream);
@@ -257,12 +283,10 @@ bool YoloDecoder::decodeMoveNet(const OnnxEngine& engine, const Letterbox& lb, f
 	}
 	const int N = (int)sh[1];
 	size_t bytes = (size_t)N * S * sizeof(float);
-	if (bytes > myHostDetBytes)
+	if (!ensurePinnedHost(myHostDet, myHostDetBytes, bytes, err))
 	{
-		if (myHostDet)
-			cudaFreeHost(myHostDet);
-		cudaMallocHost(&myHostDet, bytes);
-		myHostDetBytes = bytes;
+		launchClear(outSurf, outW, outH, 8, stream);
+		return false;
 	}
 	cudaMemcpyAsync(myHostDet, det.device, bytes, cudaMemcpyDeviceToHost, stream);
 	cudaStreamSynchronize(stream);
@@ -351,12 +375,10 @@ bool YoloDecoder::decodeYuNet(const OnnxEngine& engine, const Letterbox& lb, flo
 
 	// One readback of everything (~0.5 MB at 640x640), then decode on the CPU.
 	size_t bytes = total * sizeof(float);
-	if (bytes > myHostDetBytes)
+	if (!ensurePinnedHost(myHostDet, myHostDetBytes, bytes, err))
 	{
-		if (myHostDet)
-			cudaFreeHost(myHostDet);
-		cudaMallocHost(&myHostDet, bytes);
-		myHostDetBytes = bytes;
+		launchClear(outSurf, outW, outH, 8, stream);
+		return false;
 	}
 	const float* host[3][4];
 	size_t off = 0;
@@ -456,12 +478,10 @@ bool YoloDecoder::decodeDetr(const OnnxEngine& engine, const Letterbox& lb, floa
 	}
 	const int N = (int)lg.shape[1], C = (int)lg.shape[2];
 	size_t nl = (size_t)N * C, nb = (size_t)N * 4, bytes = (nl + nb) * sizeof(float);
-	if (bytes > myHostDetBytes)
+	if (!ensurePinnedHost(myHostDet, myHostDetBytes, bytes, err))
 	{
-		if (myHostDet)
-			cudaFreeHost(myHostDet);
-		cudaMallocHost(&myHostDet, bytes);
-		myHostDetBytes = bytes;
+		launchClear(outSurf, outW, outH, 8, stream);
+		return false;
 	}
 	cudaMemcpyAsync(myHostDet, lg.device, nl * sizeof(float), cudaMemcpyDeviceToHost, stream);
 	cudaMemcpyAsync(myHostDet + nl, bx.device, nb * sizeof(float), cudaMemcpyDeviceToHost, stream);

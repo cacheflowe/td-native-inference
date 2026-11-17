@@ -861,7 +861,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	}
 
 	const int srcW = (int)top->textureDesc.width, srcH = (int)top->textureDesc.height;
-	myInputFrame = top->totalCooks;
+	const int64_t inputFrame = top->totalCooks;
+	myInputFrame = inputFrame;
 	// Pose Crops: boxes at the model's own aspect (width / height of its input).
 	float poseAspect = 0.f;
 	if (mode == ModePoseCrops && myEngine && !myEngine->inputs().empty() && myEngine->inputs()[0].shape.size() == 4)
@@ -995,6 +996,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				extras.push_back(x);
 		}
 	}
+	const OP_TimeInfo* timeInfo = inputs->getTimeInfo();
+	const double frameTime = timeInfo && timeInfo->rate > 0 ? double(timeInfo->absFrame) / timeInfo->rate : 0.0;
 	OP_CUDAAcquireInfo acquire;
 	acquire.stream = ioStream;
 	const OP_CUDAArrayInfo* inArray = top->getCUDAArray(acquire, nullptr);
@@ -1019,7 +1022,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	// Only for a new input frame: a still input (or a parameter change on one) runs synchronously,
 	// so the node never keeps itself cooking. Raw output never reads back, so it always just queues.
 	const bool async = !myWaitResult && mode != ModeRaw;
-	const bool newInput = top->totalCooks != myLaunchedFrame;
+	const bool newInput = inputFrame != myLaunchedFrame;
 	if (myPending.active && (!async || myPending.engine != engine || myPending.mode != mode))
 		myPending.active = false;	// switched to waiting, or engine / mode changed: not wanted
 	readInferMs();
@@ -1049,7 +1052,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		}
 		cudaEventRecord(myRunDone, myStream);
 		myRunRecorded = true;
-		myLaunchedFrame = top->totalCooks;
+		myLaunchedFrame = inputFrame;
 		return true;
 	};
 	auto finishPending = [&]()
@@ -1102,21 +1105,21 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 						myPending.mode = mode;
 						myPending.crops = n;
 						myPending.cropIds.assign(myCropIds.begin(), myCropIds.begin() + n);
-						myPending.frame = top->totalCooks;
+						myPending.frame = inputFrame;
 					}
 					else
 					{
 						if (!runCrops(*engine, n, cropSoftmax, err))
 							myError = err;
 						readInferMs();
-						myResultFrame = top->totalCooks;
+						myResultFrame = inputFrame;
 					}
 				}
 			}
 			else
 			{
 				myCrops.clear();
-				myResultFrame = top->totalCooks;
+				myResultFrame = inputFrame;
 			}
 		}
 		if (myError.empty())
@@ -1160,7 +1163,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			}
 		}
 		readInferMs();
-		myResultFrame = top->totalCooks;
+		myResultFrame = inputFrame;
 		myYoloMode = true;
 		if (ok)
 		{
@@ -1189,8 +1192,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		}
 		myHoloShown = myHolistic.people();
 		readInferMs();
-		myResultFrame = top->totalCooks;
-		myLaunchedFrame = top->totalCooks;
+		myResultFrame = inputFrame;
+		myLaunchedFrame = inputFrame;
 	}
 	else if (engine && inSurf && inArray && mode == ModeHolistic)
 	{
@@ -1241,11 +1244,11 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 				myHoloBusy = true;
 				{
 					std::lock_guard<std::mutex> lock(myHoloMutex);
-					myHoloJob = { myCropBoxes, myCropIds, holisticOpt, fmt, srcW, srcH, top->totalCooks };
+					myHoloJob = { myCropBoxes, myCropIds, holisticOpt, fmt, srcW, srcH, inputFrame };
 					myHoloHasJob = true;
 				}
 				myHoloCv.notify_one();
-				myLaunchedFrame = top->totalCooks;
+				myLaunchedFrame = inputFrame;
 			}
 			else
 				myError = "Holistic: could not copy the input frame for the background run";
@@ -1287,7 +1290,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			}
 		}
 		readInferMs();
-		myResultFrame = top->totalCooks;
+		myResultFrame = inputFrame;
 		if (ok)
 		{
 			const int cells = std::max(1, n);
@@ -1358,8 +1361,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 			{
 				// Frame pair: this frame goes to a scratch tensor; the pair advances on the GPU only if
 				// it differs from the current one (a repeated frame keeps the last real motion).
-				const OP_TimeInfo* ti = inputs->getTimeInfo();
-				const double now = ti && ti->rate > 0 ? double(ti->absFrame) / ti->rate : 0.0;
+				const double now = frameTime;
 				if (!myPairFlagHost)
 				{
 					cudaMallocHost((void**)&myPairFlagHost, kPairSlots * sizeof(int));
@@ -1421,14 +1423,14 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 					myPending.engine = engine;
 					myPending.mode = mode;
 					myPending.lb = lb;
-					myPending.frame = top->totalCooks;
+					myPending.frame = inputFrame;
 				}
 				else
 				{
 					wrote = decode(lb);
 					if (mode != ModeRaw)
 						readInferMs();
-					myResultFrame = top->totalCooks;
+					myResultFrame = inputFrame;
 				}
 			}
 		}
