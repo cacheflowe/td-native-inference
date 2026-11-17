@@ -135,13 +135,14 @@ cudaError_t launchTensorRange(const void* data, bool isHalf, int C, int H, int W
 // Writes an [.., C, H, W] tensor (C <= 4 used) into an output surface, tensor row 0 at the
 // top of the image. C == 1 is replicated to RGB, alpha = 1.
 //   range:   if non-null, values are mapped (v - lo) / (hi - lo).
+//   invert:  with a range, 1 - that (a model that predicts distance, far = large, shown near = bright).
 //   mapToSource: output is outW x outH in source-image space and samples the tensor through
 //            the letterbox (tensor W x H spans lb.dstW x lb.dstH model pixels); otherwise the
 //            output must be W x H and is a 1:1 copy.
 //   mono:    output is Mono32Float (channel 0 only) instead of RGBA32Float.
 cudaError_t launchTensorToTexture(const void* data, bool isHalf, int C, int H, int W,
 	const TensorRange* range, bool mapToSource, const Letterbox& lb, bool mono,
-	cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream);
+	cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream, bool invert = false);
 
 // Zeroes a surface. bytesPerPixel: 4 = Mono32Float, 8 = RGBA16Float, 16 = RGBA32Float.
 cudaError_t launchClear(cudaSurfaceObject_t out, int outW, int outH, int bytesPerPixel, cudaStream_t stream);

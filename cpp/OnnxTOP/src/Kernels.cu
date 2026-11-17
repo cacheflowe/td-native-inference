@@ -381,7 +381,7 @@ namespace
 
 	template <typename T>
 	__global__ void kTensorToTexture(const T* data, int C, int H, int W, const TensorRange* range,
-		bool mapToSource, Letterbox lb, bool mono, cudaSurfaceObject_t out, int outW, int outH)
+		bool mapToSource, Letterbox lb, bool mono, bool invert, cudaSurfaceObject_t out, int outW, int outH)
 	{
 		int x = blockIdx.x * blockDim.x + threadIdx.x;
 		int y = blockIdx.y * blockDim.y + threadIdx.y;	// texture row (bottom-up)
@@ -411,7 +411,7 @@ namespace
 			float lo = range->lo, span = range->hi - range->lo;
 			float inv = span > 1e-12f ? 1.f / span : 0.f;
 			for (int c = 0; c < nc; c++)
-				v[c] = (v[c] - lo) * inv;
+				v[c] = invert ? 1.f - (v[c] - lo) * inv : (v[c] - lo) * inv;
 		}
 		if (mono)
 		{
@@ -640,14 +640,14 @@ cudaError_t launchTensorRange(const void* data, bool isHalf, int C, int H, int W
 
 cudaError_t launchTensorToTexture(const void* data, bool isHalf, int C, int H, int W,
 	const TensorRange* range, bool mapToSource, const Letterbox& lb, bool mono,
-	cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream)
+	cudaSurfaceObject_t out, int outW, int outH, cudaStream_t stream, bool invert)
 {
 	dim3 block(16, 16);
 	dim3 grid = grid2D(outW, outH, block);
 	if (isHalf)
-		kTensorToTexture<__half><<<grid, block, 0, stream>>>((const __half*)data, C, H, W, range, mapToSource, lb, mono, out, outW, outH);
+		kTensorToTexture<__half><<<grid, block, 0, stream>>>((const __half*)data, C, H, W, range, mapToSource, lb, mono, invert, out, outW, outH);
 	else
-		kTensorToTexture<float><<<grid, block, 0, stream>>>((const float*)data, C, H, W, range, mapToSource, lb, mono, out, outW, outH);
+		kTensorToTexture<float><<<grid, block, 0, stream>>>((const float*)data, C, H, W, range, mapToSource, lb, mono, invert, out, outW, outH);
 	return cudaGetLastError();
 }
 

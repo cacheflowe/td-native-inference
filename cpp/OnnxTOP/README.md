@@ -64,7 +64,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 
 | Page | Parameter | Notes |
 |---|---|---|
-| ONNX | Model | `.onnx` with one image input `[1, 3, H, W]` or `[1, H, W, 3]`, float32 / float16 / int32 / uint8 (H, W fixed, or dynamic + Dynamic Size). A relative path is looked up under the project folder, then under the folder holding `OnnxTOP.dll` (an installed `Plugins/<folder>/models/...`) |
+| ONNX | Model | `.onnx` with one image input `[1, 3, H, W]`, `[1, H, W, 3]` or `[1, 1, 3, H, W]` (one view: Depth Anything 3), float32 / float16 / int32 / uint8 (H, W fixed, or dynamic + Dynamic Size). A relative path is looked up under the project folder, then under the folder holding `OnnxTOP.dll` (an installed `Plugins/<folder>/models/...`) |
 | ONNX | Execution Provider | **Auto** (default): CUDA now, TensorRT once its engine is built. **TensorRT**: wait for the build. **CUDA**: never build. TensorRT falls back to CUDA if session creation fails. Saved nodes keep their value |
 | ONNX | TensorRT FP16 | Part of the engine cache key |
 | ONNX | Reload Model | Retries after a failure, or reloads in place |
@@ -96,6 +96,7 @@ in `third_party/onnxruntime` (v1.23.2, MIT). Nothing links against `onnxruntime.
 | Raw | Raw Output Index | Which output to show. `[N, H, W]` / `[.., 1, H, W]` → Mono32Float, `[.., C, H, W]` → RGBA32Float (C ≤ 4) |
 | Raw | Normalize | **Min / Max** (default) maps the frame's value range (letterbox padding excluded) to 0–1 on the GPU; **None** passes raw values |
 | Raw | Range Smoothing | Temporal smoothing of that range (0 = per frame, default 0.9) so brightness doesn't pump |
+| Raw | Invert | Flips the normalized values (1 - v), for a model that predicts distance (far = large) to show near = bright. Needs Normalize on Min / Max |
 | Raw | All Outputs (Color Buffers) | Also write every other image-shaped output to color buffers 1, 2, … in output order, raw values (no normalize), same framing; read them with a Render Select TOP (Buffer Index). One inference for a multi-output model (DAViD multi-task: depth in the main output, normals in buffer 1, matte in buffer 2) |
 | Raw | Map to Input Frame | On (default): output at the input's size with the letterbox undone. Off: the tensor's own size |
 
@@ -150,6 +151,15 @@ from the full-resolution input.
 to match 16:9 input with almost no letterbox). The output is relative inverse depth (near =
 bright), min/max normalized. On an RTX 4090 Laptop GPU, ViT-S at 518² takes about 5 ms per frame
 with TensorRT FP16 (engine build ~3 min) and about 25 ms on CUDA.
+
+#### Depth Anything 3
+
+`models/onnx/depth-anything-v3/base/model.onnx` (+ `model.onnx_data` beside it): Output Mode **Raw**,
+Input Normalize **ImageNet**, Dynamic Size a multiple of 14 (504 × 504), **Invert** on. The input is
+`pixel_values` [batch, 1, 3, H, W]: the single view is dropped, so the node sees [1, 3, H, W]. Raw
+Output Index 0 is `predicted_depth`; the other outputs (confidence, camera extrinsics and intrinsics)
+are computed too. TensorRT FP16 takes about 10-20 ms at 504²; the first engine build takes 20
+minutes or more (CUDA runs at 40-200 ms meanwhile).
 
 #### Recurrent models (Robust Video Matting)
 

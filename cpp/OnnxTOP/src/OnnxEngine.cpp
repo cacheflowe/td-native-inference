@@ -117,7 +117,7 @@ bool probeDynamicInput(const std::string& modelPath, bool& dynamic, std::string&
 		if (session.GetInputCount() > 0)
 		{
 			Ort::TypeInfo typeInfo = session.GetInputTypeInfo(0);
-			auto shape = typeInfo.GetTensorTypeAndShapeInfo().GetShape();
+			auto shape = imageInputShape(typeInfo.GetTensorTypeAndShapeInfo().GetShape());
 			dynamic = shape.size() == 4 && (shape[heightDim(shape)] <= 0 || shape[widthDim(shape)] <= 0);
 		}
 	}
@@ -377,7 +377,9 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 			Ort::TypeInfo typeInfo = mySession->GetInputTypeInfo(i);
 			auto info = typeInfo.GetTensorTypeAndShapeInfo();
 			slot.type = info.GetElementType();
-			slot.shape = info.GetShape();
+			const std::vector<int64_t> declared = info.GetShape();
+			slot.shape = imageInputShape(declared);
+			const std::vector<int64_t> logical = slot.shape;
 			for (size_t d = 0; d < slot.shape.size(); d++)
 			{
 				if (slot.shape[d] > 0)
@@ -385,12 +387,12 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 				if (d == 0)
 					slot.shape[d] = cfg.batch > 0 ? cfg.batch : 1;	// dynamic batch -> Batch Size (crop mode) or 1
 				else if (slot.shape.size() == 4 && cfg.inputW > 0 && cfg.inputH > 0 &&
-					((int)d == heightDim(info.GetShape()) || (int)d == widthDim(info.GetShape())))
-					slot.shape[d] = (int)d == heightDim(info.GetShape()) ? cfg.inputH : cfg.inputW;	// dynamic H/W -> Dynamic Size
+					((int)d == heightDim(logical) || (int)d == widthDim(logical)))
+					slot.shape[d] = (int)d == heightDim(logical) ? cfg.inputH : cfg.inputW;	// dynamic H/W -> Dynamic Size
 				else
 				{
 					err = "Input '" + slot.name + "' has dynamic dim " + std::to_string(d) +
-						" " + shapeString(info.GetShape()) + " -- set Dynamic Size, or re-export with a fixed input size";
+						" " + shapeString(declared) + " -- set Dynamic Size, or re-export with a fixed input size";
 					return false;
 				}
 			}
@@ -406,8 +408,11 @@ bool OnnxEngine::load(const EngineConfig& cfg, std::string& err)
 			}
 			cudaMemset(slot.device, 0, slot.bytes());
 			slot.owned = true;
+			std::vector<int64_t> boundShape = slot.shape;
+			if (hasViewsAxis(declared))
+				boundShape.insert(boundShape.begin() + 1, 1);	// the model's single view
 			myInputValues.emplace_back(Ort::Value::CreateTensor(*myCudaMem, slot.device, slot.bytes(),
-				slot.shape.data(), slot.shape.size(), slot.type));
+				boundShape.data(), boundShape.size(), slot.type));
 			myBinding->BindInput(slot.name.c_str(), myInputValues.back());
 			myInputs.push_back(std::move(slot));
 		}

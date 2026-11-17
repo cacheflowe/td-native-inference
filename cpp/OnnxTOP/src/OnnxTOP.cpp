@@ -764,6 +764,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 	RawOptions rawOpt;
 	rawOpt.index = inputs->getParInt("Rawoutput");
 	rawOpt.minMax = inputs->getParInt("Rawnormalize") == 1;
+	rawOpt.invert = inputs->getParInt("Rawinvert") != 0;
 	rawOpt.smoothing = (float)std::clamp(inputs->getParDouble("Rawsmoothing"), 0.0, 0.999);
 	rawOpt.mapToSource = inputs->getParInt("Rawmaptoinput") != 0;
 	const bool rawAll = inputs->getParInt("Rawalloutputs") != 0;
@@ -805,6 +806,7 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		inputs->enablePar(p, mode == ModeRaw);
 	inputs->enablePar("Letterboxpad", !cropDatMode && inputs->getParInt("Letterbox") != 0);
 	inputs->enablePar("Rawsmoothing", mode == ModeRaw && rawOpt.minMax);
+	inputs->enablePar("Rawinvert", mode == ModeRaw && rawOpt.minMax);
 	inputs->enablePar("Waitforresult", mode != ModeRaw);
 	inputs->enablePar("Scalarinput", myEngine && myEngine->hasScalarInput());
 	inputs->enablePar("Resetstate", myEngine && (myEngine->hasState() || myEngine->inputs().size() == 2));
@@ -1518,7 +1520,7 @@ bool OnnxTOP::runRaw(OnnxEngine& engine, const RawOptions& opt, const Letterbox&
 	}
 	if (ce == cudaSuccess)
 		ce = launchTensorToTexture(s.device, isHalf, C, H, W, range, opt.mapToSource, lb, opt.mono,
-			outSurf, outW, outH, myStream);
+			outSurf, outW, outH, myStream, opt.invert);
 	if (ce != cudaSuccess)
 	{
 		myError = std::string("Raw output kernel failed: ") + cudaGetErrorString(ce);
@@ -2464,6 +2466,15 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		np.clampMins[0] = np.clampMaxes[0] = true;
 		np.help = "Temporal smoothing of the min/max range, so brightness doesn't pump when the scene changes. 0 = off.";
 		check(manager->appendFloat(np));
+	}
+	{
+		OP_NumericParameter np("Rawinvert");
+		np.label = "Invert";
+		np.page = "Raw";
+		np.defaultValues[0] = 0.0;
+		np.help = "Flips the normalized values (1 - v). For a model that predicts distance, far = large (Depth Anything 3), "
+			"to show near = bright. Needs Normalize on Min / Max.";
+		check(manager->appendToggle(np));
 	}
 	{
 		OP_NumericParameter np("Rawmaptoinput");

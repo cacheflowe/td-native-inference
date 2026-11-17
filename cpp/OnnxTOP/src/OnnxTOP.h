@@ -53,6 +53,7 @@ private:
 	{
 		int		index = 0;
 		bool	minMax = false;			// normalize by the (smoothed) per-frame value range
+		bool	invert = false;			// ... and flip it (1 - v); needs minMax
 		float	smoothing = 0.f;		// 0 = this frame's range only
 		bool	mapToSource = true;		// output at the input's size, letterbox undone
 		bool	mono = false;			// single-channel tensor -> Mono32Float output

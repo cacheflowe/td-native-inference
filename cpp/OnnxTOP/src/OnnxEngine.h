@@ -142,6 +142,15 @@ inline bool isNHWC(const std::vector<int64_t>& s) { return s.size() == 4 && s[1]
 inline int heightDim(const std::vector<int64_t>& s) { return isNHWC(s) ? 1 : 2; }
 inline int widthDim(const std::vector<int64_t>& s) { return isNHWC(s) ? 2 : 3; }
 
+// An image input declared with a views axis, [batch, views, 3, H, W] with one view (Depth Anything 3),
+// is treated as [batch, 3, H, W]: the data is laid out the same, only the shape handed to ONNX Runtime
+// differs. imageInputShape() is the 4D shape the rest of the plugin sees.
+inline bool hasViewsAxis(const std::vector<int64_t>& s) { return s.size() == 5 && s[2] == 3 && s[1] <= 1; }
+inline std::vector<int64_t> imageInputShape(const std::vector<int64_t>& declared)
+{
+	return hasViewsAxis(declared) ? std::vector<int64_t>{ declared[0], declared[2], declared[3], declared[4] } : declared;
+}
+
 const char* ortTypeName(ONNXTensorElementDataType t);
 size_t ortTypeSize(ONNXTensorElementDataType t);
 std::string shapeString(const std::vector<int64_t>& shape);
