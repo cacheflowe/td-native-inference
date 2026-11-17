@@ -28,19 +28,20 @@ image, tables with stable track ids, and CHOP channels. More detail on each:
 2. Copy its `td-native-inference` folder into `Documents\Derivative\Plugins\` (create `Plugins` if
    it doesn't exist). Restart TouchDesigner, and click **Allow** when it asks to load
    `OnnxTOP.dll`, `MediaPipeTOP.dll`, `MediaPipeCHOP.dll`, `TrackerDAT.dll` and `PuppetCHOP.dll`.
-3. **Optional, for YOLO26, Robust Video Matting, DAViD, DepthART and text to speech:** in the installed folder, double-click
+3. **Optional, for YOLO26, Robust Video Matting, DAViD, DepthART, Depth Anything 3 and text to speech:** in the installed folder, double-click
    `fetch_models.cmd`. It downloads, checksum-verified, into the folder's `models\`:
    - **YOLO26** (about 90 MB). It's AGPL-3.0, so it isn't in the zip, and the script asks first.
    - **Robust Video Matting** (about 15 MB). It's GPL-3.0, so it isn't in the zip, and the script asks first.
    - **The Kokoro voice** for text to speech (about 280 MB).
    - **DAViD** (about 2.3 GB, MIT). The script asks first.
    - **DepthART** (about 24 MB). Its weights are non-commercial, so it isn't in the zip, and the script asks first.
+   - **Depth Anything 3** (about 413 MB, Apache-2.0). Its first TensorRT engine build takes 20 minutes or more.
 
 Keep the `tox` folder wherever you like, for example next to your projects.
 
 **Updating:**
 - Replace the installed `td-native-inference` folder with the new one, then restart TouchDesigner.
-- Keep the old folder's `models\tts\`, `models\onnx\yolo26\`, `models\onnx\rvm\`, `models\onnx\david\` and `models\onnx\depthart\`, or run `fetch_models.cmd` again.
+- Keep the old folder's `models\tts\`, `models\onnx\yolo26\`, `models\onnx\rvm\`, `models\onnx\david\`, `models\onnx\depthart\` and `models\onnx\depth-anything-v3\`, or run `fetch_models.cmd` again.
 - Replace the `.tox` files in your projects too: each tox expects the plugins of its own version (its **About** page shows which).
 
 Install the plugins in **one** place per machine. That's either `Documents\Derivative\Plugins\`, or a `Plugins` folder next to a show's `.toe` (handy for a portable show machine), but not both: TouchDesigner would load two copies of the same operators.
@@ -62,6 +63,7 @@ Install the plugins in **one** place per machine. That's either `Documents\Deriv
 | <img src="docs/images/models/MoveNet.jpg" width="200"> | **MoveNet MultiPose** | Fast 17-point skeletons for up to 6 people, on the GPU. |
 | <img src="docs/images/models/YuNet.jpg" width="200"> | **YuNet Face Detection** | Very fast face boxes with eye, nose and mouth points, plus which way each head is turned. |
 | <img src="docs/images/models/DepthAnything.jpg" width="200"> | **Depth Anything V2** | Estimates how far away everything in the frame is, from a single camera (near is bright). |
+| <img src="docs/images/models/DepthAnything3.jpg" width="200"> | **Depth Anything 3** | The newer Depth Anything: crisper edges and more believable structure, a bit heavier. Downloaded by `fetch_models.cmd` (413 MB). |
 | <img src="docs/images/models/DepthART.jpg" width="200"> | **DepthART Fast Depth** | A lighter relative-depth model (near is bright): quicker than Depth Anything V2, a little less accurate. Downloaded by `fetch_models.cmd` (non-commercial weights). |
 | <img src="docs/images/models/MODNet.jpg" width="200"> | **MODNet Portrait Matting** | Cuts a person out of the frame as an alpha matte, hair detail included. |
 | <img src="docs/images/models/NeuFlowV2.jpg" width="200"> | **NeuFlow v2 Optical Flow** | How every pixel moved since the last frame, on the GPU, in the same format as TouchDesigner's Optical Flow TOP: for displacing images, steering particles or measuring motion. |

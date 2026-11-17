@@ -5,11 +5,12 @@
 #   Kokoro-82M (MediaPipeTextToSpeech)              Apache-2.0; left out of the zip for size. ~280 MB.
 #   DAViD (DAViDNormals / Matte / Human)           MIT; left out of the zip for size; asks first. ~2.3 GB.
 #   DepthART (DepthART)                             Non-commercial weights (trained on CC BY-NC output); asks first. ~24 MB.
+#   Depth Anything 3 Base (DepthAnything3)          Apache-2.0; left out of the zip for size. ~413 MB.
 #
 # Every file is pinned (a Hugging Face revision, or DAViD's release URL) and checked by SHA-256: the same files the toxes
 # were tested with. Files already present are skipped. No Python needed.
 #
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-AcceptDepthArt] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid] [-SkipDepthArt]
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-AcceptDepthArt] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid] [-SkipDepthArt] [-SkipDepthAnything3]
 param(
 	[switch] $AcceptAgpl,
 	[switch] $AcceptGpl,
@@ -19,7 +20,8 @@ param(
 	[switch] $AcceptDavid,
 	[switch] $SkipDavid,
 	[switch] $AcceptDepthArt,
-	[switch] $SkipDepthArt
+	[switch] $SkipDepthArt,
+	[switch] $SkipDepthAnything3
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
@@ -70,6 +72,14 @@ $depthart = @(
 	   sha256 = '825114de5341612386de409f82f5dfb0496bb9afa559565ac633466bf172fb71' }
 )
 
+$da3Url = 'https://huggingface.co/onnx-community/depth-anything-v3-base/resolve/c56b234c94b459a116d5dc782edf4f2db5889276/onnx'
+$da3 = @(
+	@{ path = 'onnx\depth-anything-v3\base\model.onnx'; size = 646912; url = "$da3Url/model.onnx"
+	   sha256 = 'd9e7775d8b0340ce9416cfdb4356651ef72abab75eb1485f0aeefa352d78255c' },
+	@{ path = 'onnx\depth-anything-v3\base\model.onnx_data'; size = 412068352; url = "$da3Url/model.onnx_data"
+	   sha256 = '09de4dcff3fefe48b04fedbf146151f3339e6115416a72bf9b36dee3aafd03bd' }
+)
+
 function Get-Sha256([string] $path) {
 	# .NET directly: Get-FileHash can be missing when Windows PowerShell inherits PowerShell 7's module path.
 	$stream = [IO.File]::OpenRead($path)
@@ -101,7 +111,8 @@ $missingRvm = if ($SkipRvm) { @() } else { Get-Missing $rvm }
 $missingKokoro = if ($SkipKokoro) { @() } else { Get-Missing $kokoro }
 $missingDavid = if ($SkipDavid) { @() } else { Get-Missing $david }
 $missingDepthArt = if ($SkipDepthArt) { @() } else { Get-Missing $depthart }
-if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0 -and $missingDepthArt.Count -eq 0) {
+$missingDa3 = if ($SkipDepthAnything3) { @() } else { Get-Missing $da3 }
+if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0 -and $missingDepthArt.Count -eq 0 -and $missingDa3.Count -eq 0) {
 	Write-Host "[fetch_models] All models are present in $models"
 	exit 0
 }
@@ -143,4 +154,8 @@ Treat the weights as non-commercial: personal and research use.
 	$accepted = $AcceptDepthArt -or ((Read-Host 'Download the DepthART model under these terms? [y/N]') -match '^[yY]')
 	if ($accepted) { Save-Models $missingDepthArt } else { Write-Host '[fetch_models] Skipped DepthART.' }
 }
-Write-Host '[fetch_models] Done. The first run of each YOLO, DAViD or DepthART model builds a TensorRT engine (a few minutes).'
+if ($missingDa3.Count -gt 0) {
+	Write-Host '[fetch_models] Depth Anything 3 Base (ByteDance Seed, onnx-community export, Apache-2.0): 413 MB.'
+	Save-Models $missingDa3
+}
+Write-Host '[fetch_models] Done. The first run of each YOLO, DAViD, DepthART or Depth Anything 3 model builds a TensorRT engine (a few minutes; Depth Anything 3 can take much longer).'

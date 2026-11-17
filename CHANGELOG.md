@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Depth Anything 3** (`DepthAnything3.tox`): relative depth (near = bright) from the newer Depth
+  Anything (Base, Apache-2.0): crisper edges and more believable structure than V2. 413 MB, so it's
+  downloaded by `fetch_models.cmd` (`-SkipDepthAnything3`); its first TensorRT engine build takes
+  20 minutes or more. Also a layer in VisionDemo.
+- **OnnxTOP:** an image input declared as `[batch, 1, 3, H, W]` (a single view; Depth Anything 3's
+  `pixel_values`) now loads like a `[1, 3, H, W]` one, and Raw mode has an **Invert** toggle
+  (Raw page) that flips the normalized output, for models that predict distance (far = large).
 - **DepthART Fast Depth** (`DepthART.tox`): relative depth (near = bright) from a much lighter
   network than Depth Anything V2 (MobileNetV4, fixed 448 x 448, letterboxed). A little less accurate,
   and weaker on flat walls. The weights are non-commercial (trained on Depth Anything V2-Large's

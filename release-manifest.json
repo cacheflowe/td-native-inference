@@ -8,6 +8,8 @@
 		"docs/MODELS.md",
 		"docs/MANUAL.md",
 		"tox/DepthAnything.tox",
+		"tox/DepthAnything3.tox",
+		"tox/DepthART.tox",
 		"tox/MODNet.tox",
 		"tox/NeuFlowV2.tox",
 		"tox/RVM.tox",

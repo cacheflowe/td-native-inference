@@ -124,7 +124,9 @@ but deliver results a frame or more late; the CPU times below are what a cook pa
 **Licenses decide some of these.** The YOLO26 models are **AGPL-3.0** and Robust Video Matting is
 **GPL-3.0**: both are fetched, never bundled, and carry obligations if you distribute a project
 using them. **MediaPipe Holistic GPU** uses YOLO26 to find people, so the same applies to it.
-Everything else is Apache-2.0 or MIT.
+**DepthART** is fetched too: its weights were trained on Depth Anything V2-Large's output (CC BY-NC
+4.0), so use it for personal and research work, not a commercial show. Everything else is
+Apache-2.0 or MIT.
 
 ### Bodies and skeletons
 
@@ -182,6 +184,8 @@ Both are AGPL-3.0; there's no Apache-licensed object detector in the set yet.
 | You need | Use | Why |
 |---|---|---|
 | Depth of a whole scene | **Depth Anything V2** (GPU, ~5 ms at 518²) | Everything in frame, near = bright |
+| The cleanest whole-scene depth | **Depth Anything 3** (GPU, ~10-20 ms at 504², a 20-minute first engine build) | Crisp edges and real structure; near = bright. Apache-2.0, downloaded by `fetch_models.cmd` (413 MB) |
+| A lighter whole-scene depth (personal use) | **DepthART** (GPU, 3.8 GMAC against 41 for Depth Anything V2-S) | Near = bright; a little less accurate and weaker on flat walls. Non-commercial weights |
 | A person's depth, normals and matte | **DAViD Depth + Normals + Matte** (GPU, ~21 ms) | Finer body shape; the background is meaningless |
 | A person's surface normals (relighting) | **DAViD Normals** (GPU, ~10 ms) | Real surface direction, see below |
 | 3D joints rather than surfaces | **MediaPipe Holistic** / **Pose** | Metric world landmarks |
@@ -298,6 +302,29 @@ Method** picks the estimator). GPU, very fast. OpenCV Zoo YuNet, MIT.
 Relative depth for the whole frame (near = bright). TOP 1 is the depth image at the input's
 resolution. **Dynamic Size** sets the inference resolution (multiple of 14); **Normalize** and
 **Range Smoothing** keep the brightness range steady between frames. GPU. Depth Anything V2 Small, Apache-2.0.
+
+### Depth Anything 3 (`DepthAnything3.tox`)
+Relative depth for the whole frame (near = bright), from ByteDance Seed's newer model (the Base
+size). Edges are crisper than Depth Anything V2's, and it keeps real structure (a person's arms in
+front of the torso, the floor and wall falling away). TOP 1 is the depth image at the input's
+resolution. **Dynamic Size** sets the inference resolution (multiple of 14; the default 504 x 504);
+**Normalize**, **Range Smoothing** and **Invert** (on: the model predicts distance, far = large, so
+this flips it to near = bright) work as in Raw mode. GPU. Depth Anything 3 Base, Apache-2.0, 413
+MB: run `fetch_models.cmd`. The model is slow to build: the **first TensorRT engine takes 20
+minutes or more** (until it's ready the node runs on CUDA at about 40-200 ms a frame), and loading
+the cached engine takes about a minute. Per frame it's about 10-20 ms with TensorRT.
+
+### DepthART Fast Depth (`DepthART.tox`)
+Relative depth for the whole frame (near = bright), from a much lighter network than Depth Anything
+V2 (MobileNetV4, 6 M parameters, 3.8 GMAC at 448 against 41 for Depth Anything V2-S). TOP 1 is the
+depth image at the input's resolution. The model runs at a fixed 448 x 448, so there's no Dynamic
+Size, and the frame is letterboxed into it: keep **Letterbox** on, since stretching a wide frame to
+the square input leaves blotches in the background. **Normalize** and **Range Smoothing** work as in
+Depth Anything. Against Depth Anything V2-S it's close on people and busy scenes and a little
+noisier, and worse on a flat, featureless wall; the authors report a lower accuracy too (NYUD
+delta1 0.952 against 0.974). GPU. The weights are non-commercial (trained on Depth Anything V2-Large's
+output, CC BY-NC 4.0), so it isn't in the zip: run `fetch_models.cmd`, which asks first. The first
+run builds a TensorRT engine (a few minutes).
 
 ### MODNet Portrait Matting (`MODNet.tox`)
 Alpha matte of the person in frame (white = person), hair detail included. TOP 1 is the matte at

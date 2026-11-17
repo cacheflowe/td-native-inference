@@ -111,6 +111,65 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
         maybe `F.unfold` to slices, the 1e-8 epsilons for fp16. Output axes likely OpenCV (flip
         y, z; needs a per-channel remap). Estimate 10-15 ms fp16 / 20-25 ms fp32 at 640x480.
         About half a day; quality on people is the open question.
+- [ ] **DepthART** relative depth ([repo](https://github.com/xuefeng-cvr/DepthART), ONNX on
+      [Hugging Face](https://huggingface.co/Fengxue93/DepthART/tree/main/onnx); looked at Nov 17):
+      - **Only the MobileNetV4 graphs run for us.** The 12 TinyViM S/B/L graphs (relative and
+        metric) contain a custom `com.depthart:SelectiveScan` op (ONNX Runtime refuses to load
+        them); it needs the authors' CUDA kernel and a TensorRT plugin. The six MobileNetV4 graphs
+        (S / M / M-slim-SPF, 224 or 448) are standard opset 17.
+      - **MNv4-M-slim-SPF 448** (`relative_mnv4m_slim_spf_448_default.onnx`, 24 MB, in
+        `models/onnx/depthart/`): input `image` [1, 3, 448, 448], output `depth` [1, 1, 448, 448]
+        (relative, affine-invariant; near = bright). TensorRT fp16 launches in about 1 ms; its
+        p50 inference time measured 4-17 ms with TD open (too noisy to compare with Depth Anything
+        V2-S, which the authors put at 3.8 against 41 GMAC); engine build 6 min the first time.
+        **Re-measure with TD closed.**
+      - **Accuracy:** below Depth Anything V2-S (NYUD delta1 0.952 vs 0.974, KITTI 0.928 vs 0.944).
+        MobileNetV4 is sensitive to wide aspect ratios (the authors tile KITTI), so 16:9 input
+        needs a square-ish or windowed run.
+      - **License:** the code and the released parts are CC BY 4.0, but the checkpoints were
+        trained on Depth Anything V2-L's output (CC BY-NC 4.0), so treat the weights as
+        non-commercial; don't bundle.
+      - **Shipped Nov 17:** `DepthART.tox` (in `release-manifest.json`, VisionDemo layer, icon,
+        thumbnail, `docs/MODELS.md`, MANUAL, README, `models/README.md`), with a
+        `fetch_models.ps1` entry (`-AcceptDepthArt` / `-SkipDepthArt`; the pinned HF revision's
+        sha256 `825114de...fb71` matches the authors' CHECKSUMS.sha256; tested from a clean
+        folder under Windows PowerShell 5.1). Raw mode, ImageNet normalize; keep **Letterbox
+        on**: stretching a 3:2 photo to the square input left big blobs in the background. On a
+        portrait it's close to Depth Anything V2-S (a little noisier); on a flat studio wall it's
+        worse.
+      - **Still open:** the clean-process test (`tests/run_clean_wrapper.ps1`) of `DepthART.tox`;
+        the timing above. The metric models need the TinyViM plugin (and intrinsics), so they're
+        out for now.
+- [ ] **Depth Anything 3 Base** (Nov 17; `wrappers/DepthAnything3.json`, in `release-manifest.json`):
+      - **Model:** `onnx-community/depth-anything-v3-base` (Apache-2.0; Small and Base only, Large /
+        Giant are CC BY-NC), 413 MB as `model.onnx` + `model.onnx_data`, opset 18, standard ops.
+        Input `pixel_values` [batch, views, 3, H, W], four outputs (depth, confidence, extrinsics,
+        intrinsics).
+      - **Done:** OnnxTOP loads a `[batch, 1, 3, H, W]` input as `[1, 3, H, W]` (`hasViewsAxis` /
+        `imageInputShape` in `OnnxEngine.h`), and Raw mode has an **Invert** toggle (DA3 predicts
+        depth, far = large). So the original files work unmodified; `fetch_models.ps1` downloads
+        them (pinned revision, sha256, tested from a clean folder). Raw Output Index 0 is the depth;
+        the other outputs are computed too (a graph with only the depth would be a little cheaper).
+      - **Quality:** clearly the cleanest of the three on the lab photos: crisp edges, real
+        structure on the portrait's arms and a believable floor / wall gradient, where Depth
+        Anything V2-S is blobbier and DepthART is noisy.
+      - **Speed:** TensorRT fp16 launches in 2-3 ms; inference measured p50 18 ms (best 7-9 ms) with
+        TD sharing the GPU, so **re-measure with TD closed**. CUDA is 40-200 ms. The first
+        TensorRT engine build took over 20 minutes (a 2,600-node graph); later loads take a minute.
+        Ideas: a fixed input size, or the Small model if one appears (none found).
+      - **Shipped Nov 17:** also a VisionDemo layer, icon, thumbnail, docs (MODELS, MANUAL, README,
+        `models/README.md`, OnnxTOP README), CHANGELOG; full wrapper lab passes (26).
+      - **Still open:** the clean-process test of `DepthAnything3.tox` and `DepthART.tox`. TD
+        crashed twice around the wrapper / demo rebuilds that day (no dump found); rebuilding the
+        wrappers and the demos in separate bridge calls was stable.
+- [ ] **Video Depth Anything Small** (Apache-2.0; looked at Nov 17, not tried): the ONNX exporter
+      ([MapMindAI/DepthAnythingOnnx](https://github.com/MapMindAI/DepthAnythingOnnx), MIT) takes a
+      window of frames `[B, T, 3, H, W]` (trained on 32). It isn't recurrent, so live use means
+      running the last T frames every cook (T times the cost; ViT-S at 518 is about 5 ms a frame),
+      and a new OnnxTOP "frame window" mode (like the frame-pair one). The authors' streaming mode
+      (cached temporal hidden states) is experimental and drops accuracy (ScanNet delta1 0.926 to
+      0.836). It also needs the `.pth` checkpoint and PyTorch to export. Probably 2-3 days for a
+      modest gain; try a cheaper temporal filter on the depth output first.
 - [ ] Other ONNX candidates (check each license before bundling):
       - RF-DETR (Apache-2.0);
       - Real-ESRGAN upscaling and fast style transfer (Raw mode);
@@ -155,6 +214,33 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
         repo has no licence and was trained only on UnityEyes renders (UnityEyes' terms are
         research-only, unchecked); its README reports ~14 (degrees?) error on MPIIGaze, weak by
         today's standards. Check provenance before shipping; compare with the blendshape route.
+- [ ] **VRMBG 3.0** matting ([briaai/VRMBG-3.0](https://huggingface.co/briaai/VRMBG-3.0)): another
+      matting option next to RVM. The license is non-commercial, so a local experiment only (like
+      DSINE; don't bundle). Check the ONNX export, input size and speed against RVM.
+- [ ] **Camera Depth Model (CDM) for RGB+D noise reduction**
+      ([depth-anything/camera-depth-model-d435](https://huggingface.co/depth-anything/camera-depth-model-d435)):
+      cleans a RealSense D435's raw depth using the RGB frame. Look at the inputs (RGB + raw depth),
+      the export / ONNX route, the license, and how a two-image-input model fits OnnxTOP (same
+      question as NeuFlow's frame-pair mode).
+- [ ] **3D pose / mesh from one image: [ROMP](https://github.com/Arthur151/ROMP) and
+      [Multi-HMR](https://github.com/naver/multi-hmr)** (the `naver/multi-hmr2` link as given
+      doesn't match the repo name; confirm it): real-time pose estimation whose output includes a
+      3D body model (SMPL parameters / mesh), for projection mapping and general pose. Check
+      licenses (SMPL is non-commercial, and Naver's terms are unchecked), ONNX export, speed, and
+      the output format. If it pans out, it feeds the projection documentation.
+      - **Spike first (Nov 16):** Multi-HMR ViT-B (672 px; NAVER's V100 times: S 29 ms, B 43 ms,
+        L 74 ms) with the SMPL-X layer baked into the ONNX (joints and vertices out). Measure
+        TensorRT speed and joint quality before touching OnnxTOP. ROMP has an `--onnx` option but
+        is the 2021 model: jittery. Neither can be bundled (SMPL / SMPL-X non-commercial).
+      - **Puppet fit:** the solver reads world landmarks by name from the tracks, so SMPL-X joints
+        mapped to those names should drive it unchanged (needs: a new OnnxTOP output mode, like
+        MoveNet's). It could fix the puppet's known weak spots: side-on left/right swaps, bad
+        depth, hands.
+      - **Projecting onto a person (prototype plan):** the matte (RVM / DAViD) plus pose joints
+        already give a 2D silhouette and body-part anchors, and DAViD depth / normals the surface:
+        calibrate camera to projector with a depth camera (D435 / L515) first. Monocular mesh
+        position is only cm-to-dm accurate and 30-70 ms late, so use the mesh for UV texturing and
+        multi-person, not for position (depth does that; see the CDM item).
 - [ ] Also exported by MediaPipe and cheap to add: text classifier / embedder, language detector,
       object detector, image classifier / embedder, interactive segmenter.
 
