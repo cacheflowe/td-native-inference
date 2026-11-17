@@ -120,7 +120,7 @@ if ($missingKokoro.Count -gt 0) {
 	Save-Models $missingKokoro
 }
 if ($missingDavid.Count -gt 0) {
-	$gb = [Math]::Round((($missingDavid | Measure-Object -Property size -Sum).Sum) / 1GB, 1)
+	$gb = [Math]::Round((($missingDavid | ForEach-Object { $_.size } | Measure-Object -Sum).Sum) / 1GB, 1)
 	Write-Host "[fetch_models] DAViD human depth / normals / matte (Microsoft, MIT): $($missingDavid.Count) files, $gb GB."
 	$accepted = $AcceptDavid -or ((Read-Host 'Download the DAViD models? [y/N]') -match '^[yY]')
 	if ($accepted) { Save-Models $missingDavid } else { Write-Host '[fetch_models] Skipped DAViD.' }
