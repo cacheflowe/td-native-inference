@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **DepthART Fast Depth** (`DepthART.tox`): relative depth (near = bright) from a much lighter
+  network than Depth Anything V2 (MobileNetV4, fixed 448 x 448, letterboxed). A little less accurate,
+  and weaker on flat walls. The weights are non-commercial (trained on Depth Anything V2-Large's
+  output), so they aren't in the zip: `fetch_models.cmd` downloads and checksum-verifies them (24
+  MB; `-AcceptDepthArt`, `-SkipDepthArt`). Also a layer in VisionDemo.
 - **Eye gaze** on MediaPipe Face and Holistic: `gaze_x` / `gaze_y` columns in the tracks (Eye Gaze,
   on by default), from the irises against the eye corners. They give where the eyes look within the
   head, in half eye-widths (+x image right, +y up), and work without Blendshapes.

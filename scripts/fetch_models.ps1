@@ -4,11 +4,12 @@
 #   Robust Video Matting (RVM)                      GPL-3.0, so not bundled; asks first. ~15 MB.
 #   Kokoro-82M (MediaPipeTextToSpeech)              Apache-2.0; left out of the zip for size. ~280 MB.
 #   DAViD (DAViDNormals / Matte / Human)           MIT; left out of the zip for size; asks first. ~2.3 GB.
+#   DepthART (DepthART)                             Non-commercial weights (trained on CC BY-NC output); asks first. ~24 MB.
 #
 # Every file is pinned (a Hugging Face revision, or DAViD's release URL) and checked by SHA-256: the same files the toxes
 # were tested with. Files already present are skipped. No Python needed.
 #
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid]
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-AcceptDepthArt] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid] [-SkipDepthArt]
 param(
 	[switch] $AcceptAgpl,
 	[switch] $AcceptGpl,
@@ -16,7 +17,9 @@ param(
 	[switch] $SkipRvm,
 	[switch] $SkipKokoro,
 	[switch] $AcceptDavid,
-	[switch] $SkipDavid
+	[switch] $SkipDavid,
+	[switch] $AcceptDepthArt,
+	[switch] $SkipDepthArt
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
@@ -61,6 +64,11 @@ $david = @(
 	@{ path = 'onnx\david\multi-task-model-vitl16_384.onnx'; size = 1380619058; url = "$davidUrl/multi-task-model-vitl16_384.onnx"
 	   sha256 = 'cf993e33ac7d6acac642c59b1512bdf97cd576975e93fe5c9697f3425023b6c1' }
 )
+$depthart = @(
+	@{ path = 'onnx\depthart\relative_mnv4m_slim_spf_448_default.onnx'; size = 24155097
+	   url = 'https://huggingface.co/Fengxue93/DepthART/resolve/1874712d9eab9e0010695855f1bbf8d480828a29/onnx/relative_mnv4m_slim_spf_448_default.onnx'
+	   sha256 = '825114de5341612386de409f82f5dfb0496bb9afa559565ac633466bf172fb71' }
+)
 
 function Get-Sha256([string] $path) {
 	# .NET directly: Get-FileHash can be missing when Windows PowerShell inherits PowerShell 7's module path.
@@ -92,7 +100,8 @@ $missingYolo = if ($SkipYolo) { @() } else { Get-Missing $yolo }
 $missingRvm = if ($SkipRvm) { @() } else { Get-Missing $rvm }
 $missingKokoro = if ($SkipKokoro) { @() } else { Get-Missing $kokoro }
 $missingDavid = if ($SkipDavid) { @() } else { Get-Missing $david }
-if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0) {
+$missingDepthArt = if ($SkipDepthArt) { @() } else { Get-Missing $depthart }
+if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0 -and $missingDepthArt.Count -eq 0) {
 	Write-Host "[fetch_models] All models are present in $models"
 	exit 0
 }
@@ -125,4 +134,13 @@ if ($missingDavid.Count -gt 0) {
 	$accepted = $AcceptDavid -or ((Read-Host 'Download the DAViD models? [y/N]') -match '^[yY]')
 	if ($accepted) { Save-Models $missingDavid } else { Write-Host '[fetch_models] Skipped DAViD.' }
 }
-Write-Host '[fetch_models] Done. The first run of each YOLO or DAViD model builds a TensorRT engine (a few minutes).'
+if ($missingDepthArt.Count -gt 0) {
+	Write-Host @"
+DepthART (xuefeng-cvr/DepthART): the code is CC BY 4.0, but the checkpoints were trained with supervision from
+Depth Anything V2-Large (CC BY-NC 4.0); see "License and Third-Party Notices" in https://github.com/xuefeng-cvr/DepthART
+Treat the weights as non-commercial: personal and research use.
+"@
+	$accepted = $AcceptDepthArt -or ((Read-Host 'Download the DepthART model under these terms? [y/N]') -match '^[yY]')
+	if ($accepted) { Save-Models $missingDepthArt } else { Write-Host '[fetch_models] Skipped DepthART.' }
+}
+Write-Host '[fetch_models] Done. The first run of each YOLO, DAViD or DepthART model builds a TensorRT engine (a few minutes).'

@@ -224,6 +224,7 @@ demos in `tox/demos/`.
 | `YuNet` | video | Face boxes, 5 points, head `yaw`, `pitch`, `roll` | tracks |
 | `HSEmotion` | video | Finds faces and scores 7 emotions each | tracks with `emotion_label`, `emotion_<name>` |
 | `DepthAnything` | video | Relative depth of the whole frame (near is bright) | TOP 1 depth |
+| `DepthART` | video | The same from a lighter model, a little less accurate (non-commercial weights) | TOP 1 depth |
 | `MODNet` | video | Person alpha matte, hair detail included | TOP 1 matte |
 | `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow in the Optical Flow TOP's format (R right, G up, screen widths per second), TOP 3 the same scaled for viewing |
 | `components/HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |
@@ -241,6 +242,8 @@ Licenses and fetched models:
 - **YOLO26** (Detect, Seg, Pose) is AGPL-3.0 and **Robust Video Matting** is GPL-3.0. Neither is
   in the zip. Run `fetch_models.cmd` in the installed folder; it asks before downloading each.
 - **Text to Speech** needs the Kokoro voice (about 280 MB), also from `fetch_models.cmd`.
+- **DepthART**'s weights are non-commercial (trained on CC BY-NC output). Not in the zip; also from
+  `fetch_models.cmd`, which asks first.
 - Everything else is bundled. Model licenses are in [NOTICE](../NOTICE).
 
 The Models page of each tox in [MODELS.md](MODELS.md#the-models) explains its own parameters and

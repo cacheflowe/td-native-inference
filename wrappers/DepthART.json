@@ -1,0 +1,15 @@
+{
+	"name": "DepthART",
+	"label": "DepthART Fast Depth",
+	"plugin": "OnnxTOP",
+	"kind": "image",
+	"preset": {
+		"Model": "models/onnx/depthart/relative_mnv4m_slim_spf_448_default.onnx",
+		"Mode": "raw",
+		"Inputnorm": "imagenet"
+	},
+	"model": [
+		"Rawnormalize",
+		"Rawsmoothing"
+	]
+}
