@@ -41,6 +41,13 @@ Depth Anything V2 Small, ONNX export: onnx/depth-anything/depth_anything_v2_vits
   https://github.com/DepthAnything/Depth-Anything-V2
   https://github.com/fabio-sim/Depth-Anything-ONNX
 
+Any2Full ViT-S, converted to a fixed-size ONNX graph: onnx/depthclean/any2full_vits_518x924.onnx
+  Copyright the Any2Full authors (Zhou et al., ECCV 2026). Apache License 2.0 (code and weights).
+  Converted by this project: the same weights and computation, with the nearest-fill loop unrolled,
+  the pooling written as matrices and the least-squares fit in closed form.
+  https://github.com/zhiyuandaily/Any2Full
+  https://huggingface.co/zhiyuandaily/Any2Full
+
 HSEmotion enet_b2_7 (renamed onnx/hsemotion/emotion.onnx)
   Copyright Andrey Savchenko. Apache License 2.0.
   https://github.com/sb-ai-lab/EmotiEffLib

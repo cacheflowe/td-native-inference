@@ -226,6 +226,7 @@ demos in `tox/demos/`.
 | `DepthAnything` | video | Relative depth of the whole frame (near is bright) | TOP 1 depth |
 | `DepthAnything3` | video | The same from the newer, crisper Depth Anything 3 (413 MB, `fetch_models.cmd`) | TOP 1 depth |
 | `DepthART` | video | The same from a lighter model, a little less accurate (non-commercial weights) | TOP 1 depth |
+| `DepthClean` | video + depth | Fills the holes and noise in a depth camera's depth, guided by its RGB; **two inputs: RGB, then depth aligned to the color** | TOP 1 the cleaned depth (the depth's units), TOP 2 the RGB |
 | `MODNet` | video | Person alpha matte, hair detail included | TOP 1 matte |
 | `NeuFlowV2` | video | Optical flow: how every pixel moved since the previous frame | TOP 1 flow in the Optical Flow TOP's format (R right, G up, screen widths per second), TOP 3 the same scaled for viewing |
 | `components/HandsGeometry` | joints DAT | Draws tracked hands as 3D spheres and cylinders (needs a POP-capable TouchDesigner, 2025+) | TOP render, POP geometry |

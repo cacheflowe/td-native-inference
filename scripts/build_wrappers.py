@@ -61,13 +61,24 @@ if WRAPPERS:
 		moving.par.ty.expr = '0.02 * math.cos(absTime.frame * 0.11)'
 		moving.nodeX, moving.nodeY = 150, 150
 	sources = {'video': source, 'audio': audio_source, 'text': text_source}
+	# Wrappers with a depth input (DepthClean): a float ramp with a hole at its left edge.
+	depth_source = lab.op('depth_source')
+	if depth_source is None:
+		depth_source = lab.create('rampTOP', 'depth_source')
+		depth_source.par.outputresolution = 'custom'
+		depth_source.par.resolutionw, depth_source.par.resolutionh = 640, 360
+		depth_source.par.format = 'rgba32float'
+		depth_source.nodeX, depth_source.nodeY = 0, 300
 	for name in names:
 		spec = wrapper_builder.load_spec(name)
 		existed = lab.op(name) is not None
 		comp = wrapper_builder.build(spec, lab)
 		if not existed:
 			comp.nodeX, comp.nodeY = 300, -wrapper_builder.spec_names().index(name) * 200
+		if not comp.inputConnectors[0].connections:
 			comp.inputConnectors[0].connect(moving if spec.get('flow') else sources[spec.get('input', 'video')])
+		if spec.get('depth_input') and not comp.inputConnectors[1].connections:
+			comp.inputConnectors[1].connect(depth_source)
 		entry = {'nodes': len(comp.findChildren())}
 		if EXPORT:
 			destination = Path(project.folder) / 'tox' / f'{name}.tox'

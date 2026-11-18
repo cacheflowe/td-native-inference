@@ -28,6 +28,9 @@ The spec decides what differs:
 	detector, classes  classifier only: the nested detector spec and the score column settings
 	input            'audio' builds an audio wrapper instead (_build_audio): audio CHOP in, the
 	                 MediaPipe audio CHOP, kind transcript (DATs + closed-caption TOP)
+	depth_input      image only: a second TOP input (`input2`, a depth image aligned to the RGB, 0 =
+	                 no reading) stacked under the RGB into one image of "stack_size": [width, height]
+	                 per half (_build_depth_stack); the model's ONNX splits the halves (DepthClean)
 Everything not exposed stays preset on the inner nodes.
 """
 
@@ -587,6 +590,50 @@ def _build_instances(comp):
 	_connect(output, instances)
 
 
+DEPTH_STACK_GLSL = '''// RGB in the top half, the depth (red channel, 0 = no reading) in the bottom half: one image for
+// a model that takes both (OnnxTOP flips the rows, so the top of this image is the tensor's first row).
+out vec4 fragColor;
+void main()
+{
+	vec2 uv = vUV.st;
+	vec4 color;
+	if (uv.y >= 0.5)
+	{
+		color = vec4(texture(sTD2DInputs[0], vec2(uv.x, (uv.y - 0.5) * 2.0)).rgb, 1.0);
+	}
+	else
+	{
+		// Nearest: a hole must not be blended into its neighbours' valid values.
+		ivec2 size = textureSize(sTD2DInputs[1], 0);
+		ivec2 p = clamp(ivec2(vec2(uv.x, uv.y * 2.0) * vec2(size)), ivec2(0), size - ivec2(1));
+		float d = texelFetch(sTD2DInputs[1], p, 0).r;
+		d = (d > 0.0 && !isnan(d) && !isinf(d)) ? d : 0.0;
+		color = vec4(d, d, d, 1.0);
+	}
+	fragColor = TDOutputSwizzle(color);
+}
+'''
+
+
+def _build_depth_stack(comp, spec):
+	"""A spec's "depth_input": a second TOP input, `input2` (the depth image, aligned to the RGB, any
+	units, 0 = no reading), and `stack`: both resampled into one 32-bit float image, RGB above depth, of
+	the model's input size ("stack_size": [width, height] of each half). OnnxTOP then needs no second
+	input: the model's ONNX splits the halves itself."""
+	width, height = spec['stack_size']
+	comp.create('inTOP', 'input2')
+	stack = comp.create('glslTOP', 'stack')
+	for name in ('stack_compute', 'stack_info'):
+		if comp.op(name) is not None:
+			comp.op(name).destroy()
+	comp.op('stack_pixel').text = DEPTH_STACK_GLSL
+	stack.par.outputresolution = 'custom'
+	stack.par.resolutionw, stack.par.resolutionh = width, height * 2
+	stack.par.format = 'rgba32float'
+	stack.par.inputfiltertype = 'linear'
+	_connect(stack, comp.op('input'), comp.op('input2'))
+
+
 def _build_pages(comp, spec, plugin, tracker):
 	model_page = comp.appendCustomPage('Model')
 	pulses = []
@@ -648,6 +695,9 @@ def _layout(comp, spec):
 			positions.update(LAYOUT_RESULT_INFERENCE)
 		if spec.get('remap'):
 			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
+		if spec.get('depth_input'):
+			positions.update({'input': (0, 250), 'input2': (0, 110), 'stack': (1, 180), 'inference': (2, 180),
+				'detections': (3, 120), 'overlay': (3, 320)})
 		if spec.get('flow'):
 			positions.update({'flow': (2, 320), 'flow_feedback': (2, 460), 'flow_smooth': (3, 320), 'flow_gate': (4, 320),
 				'flow_color': (4, 460), 'overlay': (5, 200), 'out_color': (7, -700)})
@@ -706,7 +756,11 @@ def build(spec, parent_comp, name=None):
 	plugin = comp.create(spec['plugin'], 'inference')
 	for parameter, value in spec.get('preset', {}).items():
 		_set(plugin, parameter, value)
-	_connect(plugin, comp.op('input'))
+	if spec.get('depth_input'):
+		_build_depth_stack(comp, spec)
+		_connect(plugin, comp.op('stack'))
+	else:
+		_connect(plugin, comp.op('input'))
 	info = comp.create('infoDAT', 'detections')
 	info.par.op = 'inference'
 	stats = comp.create('infoCHOP', 'inference_stats')

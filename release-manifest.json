@@ -10,6 +10,7 @@
 		"tox/DepthAnything.tox",
 		"tox/DepthAnything3.tox",
 		"tox/DepthART.tox",
+		"tox/DepthClean.tox",
 		"tox/MODNet.tox",
 		"tox/NeuFlowV2.tox",
 		"tox/RVM.tox",
@@ -66,6 +67,7 @@
 		"models/onnx/neuflow/neuflow_mixed.onnx": "td-native-inference/models/onnx/neuflow/neuflow_mixed.onnx",
 		"models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/pose_landmarks_detector.onnx",
 		"models/onnx/mediapipe_holistic/hand_roi_refinement.onnx": "td-native-inference/models/onnx/mediapipe_holistic/hand_roi_refinement.onnx",
+		"models/onnx/depthclean/any2full_vits_518x924.onnx": "td-native-inference/models/onnx/depthclean/any2full_vits_518x924.onnx",
 		"models/onnx/mediapipe_holistic/hand_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/hand_landmarks_detector.onnx",
 		"models/onnx/mediapipe_holistic/face_landmarks_detector.onnx": "td-native-inference/models/onnx/mediapipe_holistic/face_landmarks_detector.onnx"
 	}

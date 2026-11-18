@@ -186,6 +186,7 @@ Both are AGPL-3.0; there's no Apache-licensed object detector in the set yet.
 | Depth of a whole scene | **Depth Anything V2** (GPU, ~5 ms at 518²) | Everything in frame, near = bright |
 | The cleanest whole-scene depth | **Depth Anything 3** (GPU, ~10-20 ms at 504², a 20-minute first engine build) | Crisp edges and real structure; near = bright. Apache-2.0, downloaded by `fetch_models.cmd` (413 MB) |
 | A lighter whole-scene depth (personal use) | **DepthART** (GPU, 3.8 GMAC against 41 for Depth Anything V2-S) | Near = bright; a little less accurate and weaker on flat walls. Non-commercial weights |
+| Clean up a depth camera's own depth (holes, shadows, noise) | **Depth Clean** (GPU, ~8-12 ms) | Takes the camera's RGB and aligned depth; see below |
 | A person's depth, normals and matte | **DAViD Depth + Normals + Matte** (GPU, ~21 ms) | Finer body shape; the background is meaningless |
 | A person's surface normals (relighting) | **DAViD Normals** (GPU, ~10 ms) | Real surface direction, see below |
 | 3D joints rather than surfaces | **MediaPipe Holistic** / **Pose** | Metric world landmarks |
@@ -325,6 +326,22 @@ noisier, and worse on a flat, featureless wall; the authors report a lower accur
 delta1 0.952 against 0.974). GPU. The weights are non-commercial (trained on Depth Anything V2-Large's
 output, CC BY-NC 4.0), so it isn't in the zip: run `fetch_models.cmd`, which asks first. The first
 run builds a TensorRT engine (a few minutes).
+
+### Depth Clean (`DepthClean.tox`)
+Fills the holes, IR shadows and noise in a depth camera's own depth map, using the camera's color
+image as a guide. **Two inputs**: input 1 is the RGB image and input 2 the depth image
+(RealSense TOP, Kinect, ...), and **the depth must be aligned to the color image** (the camera's
+align-to-color option): an unaligned depth map makes the result worse at edges. Depth is a single
+channel in any units, with 0 meaning no reading. TOP 1 is the cleaned depth at the RGB image's
+resolution, **in the same units as the depth you feed in** (the model fits its estimate to your
+valid pixels, so nothing needs scaling), and TOP 2 is the RGB. Every pixel gets a value; valid
+pixels barely move (a median of about 1%), and the holes and the shadows around a person or a
+hand are filled and follow the RGB edges. The model (Any2Full, ViT-S, Apache-2.0; 136 MB) runs at a
+fixed 924 x 518, so other aspect ratios are stretched in and back out, which is mild. It works with
+any camera, not just one. About 8 ms per frame with TensorRT (12 ms with TouchDesigner sharing the
+GPU); the first run builds a TensorRT engine (about 5 minutes; until then it runs on CUDA, slower).
+Against a larger depth-camera model (CDM) it's close on ordinary scenes and softer on a hand close
+to the lens with most of the depth missing: the fingertips come out ragged.
 
 ### MODNet Portrait Matting (`MODNet.tox`)
 Alpha matte of the person in frame (white = person), hair detail included. TOP 1 is the matte at

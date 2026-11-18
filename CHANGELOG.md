@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Depth Clean** (`DepthClean.tox`): fills the holes, IR shadows and noise in a depth camera's own
+  depth map using its RGB. Two inputs (RGB, then depth aligned to the color; any camera, any depth
+  units, 0 = no reading); TOP 1 is the cleaned depth at the RGB's resolution in the depth's units.
+  Any2Full ViT-S (Apache-2.0, 136 MB, in the zip), about 8 ms with TensorRT. The wrapper builder
+  gained a `depth_input` spec key: a second input and a stacking network that feeds one image to
+  the OnnxTOP.
 - **`fetch_models.ps1` downloads NeuFlow v2** (42 MB, checksum-verified; `-SkipNeuFlow`) when
   `models\onnx\neuflow\` is missing. The release zip already has it, so only a source checkout
   (where `.onnx` files are gitignored) needed it.

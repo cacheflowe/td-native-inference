@@ -172,7 +172,7 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
       modest gain; try a cheaper temporal filter on the depth output first.
 - [ ] Other ONNX candidates (check each license before bundling):
       - RF-DETR (Apache-2.0);
-      - Real-ESRGAN upscaling and fast style transfer (Raw mode);
+      - fast style transfer (Raw mode);
       - MobileSAM / EfficientSAM (needs prompt inputs);
       - RAFT optical flow (needs two frames).
 - [ ] **NeuFlow v2** optical flow (2024): built for edge devices, much lighter than RAFT for similar
@@ -191,6 +191,20 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
         give coherent motion (the head 156 px to the right).
 
       **Next:** OnnxTOP has no two-frame input yet. A "frame pair" mode: when a model has two image
+- [ ] **Fast 2x upscaling (Real-ESRGAN family)**: wanted: a quick 2x ONNX upscaler for live video
+      (Raw mode, an output at twice the input's size; a model with a dynamic or fixed small input
+      tile). Candidates to compare (none tried, check each license and ONNX source):
+      - **`realesr-general-x4v3`** (SRVGGNetCompact, 1.2 M parameters, BSD-3-Clause, general
+        scenes, has a denoise-strength blend): 4x only, so run it and downscale to 2x, or run it on
+        a half-size input. An ONNX export exists (e.g. `vlad-grig/realesr-general-x4v3-onnx` on
+        Hugging Face, the official weights unchanged). Cheapest to try.
+      - **`realesr-animevideov3`** (compact, x2 / x3 / x4 variants, for animation video).
+      - **`RealESRGAN_x2plus`** (RRDBNet, much heavier; quality reference, probably not real-time).
+      - **OpenModelDB 2x compact models** (SPAN, compact RealESRGAN-style; many are permissively
+        licensed, each its own terms).
+      - **To work out:** OnnxTOP's Raw mode writes the tensor at the input's size or its own size
+        (`Map to Input Frame` off gives the tensor's size, so a 2x output works); tiling for big
+        frames; an fp16 TensorRT build and the cost at 720p / 1080p; edges between tiles.
       inputs of one shape, feed `input1` the previous frame's tensor (kept on the GPU, like RVM's
       recurrent state) and `input2` the current one. The flow comes out through Raw mode as RG,
       converted to UV (dx / 768, -dy / 432). Then a wrapper spec, a flow-to-color visualization
@@ -217,11 +231,219 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 - [ ] **VRMBG 3.0** matting ([briaai/VRMBG-3.0](https://huggingface.co/briaai/VRMBG-3.0)): another
       matting option next to RVM. The license is non-commercial, so a local experiment only (like
       DSINE; don't bundle). Check the ONNX export, input size and speed against RVM.
-- [ ] **Camera Depth Model (CDM) for RGB+D noise reduction**
-      ([depth-anything/camera-depth-model-d435](https://huggingface.co/depth-anything/camera-depth-model-d435)):
-      cleans a RealSense D435's raw depth using the RGB frame. Look at the inputs (RGB + raw depth),
-      the export / ONNX route, the license, and how a two-image-input model fits OnnxTOP (same
-      question as NeuFlow's frame-pair mode).
+- [ ] **Noisy RGB+D depth: clean-up and hole filling for the D415 / D435 / Kinect** (summary and
+      plan, Nov 17; the per-model notes are in the next item). Goal: fill holes and IR shadows and
+      remove noise from a depth camera's map using its RGB, ideally in real time inside TD.
+      - **Test data:** `media/cdm/d435/` (gitignored): 254 frames of you at a desk, a raised hand
+        close to the lens and the room behind; `rgb/` PNG 1920 x 1080, `depth/` EXR (half float, one
+        channel) 1920 x 1080 **aligned to color**, recorded from the RealSense TOP. **1.0 in the EXR
+        is 5 m.** An earlier recording without alignment was discarded: unaligned depth made every
+        model look worse at edges. No Kinect or D415 frames yet.
+      - **Compared on those frames** (panels in `build/cdm_compare/`; judged by eye, no ground
+        truth; speeds are `onnxtop_tool` TensorRT fp16 p50 with TD open unless noted):
+
+        | Model | License / size | Cameras | Speed | Quality |
+        |---|---|---|---|---|
+        | **CDM** (ViT-L x2) | code Apache-2.0, weights unstated; 5.5 GB per camera | D435, Azure Kinect, L515, ... (not D415) | 31 ms at 252 x 448, 45 ms at 322 x 574, 69 ms at 518 x 686 | Best on the hard frame (a hand over the view): crisp fingers; fills holes, shadows and glare |
+        | **LingBot-Depth v0.5** (ViT-L) | Apache-2.0; 1.28 GB | RealSense, Orbbec, Azure Kinect (one model; needs intrinsics) | not timed (eager bf16: 80-90 ms at 1,200 tokens) | Cleanest silhouettes on ordinary frames; ragged fingers on the hard frame |
+        | **Any2Full-S** (ViT-S) | Apache-2.0; 195 MB (B 764 MB, L 2 GB) | any (scale-prompted) | not timed; expect about 14 ms | Close to CDM on ordinary frames, no halos, fingers separate with ragged tips; valid pixels barely move |
+        | **PromptDA-S** | Apache-2.0 tag; 96 MB | any | 14 ms at 504 x 896 | Cleaner than raw; edge halos, blobby fingers on the hard frame |
+        | MSG-CHN | Apache-2.0 code; 364 K parameters | any | not run | KITTI outdoor LiDAR only: not suited to dense indoor depth |
+        | Plain GPU fill / DA3 + fit / distilled CDM / RealSense SDK filters | n/a | n/a | not tried | see the next item |
+
+      - **Findings so far:** alignment matters; the hand over the lens is the hard case (most raw
+        depth is missing); CDM fp16 matches fp32 (median relative diff 0.0003); CDM's output is
+        inverse depth; Any2Full and PromptDA output follows the input's units (scale fitted to the
+        valid pixels), so no depth-scale setting is needed.
+      - **Decision (Nov 17): build a Depth Clean node on Any2Full-S.** CDM stays the quality
+        option (and the Kinect's, once its weights are tried); revisit LingBot if a static-shape
+        export of its masked path works.
+      - **Plan for the node** (about 1.5 days, no C++): (1) export Any2Full-S at a fixed 16:9 size
+        (multiple of 14, e.g. 518 x 924) as one graph with a stacked input (RGB on top, depth
+        below; OnnxTOP's preprocess passes 32-bit floats through unchanged at the same size), the
+        global fit as closed-form 2 x 2 normal equations over the valid pixels and the prompt
+        statistics as masked sums; (2) TensorRT build, speed, and an fp16 check against fp32;
+        (3) a wrapper with two inputs (RGB and depth; `wrapper_builder.py` has a single `input`
+        today), a packing GLSL network and the output (Raw, Normalize None, Map to Input Frame
+        off) resized back to the camera's resolution; (4) host the exported ONNX (derived from
+        Apache-2.0 weights; a release asset) with a pinned fetch entry, docs, icon, manifest and
+        NOTICE; (5) lab test on `media/cdm/d435/` and a clean-process test. Not in VisionDemo
+        (one camera input).
+      - **Progress (Nov 17): Any2Full-S exported and verified; steps 1-2 of the plan are done.**
+        - **Export** (`tmp/cdm/export_a2f.py vits 518 924 out.onnx --check <frame>`): one fixed-size
+          graph, input `stacked` `[1, 3, 1036, 924]` (RGB top half, depth in the red channel of the
+          bottom half, any units), output `depth` `[1, 1, 518, 924]` in the input's units; 136 MB,
+          opset 17 (legacy exporter). The wrapper reproduces the repo's own `forward` exactly
+          (relative difference: median 0, p99 1e-5). Three things had to change for a static graph:
+          the patch-embedding's `adaptive_avg_pool2d` to 3 x 3 (not a divisor of 14; replaced by
+          the same bins as a pooling matrix), its `while not valid_mask.all()` nearest-fill loop
+          (unrolled to grid - 1 steps), and the prompt attention's mask, which the repo expands to
+          `[B, heads, N, N]` and the exporter baked in as a 143 MB constant per block (broadcast
+          `[B, 1, 1, N]` instead; same result). The global scale / shift fit is the closed-form
+          least squares and the prompt statistics are masked sums.
+        - **TensorRT fp16:** build 5.4 minutes, **p50 11.6 ms (min 8.2, p95 15.4)** with TD open.
+        - **End to end in TD** (a scratch OnnxTOP on a stacked 32-bit EXR: Raw mode, Input
+          Normalize 0 to 1, Letterbox off, Normalize None, Map to Input Frame off): no C++ change
+          needed. The output TOP is 924 x 518 in the input's units. Against the PyTorch fp32
+          reference: CUDA fp32 median relative difference 4e-5 (p99 2.6e-4); TensorRT fp16 median
+          4e-4, **p99 0.85%, max 24% at a few pixels**, no NaN. The fit sums are computed in the
+          graph, so fp16 accumulation is the thing to watch on other scenes.
+        - **Next:** the two-input wrapper (RGB + depth) with the stacking GLSL network, a fetch /
+          hosting entry for the ONNX, docs and tests.
+        - **Wrapper built (Nov 17, `wrappers/DepthClean.json`, `"demo": false`):** a new spec key
+          `depth_input` (with `stack_size`) makes `wrapper_builder.py` add a second In TOP,
+          `input2`, and a `stack` GLSL TOP (RGB bilinear on top, depth nearest below, 32-bit float
+          RGBA, 924 x 1036) feeding the OnnxTOP; the model is `models/onnx/depthclean/
+          any2full_vits_518x924.onnx`. TOP 1 is the cleaned depth resized to the RGB input's
+          resolution (the input's depth units; Normalize None), TOP 2 the RGB. The built COMP has
+          two input connectors, `input` then `input2` (checked). Lab wiring note: a source for
+          `input2` must be a sibling of the wrapper (inside another COMP the connect silently
+          fails and the In TOP stays 128 x 128).
+        - **Speed with TD closed (quiet GPU): TensorRT fp16 p50 7.75 ms (min 7.5).**
+        - **Tested (Nov 17):** the rebuilt wrapper with the recorded frames wired in (RGB
+          1920 x 1080, aligned depth): output 924 x 518 internally, TOP 1 at 1920 x 1080, every pixel
+          filled (min 0.11, max 1.15, no NaN); the lab test passes (a float ramp stands in for the
+          depth input: `depth_source` in `scripts/build_wrappers.py`). Panel:
+          `build/cdm_compare/depthclean_wrapper_120.jpg`.
+        - **Shipping status:** in `release-manifest.json` (tox and the 136 MB ONNX, bundled in the
+          zip; Apache-2.0, NOTICE entry), docs in MODELS / MANUAL / `models/README.md`, CHANGELOG.
+          **Still open:** a tracked export script (the export is `tmp/cdm/export_a2f.py` plus the
+          attention-mask patch, neither in git), a README row and thumbnail (the lab's thumbnails
+          use the stock photos, and a depth pair needs a camera: decide whether to use your
+          footage), the clean-process test, your live `realsense_rgb` / `realsense_depth` (not in
+          the current project), and an optional depth input on VisionDemo.
+        - **TD crashed three times on Nov 17** (no dump found), each time while a TensorRT engine
+          was building in the background (the wrapper rebuild + engine builds in the lab; this time
+          the new model's first build). Pre-building the engine with `onnxtop_tool` (before TD
+          opens the model) avoids the in-TD build: the cache is keyed on the model's path.
+      - **Open:** Kinect and D415 frames (record the same kind of clips; for the Kinect, CDM's
+        `kinect` weights are 5.5 GB); Any2Full fp16 on other scenes (the in-graph fit sums); whether
+        ViT-B is worth it (it looked the same as ViT-S); distilling CDM or LingBot into a small net
+        if the hands matter.
+      - **Reproducing** (`tmp/cdm/`, gitignored, not in git): a venv with torch 2.14 (cu126, Python
+        3.14), onnx, OpenEXR, opencv-headless, torchvision; clones of the CDM, PromptDA, Any2Full
+        and LingBot-Depth repos; checkpoints in `weights/`; `export_cdm.py`, `export_pda.py`,
+        `run_cdm.py`, `run_promptda.py`, `run_a2f.py`, `run_lingbot.py` (panels, fp16 checks),
+        `export_a2f.py`, `make_stack_test.py`, `td_a2f_check.py` (the TD check, run through the
+        bridge). The Any2Full clone has the attention-mask patch above in `prompt_attention.py`.
+        The LingBot clone has a one-sample patch to `vision_transformer.py` (no xFormers). Copy
+        the scripts somewhere tracked if the spike is revisited.
+- [ ] **Camera Depth Models (CDM) for RGB+D clean-up and hole filling**
+      ([project](https://manipulation-as-in-simulation.github.io/),
+      [code](https://github.com/ByteDance-Seed/manip-as-in-sim-suite/tree/main/cdm) Apache-2.0,
+      [weights](https://huggingface.co/collections/depth-anything/camera-depth-models); per-model
+      notes, Nov 17). Cameras here: RealSense D415 and D435, a Kinect.
+      - **Models:** one checkpoint per camera (D405, D435, L515, Azure Kinect, ZED 2i quality /
+        neural, plus a `base`); 5.47 GB each as an fp32 PyTorch `.ckpt`. **D435 and the Azure Kinect
+        are covered; the D415 isn't** (try the D435 model on it, or `base`; a D415 has a different
+        baseline and field of view, so accuracy is unknown). Which Kinect (Azure, or v2)? Only the
+        Azure Kinect has a model. The weights' license isn't stated on the cards (check before
+        anything but a local experiment).
+      - **Architecture** (`rgbddepth/dpt.py`): two full DINOv2 **ViT-L** encoders (RGB and depth),
+        a 4-head cross-attention over each token's RGB / depth pair, and a DPT head on the
+        concatenated features; output is metric depth in metres. Input `[1, 4, H, W]`: RGB (ImageNet
+        normalized) plus the raw depth as **inverse depth** (`1/d`, 0 where there's no reading, in
+        metres), resized so the short side is 518 (multiple of 14), e.g. 518 x 686 for 640 x 480.
+      - **Real-time? Yes at a reduced size (measured Nov 17).** The network exports to ONNX
+        (legacy exporter, opset 17, fixed size, 659 M parameters; random weights, since speed
+        doesn't depend on them) and builds in TensorRT fp16 in 3-17 minutes (longer when the GPU
+        is busy); the engine is 1.27 GB. Inference p50 with TD open and sharing the GPU
+        (`onnxtop_tool`, 200 runs):
+
+        | Input (H x W) | p50 | fps |
+        |---|---|---|
+        | 252 x 448 (16:9) | 32.8 ms | 30 |
+        | 322 x 434 | 29.4 ms (p95 33) | 34 |
+        | 322 x 574 (16:9) | 45.2 ms (min 35; the GPU was busy) | 22 |
+        | 406 x 546 | 38.8 ms (p95 41) | 26 |
+        | 518 x 686 (the authors' size for 640 x 480) | 69.2 ms (p95 73) | 14 |
+
+        So about 26-34 fps at 320-400 px and 14 fps at full size, better than the 60-150 ms I first
+        estimated for full size. Not yet known: accuracy at the smaller sizes (the authors use 518),
+        and fp16 numerics with the real weights (DepthART-L overflowed in FP16; DINOv2-L usually
+        doesn't, but the cross-attention is unproven). Other levers: run on every second frame and
+        merge with the fresh raw depth; INT8. VRAM is modest: 1.27 GB engine, so it can sit
+        alongside other models.
+      - **Quality check on recorded D435 frames (Nov 17, `media/cdm/d435/`, 254 frames, 1080p
+        color with aligned depth; panels in `tmp/cdm/out/`):** strong. The cleaned depth fills the
+        holes and the IR shadows around a person and a raised hand, follows the RGB edges (the
+        fingers come out crisp), removes noise, and corrects a bright false blob where a dark
+        monitor glared; the result is smooth with some blockiness on busy shelves. 322 px and 518
+        px short side look nearly the same (518 has a little more shelf detail). Valid pixels move
+        a median 2% from the raw values (p90 about 6-8%); with the first, unaligned recording the
+        median was 4-8%, so alignment matters. **fp16 is safe with the real weights**: against
+        fp32 the median relative difference is 0.0003, p99 under 0.7%, max 6.6%, no NaN / inf.
+        Unknown: what 1.0 in the recorded EXR equals in metres (the model's output scales with its
+        input, so absolute values depend on it; I used 5 m per 1.0 for the panels). The network's
+        output is **inverse depth** (the authors take `1 / pred`), so the export needs a
+        reciprocal at the end. The authors' `infer.py` passes RGB into `infer_image`, which swaps
+        channels again; the spike copies that.
+      - **Compared with MSG-CHN depth completion** ([ONNX port](https://github.com/ibaiGorordo/ONNX-msg_chn_wacv20-depth-completion);
+        364 K parameters, trained on KITTI outdoor LiDAR only, sparse input): a tiny fallback at
+        best; not for dense, noisy indoor depth. Not run.
+      - **More candidates (Nov 17, same frames; panels `build/cdm_compare/a2f_*.jpg`,
+        `lingbot_*.jpg`):**
+        - **Any2Full** ([repo](https://github.com/zhiyuandaily/Any2Full), Apache-2.0 code and
+          weights, ECCV 2026; ViT-S 195 MB, ViT-B 764 MB, ViT-L 2 GB): a Depth Anything encoder
+          prompted with the depth treated as disparity (zeros = holes), then a global scale / shift
+          fit to the valid pixels. Better than PromptDA-S here: no edge halos, clean silhouettes,
+          fingers separate (with some ragged fingertips and a blobby face on the hardest frame), and
+          valid pixels barely move (median 0.5%). ViT-B looks the same as ViT-S. Eager PyTorch fp32
+          took 125-130 ms (S) and 220-260 ms (B), mostly the `pinverse` fit over about a million
+          points; an export would replace that with the closed-form 2x2 normal equations and use
+          masked sums for the prompt statistics. Not exported or timed; expect ViT-S in the
+          PromptDA range (about 14 ms). **The most promising fast option.**
+        - **LingBot-Depth** ([page](https://technology.robbyant.com/lingbot-depth),
+          [code](https://github.com/Robbyant/lingbot-depth), Apache-2.0; v0.5 recommended, 1.28 GB
+          fp32, 321 M parameters; trained on 3 M RGB-D pairs from RealSense, Orbbec and Azure Kinect,
+          so one model for all your cameras; needs camera intrinsics, normalized by width / height;
+          a token budget of 1,200-3,600 sets the resolution): one ViT-L over the RGB tokens plus the
+          depth tokens, with depth patches that have no valid pixels dropped. Excellent on ordinary
+          frames, with the cleanest silhouettes of anything tried (cleaner than CDM at the
+          person's edge); weaker than CDM on the hardest frame (a hand covering the view, mostly no
+          raw depth): fingers come out ragged and truncated. Eager bf16: 80-90 ms at 1,200 tokens,
+          300-320 ms at 3,600; not timed in TensorRT. **Export is the catch:** the masked path
+          drops a variable number of tokens (it needs xFormers' nested tensors, which isn't
+          installable here; I patched the one-sample case in `tmp/cdm/lingbot`). Without masking
+          (`enable_depth_mask=False`) the holes are fed as zero depth, which it wasn't trained for
+          and which loses the fingers. A static-shape export would need an attention mask in place
+          of the token drop. The intrinsics I used are approximate (fx = fy = 1387 at 1080p).
+        - **Prompt Depth Anything, ViT-S** ([PromptDA](https://github.com/DepthAnything/PromptDA);
+          25 M parameters, 96 MB checkpoint, Apache-2.0 tag on the HF repo; camera-agnostic, so it
+          also covers the D415 and the Kinect). Tested on the D435 frames with a 4x pooled depth
+          prompt, holes pre-filled by a few pooling passes (the model normalizes the prompt by its
+          min / max, so zeros in it break it). Exported as one `[1, 4, 504, 896]` input
+          (`tmp/cdm/export_pda.py`): TensorRT fp16 **p50 13.9 ms (min 5), about 70 fps**, build
+          6.5 minutes. Quality: close to CDM on the static room (frame 180), but blobbier on a
+          close hand (frame 60: the fingers merge into the background), and a prompt left with
+          holes gives dark artifacts. fp16 numerics not checked.
+        - **Not tried:** a plain GPU hole fill (push-pull plus an RGB-guided filter, about 1 ms;
+          fills small holes and shadows flatly, no noise correction); Depth Anything 3 / V2
+          relative depth fitted to the valid pixels (10-18 ms, existing wrappers); distilling CDM
+          into a small U-Net trained on our own camera footage (2-6 ms guess; camera-specific, and
+          CDM's weight license limits redistribution); the RealSense SDK's own hole-filling and
+          temporal filters.
+      - **Spike setup** (`tmp/cdm/`, gitignored): a venv with torch 2.14 (cu126, Python 3.14),
+        onnx, OpenEXR, opencv-headless and torchvision; the authors' code sparse-cloned into
+        `repo/`; `export_cdm.py <H> <W> <out.onnx>` (random weights, speed only), `run_cdm.py`
+        (panels and fp16 checks), the D435 checkpoint in `weights/`.
+      - **What it takes** (about 3-4 days):
+        1. Export: PyTorch (not installed) to ONNX at a fixed size, fp16 weights; the DINOv2
+           position-embedding interpolation and the 2-token cross-attention should export, but it's
+           unproven. A long first TensorRT build is likely (Depth Anything 3 took 20+ minutes).
+        2. OnnxTOP: a 4-channel image input. The model's input is RGB + depth in one tensor, so no
+           second TOP input is needed: the wrapper packs the depth into the alpha of one 32-bit
+           float RGBA TOP (Math TOP: `1/d`, a Shuffle / Reorder TOP), and OnnxTOP's preprocess
+           emits four planes with the fourth un-normalized. Small kernel change.
+        3. Wrapper: the packing network, Raw mode with Normalize None (output stays in metres,
+           the clean depth map at the input's size), and a **Camera** menu that swaps the Model
+           path per camera (one export and one engine each; the weights are too big for the zip,
+           so a fetch entry downloads and the user exports, or we host exported fp16 ONNX files if
+           the license allows).
+        4. Depth must be registered to the color image (RealSense TOP's align option, the Kinect's
+           depth-to-color), with depth in metres.
+      - **First step (done Nov 17):** a Python spike on recorded D435 frames showed the clean-up
+        is worth it; see the summary item above for what we compared and decided.
 - [ ] **3D pose / mesh from one image: [ROMP](https://github.com/Arthur151/ROMP) and
       [Multi-HMR](https://github.com/naver/multi-hmr)** (the `naver/multi-hmr2` link as given
       doesn't match the repo name; confirm it): real-time pose estimation whose output includes a
@@ -324,6 +546,13 @@ RTMPose 2D on TensorRT fp16, 256x192 crops (OpenMMLab `onnx_sdk` exports):
 |---|---|---|---|---|
 | RTMPose-m body7 | 17 | 2.4 ms | 1.8 ms | 3.2 / 3.4 min |
 | RTMW-l (cocktail14) | 133 | 3.6 ms | 10.0 ms | 5.4 / 5.8 min |
+- [ ] **Where to host our own converted ONNX models.** Depth Clean's `any2full_vits_518x924.onnx`
+      (136 MB, converted by us from Apache-2.0 weights, sha256 `cb9d9064...`) is **bundled in the
+      zip for now** (decided Nov 17). It's a special-use model (it needs a depth camera), so it
+      would be better as a download: pick a host (a GitHub release asset of a separate "models"
+      release, or a Hugging Face repo), then add a pinned `fetch_models.ps1` entry (no accept
+      prompt, like Depth Anything 3), drop it from `release-manifest.json` and update the docs.
+      The same host would also take any future converted model.
 
 **Dropped:**
 - **BiRefNet lite** (Nov 11): 92 ms per frame, a 304 MB engine and a 22-minute build.
