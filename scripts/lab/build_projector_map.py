@@ -85,16 +85,41 @@ void main() {
 }
 '''
 
-PATTERN = HEADER + '''// uPat: x mode (0 black, 1 one dot, 2 test grid), y z the dot's centre (uv), w its radius (x height).
-// The grid's corners: bottom left red, bottom right green, top right blue, top left yellow.
+PATTERN = HEADER + '''// uPat: x mode (0 black, 1 one dot, 2 test grid, 3 camera-space grid), y z the dot's centre (uv), w its radius (x height).
+// The test grid's corners: bottom left red, bottom right green, top right blue, top left yellow.
+// Mode 3: a regular grid drawn in the camera's image space and mapped into the projector by the homography
+// (uH0..2). If the calibration is right it looks straight and evenly spaced in the camera's image; the
+// orange outline is the camera frame's edge, cyan the image's centre lines. uCam: the camera's size.
 uniform vec4 uPat;
+uniform vec4 uH0;
+uniform vec4 uH1;
+uniform vec4 uH2;
+uniform vec4 uCam;
 out vec4 fragColor;
 void main() {
 	vec2 uv = vUV.st;
 	vec2 res = uTDOutputInfo.res.zw;
 	float aspect = res.x / res.y;
 	vec3 rgb = vec3(0.0);
-	if (uPat.x > 1.5) {
+	if (uPat.x > 2.5) {
+		vec3 p = vec3(uv, 1.0);
+		vec3 h = vec3(dot(uH0.xyz, p), dot(uH1.xyz, p), dot(uH2.xyz, p));
+		vec2 c = h.xy / h.z;
+		if (h.z > 0.0 && c.x >= 0.0 && c.x <= 1.0 && c.y >= 0.0 && c.y <= 1.0) {
+			float cols = 8.0;
+			float rows = max(1.0, floor(cols * uCam.y / uCam.x + 0.5));
+			vec2 g = c * vec2(cols, rows);
+			vec2 d = abs(fract(g - 0.5) - 0.5) / max(fwidth(g), vec2(1e-5));
+			float line = 1.0 - smoothstep(1.0, 2.5, min(d.x, d.y));
+			vec2 m = abs(c - 0.5) / max(fwidth(c), vec2(1e-5));
+			float centre = 1.0 - smoothstep(1.0, 2.5, min(m.x, m.y));
+			vec2 e = min(c, 1.0 - c) / max(fwidth(c), vec2(1e-5));
+			float edge = 1.0 - smoothstep(2.0, 4.5, min(e.x, e.y));
+			rgb = vec3(line);
+			rgb = mix(rgb, vec3(0.0, 0.9, 0.9), centre);
+			rgb = mix(rgb, vec3(1.0, 0.45, 0.0), edge);
+		}
+	} else if (uPat.x > 1.5) {
 		vec2 g = uv * vec2(floor(aspect * 9.0 + 0.5), 9.0);
 		vec2 d = abs(fract(g - 0.5) - 0.5) / fwidth(g);
 		rgb = vec3(1.0 - min(min(d.x, d.y), 1.0));
@@ -362,7 +387,7 @@ def build():
 	m = comp.appendCustomPage('Map')
 	par(m, 'Menu', 'Output', 'Output', 'content', menu=[('content', 'Content x Silhouette'), ('mask', 'Silhouette'),
 		('outline', 'Outline'), ('camera', 'Camera (aligned, for checking)'), ('grid', 'Test Grid'),
-		('full', 'Content (no silhouette)')])
+		('full', 'Content (no silhouette)'), ('camgrid', 'Camera Grid (keystone check)')])
 	par(m, 'Menu', 'Content', 'Content', 'white', menu=[('input', 'Input 3 (projector space)'),
 		('camerainput', 'Input 3 (camera space)'), ('white', 'White'), ('stripes', 'Stripes'), ('rainbow', 'Rainbow')])
 	par(m, 'WH', 'Resolution', 'Projector Resolution', (1920, 1080), 16, 8192)
@@ -439,11 +464,14 @@ def build():
 	compose.par.format = 'rgba8fixed'
 	vec(compose, 0, 'uMode', 'parent().par.Output.menuIndex', 'parent().par.Content.menuIndex', 'absTime.seconds', '0')
 	pattern = _pattern(comp)
-	vec(pattern, 0, 'uPat', "1 if parent().par.Busy else (2 if parent().par.Output == 'grid' else 0)", '0.5', '0.5', 'parent().par.Dotsize')
+	vec(pattern, 0, 'uPat', "1 if parent().par.Busy else (2 if parent().par.Output == 'grid' else (3 if parent().par.Output == 'camgrid' else 0))", '0.5', '0.5', 'parent().par.Dotsize')
+	for i in range(3):
+		vec(pattern, 1 + i, f'uH{i}', cell(i, 0), cell(i, 1), cell(i, 2), '0')
+	vec(pattern, 4, 'uCam', "max(1, op('in1_camera').width)", "max(1, op('in1_camera').height)", '0', '0')
 	for axis in 'yz':	# the dot's centre: set by the logic, plain values
 		getattr(pattern.par, f'vec0value{axis}').expr = ''
 	switch = comp.create('switchTOP', 'out_switch')
-	switch.par.index.expr = "1 if (parent().par.Busy or parent().par.Output == 'grid') else 0"
+	switch.par.index.expr = "1 if (parent().par.Busy or parent().par.Output in ('grid', 'camgrid')) else 0"
 	switch.inputConnectors[0].connect(compose)
 	switch.inputConnectors[1].connect(pattern)
 	out = comp.create('outTOP', 'out_projector')

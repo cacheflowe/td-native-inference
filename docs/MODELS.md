@@ -641,7 +641,7 @@ Send TOP 1 to the projector's Window COMP, at the projector's resolution.
   whose error is above **Max Error (px)** (30) and keeps the last good one.
 
 - **Map page:** **Output** (Content × Silhouette, Silhouette, Outline, Camera, Test Grid, Content
-  with no silhouette), **Content** (Input 3 in projector or camera space, White, Stripes, Rainbow),
+  with no silhouette, Camera Grid), **Content** (Input 3 in projector or camera space, White, Stripes, Rainbow),
   **Projector Resolution**, **Matte Black / White**
   (the range of the matte that fades from nothing to full), **Erode** (pulls the edge in, in
   projector pixels, so light doesn't spill past the body) and **Feather** (softens the edge; also the
@@ -657,7 +657,15 @@ Send TOP 1 to the projector's Window COMP, at the projector's resolution.
   own image).
 
 To calibrate: point the camera at where the projector lands, dim the room, set **Output** to Test
-Grid to check the projector's own framing, then press **Calibrate**. Check the result with
+Grid to check the projector's own framing, then press **Calibrate**. **Output** = Camera Grid shows
+what the solution is: a regular grid drawn in the camera's image space and warped into the projector
+(orange = the camera frame's edge, cyan = its centre lines). In the camera's image it should look
+straight and evenly spaced; from the room it looks keystoned, which is the correction. It is exact for
+the wall's plane only: anything standing in front of the wall (a person) is seen from the camera's
+angle but lit from the projector's, so it lands off by about its distance from the wall times the
+difference of the two viewing angles (the shoulders high when the camera looks up from below). Stand
+close to the wall, calibrate on a flat board at the standing distance, or bring the camera next to
+the projector. Check the result with
 **Output** = Camera: the camera image drawn through the solution should line up with the real
 scene. If the dots can't be found, use **Source** = Manual Corners instead: **Corner 1 to 4** are
 where the camera image's corners (bottom left, bottom right, top right, top left) land in the
