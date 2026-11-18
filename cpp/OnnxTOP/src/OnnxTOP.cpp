@@ -482,6 +482,31 @@ void OnnxTOP::manageLoading(const EngineConfig& desired, const std::vector<std::
 	myLoader = std::thread([this, desired, companions]() { loadEngines(desired, companions); });
 }
 
+void OnnxTOP::unloadModel()
+{
+	myCancelLoad = true;
+	if (myLoader.joinable())
+		myLoader.join();
+	myUpgrading = false;
+	waitHolisticIdle();
+	if (myStream)
+		cudaStreamSynchronize(myStream);
+	myPending.active = false;
+	myEngine.reset();
+	myCompanions.clear();
+	{
+		std::lock_guard<std::mutex> lock(myLoadMutex);
+		myNextEngine.reset();
+		myNextCompanions.clear();
+		myLoadError.clear();
+		myLoadWarning.clear();
+	}
+	myHasRequested = false;	// the next manageLoading loads again
+	myForceReload = false;
+	myUnloaded = true;
+	myLoadState = LoadState::Idle;
+}
+
 bool OnnxTOP::sameModelConfig(const EngineConfig& a, const EngineConfig& b)
 {
 	// Dynamic Size doesn't apply to a fixed-size model, so changing it mustn't reload one.
@@ -829,7 +854,25 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		for (const char* name : kHolisticCompanions)
 			companions.push_back((fs::path(desired.modelPath).parent_path() / name).generic_string());
 	holisticOpt.maxPeople = maxDets;
-	manageLoading(desired, companions);
+	const double unloadAfter = inputs->getParDouble("Unloadafter");
+	if (active)
+	{
+		myIdle = false;
+		myUnloaded = false;
+	}
+	else
+	{
+		const auto now = std::chrono::steady_clock::now();
+		if (!myIdle)
+		{
+			myIdle = true;
+			myIdleSince = now;
+		}
+		if (!myUnloaded && unloadAfter > 0.0 && std::chrono::duration<double>(now - myIdleSince).count() >= unloadAfter)
+			unloadModel();
+	}
+	if (!myUnloaded)
+		manageLoading(desired, companions);
 	{
 		std::lock_guard<std::mutex> lock(myLoadMutex);
 		std::string staticPath = myStaticModelPath;
@@ -840,7 +883,8 @@ void OnnxTOP::execute(TOP_Output* output, const OP_Inputs* inputs, void*)
 		std::lock_guard<std::mutex> lock(myLoadMutex);
 		switch (myLoadState.load())
 		{
-			case LoadState::Idle:		myWarning = "Set the Model parameter to an .onnx file"; break;
+			case LoadState::Idle:		myWarning = myUnloaded ? "Unloaded while Active was off; turn Active on to load it again"
+																: "Set the Model parameter to an .onnx file"; break;
 			case LoadState::Loading:	myWarning = myLoadStatus; break;
 			case LoadState::Failed:		myError = myLoadError; break;
 			case LoadState::Ready:		myWarning = myLoadWarning; break;
@@ -2278,6 +2322,26 @@ void OnnxTOP::setupParameters(OP_ParameterManager* manager, void*)
 		check(manager->appendPulse(np));
 	}
 	{
+		OP_NumericParameter np("Unload");
+		np.label = "Unload Model";
+		np.page = "ONNX";
+		np.help = "Frees the model and its GPU memory now. It loads again when Active is on at the next cook.";
+		check(manager->appendPulse(np));
+	}
+	{
+		OP_NumericParameter np("Unloadafter");
+		np.label = "Unload After (s)";
+		np.page = "ONNX";
+		np.defaultValues[0] = 30.0;
+		np.minValues[0] = np.minSliders[0] = 0.0;
+		np.maxSliders[0] = 300.0;
+		np.clampMins[0] = true;
+		np.help = "Frees the model's GPU memory once Active has been off this long (0 = keep it loaded). Turning "
+			"Active on loads it again: a few seconds with a cached TensorRT engine, minutes the first time. "
+			"Only counts while the node cooks; the wrappers and demos also pulse Unload for a model that isn't cooking.";
+		check(manager->appendFloat(np));
+	}
+	{
 		OP_NumericParameter np("Scalarinput");
 		np.label = "Scalar Input";
 		np.page = "ONNX";
@@ -2647,6 +2711,8 @@ void OnnxTOP::pulsePressed(const char* name, void*)
 {
 	if (!strcmp(name, "Reload"))
 		myForceReload = true;
+	else if (!strcmp(name, "Unload"))
+		unloadModel();
 	else if (!strcmp(name, "Resetstate"))
 		myResetState = true;
 }

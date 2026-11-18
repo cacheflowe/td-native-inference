@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Models unload when they aren't in use.** OnnxTOP frees a model's GPU memory once **Active** has
+  been off for **Unload After** seconds (default 30, 0 = never); turning Active on loads it again
+  (about 17 s for DAViD's large model, from the cached TensorRT engine). **Unload** (a pulse) does it
+  now. The wrappers (and a nested person detector) and VisionDemo's model toggles trigger it too,
+  since a model that doesn't cook has no timer of its own. Both parameters are on every ONNX
+  wrapper's Model page.
 - **Depth Clean** (`DepthClean.tox`): fills the holes, IR shadows and noise in a depth camera's own
   depth map using its RGB. Two inputs (RGB, then depth aligned to the color; any camera, any depth
   units, 0 = no reading); TOP 1 is the cleaned depth at the RGB's resolution in the depth's units.

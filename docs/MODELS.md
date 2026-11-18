@@ -40,7 +40,9 @@ and `t<id>_<joint>_wx/_wy/_wz` channels.
 
 ## Shared parameters
 
-- **Model** page: **Active**, the handful of settings that matter for that model, and **Reload**.
+- **Model** page: **Active**, the handful of settings that matter for that model, **Reload**, and on
+  the ONNX models **Unload After** / **Unload** (the GPU memory comes back once a model has been off
+  for that long).
 - **Tracking** page: how detections become stable tracks. **Confidence Threshold** (ignore
   weaker detections), **Track Loss Frames** (how long a lost track is held), **Output Smoothing**
   (0 = raw), plus model-specific settings.

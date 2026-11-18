@@ -39,6 +39,25 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
       DAViD's outputs) and a private RelightDemo; models / components / demos in three folders.
 - [ ] **Next release (v0.6.0):** NeuFlow, the Relight component and the folder move are unreleased;
       follow docs/RELEASING.md (the package test also covers MixamoPuppet's fresh-process check).
+- [ ] **Unload models when they aren't in use** (Nov 18): OnnxTOP kept a model's GPU memory after
+      Active went off. OnnxTOP has `Unload After (s)` (default 30, 0 = never) and an `Unload` pulse;
+      wrappers expose both and pulse Unload (inference and a nested `detector`) from a watcher
+      (`unload_watch`) and VisionDemo's `model_controls`, since an off model doesn't cook. Not for the
+      MediaPipe nodes (CPU). Works in VisionDemo (Nov 18, 6 s delay; check with `nvidia-smi`, since the
+      `loaded` info channel goes stale while a wrapper isn't cooking):
+      - [x] Rebuilt VisionDemo / AudioDemo (`DEMO = True`, `WRAPPERS = False`) on the new `OnnxTOP.dll`.
+      - [x] On then off frees the memory after the delay: DAViD multi-task ~1000 MB, Holistic GPU ~350
+            (its nested detector too), NeuFlow ~140, Yolo26Pose ~300. The first run missed models that
+            didn't cook and nested detectors; fixed.
+      - [x] Off then on within the delay keeps the session (no drop, no reload).
+      - [x] Off while loading: cancelled and unloaded cleanly, no stall.
+      - [x] Reload after unload works; DAViD multi-task takes ~17 s from the cached TensorRT engine.
+      - [x] The `Unload` pulse reaches a node whose COMP isn't cooking.
+      - [x] Rebuilt the 18 OnnxTOP wrappers (`NAMES` in batches of 3-4) so `tox/*.tox` have Unload After /
+            Unload and `unload_watch`; the lab test passes on all.
+      - [x] Standalone wrapper (cooking on): Active off unloads after the delay (DAViD Matte ~400 MB).
+      - [ ] RVM: its recurrent state after a reload; Auto provider off during the CUDA -> TensorRT upgrade.
+      - [ ] Decide the default delay (30 s is a guess; reloads are 5-20 s); a MediaPipe equivalent if RAM matters.
 
 ## Speed
 

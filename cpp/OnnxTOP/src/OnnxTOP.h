@@ -15,6 +15,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -63,6 +64,9 @@ private:
 	// hand and face models; they land in myCompanions in the same order.
 	void		manageLoading(const EngineConfig& desired, const std::vector<std::string>& companions);
 	bool		sameModelConfig(const EngineConfig& a, const EngineConfig& b);
+	// Frees the model and its GPU memory (a load in progress is cancelled); the next cook with Active on
+	// loads it again (a cached TensorRT engine takes seconds). Main thread.
+	void		unloadModel();
 	void		loadEngines(EngineConfig cfg, std::vector<std::string> companions);		// loader thread
 	int			buildTrtEngine(const EngineConfig& cfg, bool background, std::string& message);
 	bool		publishEngine(std::unique_ptr<OnnxEngine> engine, const std::string& warning,
@@ -110,6 +114,9 @@ private:
 	EngineConfig				myRequestedConfig;
 	bool						myHasRequested = false;
 	bool						myForceReload = false;
+	bool						myUnloaded = false;		// freed by unloadModel; not reloaded until Active is on
+	bool						myIdle = false;			// Active has been off since myIdleSince
+	std::chrono::steady_clock::time_point	myIdleSince;
 	std::unique_ptr<OnnxEngine>	myEngine;		// main thread only
 	std::vector<std::unique_ptr<OnnxEngine>>	myCompanions;		// main thread only
 	std::vector<std::unique_ptr<OnnxEngine>>	myNextCompanions;	// with myNextEngine

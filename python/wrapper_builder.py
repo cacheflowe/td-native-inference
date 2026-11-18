@@ -51,6 +51,20 @@ DEBUG_KEYPOINTS = 'tox/shared/DebugKeypoints.tox'
 KINDS = ('landmarks', 'boxes', 'image', 'classifier', 'transcript', 'scores', 'speech')
 ALWAYS_EXPOSED = ('Active',)
 ALWAYS_PULSES = ('Reload',)
+# OnnxTOP only (MediaPipe's nodes keep no GPU memory): free the model while Active is off.
+UNLOAD_PARS = ('Unloadafter', 'Unload')
+# Active going off starts the countdown; when it ends and Active is still off, pulse Unload. The node
+# counts too, but only while it cooks, and an idle wrapper often doesn't.
+UNLOAD_WATCH = ("def onValueChange(par, prev):\n"
+	"\tdelay = parent().par.Unloadafter.eval()\n"
+	"\tif not par.eval() and delay > 0:\n"
+	"\t\trun('args[0].module.sleep()', me, delayMilliSeconds=int(delay * 1000))\n"
+	"def sleep():\n"
+	"\tif not parent().par.Active.eval():\n"
+	"\t\tfor name in ('inference', 'detector'):\t# a nested person detector holds a model too\n"
+	"\t\t\tnode = parent().op(name)\n"
+	"\t\t\tif node is not None and hasattr(node.par, 'Unload'):\n"
+	"\t\t\t\tnode.par.Unload.pulse()\n")
 
 # Columns 200 apart, in data-flow order. Bands, top to bottom: the input-image lane
 # (null_passthrough -> passthrough, nothing else at that height), the inference/visualizer band,
@@ -68,7 +82,7 @@ LAYOUT = {
 	'bones': (6, -380), 'out_bones': (7, -380),
 	'inference_stats': (5, -540), 'channels': (6, -540), 'out_channels': (7, -540),
 	'track_values': (4, -680), 'track_channels': (5, -680), 'tracker_stats': (4, -820),
-	'component': (0, -100), 'model_pulses': (1, -100), 'local': (0, -260),
+	'component': (0, -100), 'model_pulses': (1, -100), 'unload_watch': (1, -180), 'local': (0, -260),
 	'tracker/in_info': (0, 0), 'tracker/script_tracks': (1, 0), 'tracker/out_tracks': (3, 0),
 	'tracker/script_joints': (2, -150), 'tracker/out_joints': (3, -150),
 	'tracker/script_bones': (2, -300), 'tracker/out_bones': (3, -300),
@@ -678,7 +692,7 @@ def _build_depth_stack(comp, spec):
 def _build_pages(comp, spec, plugin, tracker):
 	model_page = comp.appendCustomPage('Model')
 	pulses = []
-	for name in (*ALWAYS_EXPOSED, *spec.get('model', ()), *ALWAYS_PULSES):
+	for name in (*ALWAYS_EXPOSED, *spec.get('model', ()), *ALWAYS_PULSES, *(n for n in UNLOAD_PARS if hasattr(plugin.par, n))):
 		_, found = _expose(model_page, plugin, name)
 		pulses += found
 	for name, choices in spec.get('menus', {}).items():
@@ -724,6 +738,12 @@ def _build_pages(comp, spec, plugin, tracker):
 		forward.par.valuechange = False
 		forward.par.onpulse = True
 		forward.text = "def onPulse(par):\n\tparent().op('inference').par[par.name].pulse()\n"
+	if hasattr(comp.par, 'Unloadafter'):
+		watch = comp.create('parameterexecuteDAT', 'unload_watch')
+		watch.par.op = '..'
+		watch.par.pars = 'Active'
+		watch.par.onpulse = False
+		watch.text = UNLOAD_WATCH
 
 
 def _layout(comp, spec):
@@ -1368,7 +1388,20 @@ def _model_gate(demo, controls):
 	gate.par.pars = ' '.join(controls)
 	gate.par.onpulse = False
 	gate.text = (f'NAMES = {controls!r}\n'
-		'def onValueChange(par, prev):\n\tpar.owner.op(NAMES[par.name]).allowCooking = bool(par.eval())\n'
+		'def onValueChange(par, prev):\n'
+		'\twrapper = par.owner.op(NAMES[par.name])\n'
+		'\twrapper.allowCooking = bool(par.eval())\n'
+		'\t# A wrapper that is off doesn\'t cook, so its model\'s own idle timer never runs: free it from here.\n'
+		'\tinference = wrapper.op(\'inference\')\n'
+		'\tdelay = inference.par.Unloadafter.eval() if hasattr(inference.par, \'Unloadafter\') else 0\n'
+		'\tif not par.eval() and delay > 0:\n'
+		'\t\trun("args[0].module.sleep(args[1])", me, par.name, delayMilliSeconds=int(delay * 1000))\n'
+		'def sleep(control):\n'
+		'\tif not parent().par[control].eval():\n'
+		'\t\tfor name in (\'inference\', \'detector\'):\t# a nested person detector holds a model too\n'
+		'\t\t\tnode = parent().op(NAMES[control]).op(name)\n'
+		'\t\t\tif node is not None and hasattr(node.par, \'Unload\'):\n'
+		'\t\t\t\tnode.par.Unload.pulse()\n'
 		'def apply():\n\tfor control, name in NAMES.items():\n'
 		'\t\tparent().op(name).allowCooking = bool(parent().par[control].eval())\n')
 	startup = demo.create('executeDAT', 'initialize')

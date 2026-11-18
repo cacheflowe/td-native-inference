@@ -58,7 +58,10 @@ Parameters sit on pages of the tox:
 - **Performance**: read-only timings in milliseconds, see [section 4](#4-speed-and-latency).
 - **About**: the package version. A tox expects the plugins of its own version.
 
-**Active** off stops the model and clears its output. **Reload** (a pulse) retries after a
+**Active** off stops the model and clears its output; after **Unload After** seconds (30 by
+default, 0 = never) the ONNX models also free their GPU memory, and turning **Active** back on
+loads them again (a few seconds once the TensorRT engine is cached). **Unload** (a pulse) does it
+now. **Reload** (a pulse) retries after a
 failure, for example after you put a missing model file in place, or reloads the model in place.
 **Debug Overlay** off makes TOP 1 transparent and skips the drawing work; do this in a show if you
 only use the tables or channels.
