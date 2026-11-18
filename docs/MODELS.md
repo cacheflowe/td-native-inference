@@ -562,6 +562,119 @@ TOP 1 is the relit image; CHOP 1 the lights' positions and aims (`light1_x`, `li
 small GLSL passes; the cost is in the models feeding it (DAViD Depth + Normals + Matte about 21 ms
 of GPU, MediaPipe Hands on the CPU).
 
+### Latency Loop (`components/LatencyLoop.tox`)
+Measures how long the projector-to-camera path takes, for projecting onto moving people and
+objects. It flashes its output white, watches a camera for the flash and counts the frames in
+between, many times. The result is render + display (projector) lag + camera capture. Add the
+tracking delay (inference) on top to get the lead that prediction needs.
+
+Inputs:
+1. the camera that sees the projection;
+2. optional: content to show between flashes (black without it).
+
+Send TOP 1 to the projector's Window COMP and point the camera at the projected area.
+
+- **Latency page:** **Start** / **Stop**, **Samples**, **Threshold** (the brightness jump, 0 to 1,
+  that counts as seeing the flash; watch **Camera Level** on the Results page to pick it),
+  **Gap Min / Max** (random dark frames between flashes, so flashes land at every phase of the
+  camera's frames), **Timeout** (frames before a flash counts as missed), **Flash Level**,
+  **Resolution**, **Camera ROI** (the part of the camera image to watch, 0 to 1) and
+  **Results File** (JSON, relative to the project folder; empty to skip).
+- **Results page:** status, live camera level, count, misses, median / min / max in ms and the
+  median in frames.
+
+DAT 1 lists each sample (frames, ms). The shortest possible reading is 1 frame: the flash is
+decided at the start of a frame and drawn in it.
+
+### Lead Check (`components/LeadCheck.tox`)
+Predicts one tracked joint ahead in time and draws it next to the raw position, to tune the lead
+that hides latency. Project the overlay onto the person, move, and raise **Lead** until the
+green dot stays on the joint. The input is any tracker's joints DAT (`track_id, name, x, y, ...`,
+e.g. MediaPipe Pose's or Hands' DAT 2).
+
+The joint is smoothed with the same One Euro filter as the Puppet CHOP, and its smoothed speed
+carries it forward. Inference results arrive slower than TouchDesigner's frames, so the filter
+steps only on a new value. The prediction runs from that value's arrival to now + **Lead**.
+
+- **Lead page:** **Joint** (its name in the DAT), **Track ID** (0 = the lowest), **Lead (ms)**,
+  **Count From Measurement** (also cover the time since the last result; on unless the source
+  updates every frame), **Cutoff**, **Speed Coefficient** and **Slope Cutoff** (One Euro, as in
+  the Puppet CHOP), **Max Speed** (caps the speed the lead uses, in image widths / heights per
+  second, to limit overshoot when a movement stops; 0 = off).
+- **Overlay page:** **Dot Size**, **Show Raw** (red ring), **Show Predicted** (green dot),
+  **Show Line**, **Resolution**.
+
+CHOP 1: `raw_x/y`, `smooth_x/y`, the predicted `x/y`, `vx/vy`, `speed`, `age_ms` (time since the
+last result) and `valid`. TOP 1: the dots on black, in the input image's 0-to-1 space (map it onto
+the projector with a Corner Pin or Stoner, or put the camera next to the projector). To view it
+over the camera, composite with Add.
+
+Start the lead at Latency Loop's median plus the tracker's own delay, then adjust it by eye.
+
+### Projector Map (`components/ProjectorMap.tox`)
+Puts a person's silhouette (any matte) into a projector's pixels, to project content onto them.
+It finds where the camera sees the projector, then warps the matte into projector space and draws
+content through it with an eroded, feathered edge. A single homography, so it is exact for one
+plane (a wall) and approximate for a body: the content sticks to the silhouette, not to the 3D
+surface.
+
+Inputs:
+1. the camera that sees the projection;
+2. the matte, white = person (RVM, MODNet, DAViD Matte or MediaPipe Segment; the red channel);
+3. optional: content. By default it is drawn in projector space; **Content** = Input 3 (camera space)
+   warps it with the calibration, to project something made on the camera image (a tracker's
+   overlay, joint dots) so it lands on the real thing.
+
+Send TOP 1 to the projector's Window COMP, at the projector's resolution.
+
+- **Map page:** **Output** (Content × Silhouette, Silhouette, Outline, Camera, Test Grid, Content
+  with no silhouette), **Content** (Input 3 in projector or camera space, White, Stripes, Rainbow),
+  **Projector Resolution**, **Matte Black / White**
+  (the range of the matte that fades from nothing to full), **Erode** (pulls the edge in, in
+  projector pixels, so light doesn't spill past the body) and **Feather** (softens the edge; also the
+  Outline's width).
+- **Calibration page:** **Calibrate** projects a grid of dots one at a time, finds each in the camera
+  and solves the homography (shown as Status, **Error** in projector pixels and **Dots Found**; 1 to 3 px
+  is good, since the camera is lower resolution). **Dots Across / Down**, **Margin**, **Dot Size**,
+  **Settle (ms)** (how long to wait after each dot: at least Latency Loop's median, or the dots
+  smear) and **Min Contrast**. Dots the camera can't see, or only partly, are skipped (6 are needed),
+  and ones that disagree with the rest are dropped. DAT `points` lists them. **Verify** projects 9
+  held-out dots the solve never used and reports the mean and worst error in projector pixels; it
+  checks the calibration without the feedback that **Output** = Camera has (the camera sees its
+  own image).
+
+To calibrate: point the camera at where the projector lands, dim the room, set **Output** to Test
+Grid to check the projector's own framing, then press **Calibrate**. Check the result with
+**Output** = Camera: the camera image drawn through the solution should line up with the real
+scene. If the dots can't be found, use **Source** = Manual Corners instead: **Corner 1 to 4** are
+where the camera image's corners (bottom left, bottom right, top right, top left) land in the
+projector (0 to 1); nudge them with **Output** = Camera until the projected camera image lines up
+with the scene.
+
+The camera, the matte and the content run at the camera's frame rate, so the silhouette trails a
+moving body by the whole path's latency (measure it with Latency Loop).
+
+### Capsule Matte (`components/CapsuleMatte.tox`)
+Draws a person as tapered capsules between tracked joints, as a matte: a steadier, hole-free
+alternative to a segmentation matte (YOLO26 Seg, RVM) for Projector Map's matte input. It uses
+the same smoothed joints a puppet uses, so noise in the mask follows the tracker's, not the
+segmentation model's. The input is the joints DAT of MediaPipe Holistic GPU (`pose_*` plus
+`left_hand_*` / `right_hand_*`) or MediaPipe Pose.
+
+TOP 1: the matte in the camera image's uv space (white = body), at **Resolution**, which should
+be the camera's size so the capsules stay round.
+
+- **Capsules page:** **Track ID** (0 = the lowest), **Min Confidence** (a joint below it, and the
+  capsules that need it, are left out), **Body Scale**, **Torso Width**, **Limb Width**, **Head
+  Size**, **Hand Detail** (Holistic's hand joints give a palm and five fingers; off, or without a
+  hand track, one blob from the wrist), **Feather (px)**, and **Size Smoothing**.
+- **Body size:** every radius follows one size, the shoulder width, or 0.8 × the torso length
+  when that is larger (shoulders collapse when the body turns side-on). It is smoothed, so the
+  matte doesn't breathe with the tracking.
+- **Limits:** a body is drawn only from joints the tracker reports; the capsules are 2D, so they
+  don't know about depth or a turned torso. Projector Map warps them through the same
+  calibration as any matte.
+
 ## Demos
 
 Demos wire models and components together to show what they can do. They're in `tox/demos/`.

@@ -239,6 +239,10 @@ demos in `tox/demos/`.
 | `MediaPipeTextToSpeech` | text or DAT | Speaks text in 54 voices | CHOP 1 audio; TOP 1 caption; DAT `lines` |
 | `MediaPipeSoundClassifier` | audio CHOP | Recognizes 521 sound classes | CHOP 1 scores, CHOP 2 `<name>_onset`; DAT `top` |
 | `components/Relight` | DAViD Depth + Normals + Matte's TOPs, optional hands tracks | Relights a person with two point / spot lights that can follow the hands | TOP 1 relit, CHOP 1 light positions |
+| `components/LatencyLoop` | the camera that sees a projector, optional content | Measures projector-to-camera latency with a flash loop | TOP 1 for the projector, DAT results |
+| `components/LeadCheck` | a tracker's joints DAT | Predicts one joint ahead and draws it beside the raw position | TOP 1 dots, CHOP 1 positions and speed |
+| `components/ProjectorMap` | camera, matte, optional content | Calibrates camera to projector and draws content on the silhouette | TOP 1 for the projector |
+| `components/CapsuleMatte` | a Holistic / Pose joints DAT | Draws the body as capsules between the joints | TOP 1 matte |
 | `demos/VisionDemo` | video | All video models on toggles | TOP 1 composited overlays |
 | `demos/AudioDemo` | audio, optional DAT | The three audio models on toggles | TOP 1, CHOP 1, DATs |
 

@@ -90,6 +90,10 @@ Components build on the models' outputs; they have no model inside (`tox/compone
 | **Mixamo Puppet** | video + a tracks DAT (Holistic or Pose) | Poses a Mixamo character and draws it over the video or on its own. You supply the character (FBX); see the [manual](docs/MANUAL.md#puppets). |
 | **Hands Geometry** | MediaPipe Hands' joints DAT | Draws tracked hands as 3D spheres and cylinders (a POP plus a render). Needs TouchDesigner 2025 or later. |
 | **Relight** | DAViD Depth + Normals + Matte's TOPs, optionally MediaPipe Hands' tracks DAT | Relights a person with two colored point lights or spotlights that can follow their hands (PBR or simple shading). See [docs/MODELS.md](docs/MODELS.md#relight-componentsrelighttox). |
+| **Latency Loop** | the camera that sees a projector | Measures projector-to-camera latency by flashing the output and timing the camera's reaction. See [docs/MODELS.md](docs/MODELS.md#latency-loop-componentslatencylooptox). |
+| **Lead Check** | any tracker's joints DAT | Predicts a joint ahead by a lead in milliseconds and draws it next to the raw position, to tune the lead that hides latency. See [docs/MODELS.md](docs/MODELS.md#lead-check-componentsleadchecktox). |
+| **Projector Map** | a camera, a matte (RVM, MODNet...), optional content | Calibrates camera to projector with projected dots and draws content onto a person's silhouette. See [docs/MODELS.md](docs/MODELS.md#projector-map-componentsprojectormaptox). |
+| **Capsule Matte** | MediaPipe Holistic GPU's (or Pose's) joints DAT | Draws a person as capsules between the joints, as a steady matte for Projector Map. See [docs/MODELS.md](docs/MODELS.md#capsule-matte-componentscapsulemattetox). |
 
 ## Demos
 

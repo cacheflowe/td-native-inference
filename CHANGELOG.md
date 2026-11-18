@@ -8,6 +8,16 @@
   now. The wrappers (and a nested person detector) and VisionDemo's model toggles trigger it too,
   since a model that doesn't cook has no timer of its own. Both parameters are on every ONNX
   wrapper's Model page.
+- **Capsule Matte** (`components/CapsuleMatte.tox`): draws a person as tapered capsules between the
+  joints of MediaPipe Holistic GPU (or Pose), with a palm and fingers from the hand joints, as a
+  matte for Projector Map. Steadier than a segmentation matte. Projector Map also gained **Verify**
+  (held-out dots, no feedback) and **Content = Input 3 (camera space)**.
+- **Projector Map** (`components/ProjectorMap.tox`), **Latency Loop** and **Lead Check**: the
+  building blocks for projecting onto a moving person. Projector Map calibrates camera to projector
+  by projecting dots (homography, error in px) and draws content through a matte's silhouette at the
+  projector's resolution (erode, feather, outline, a manual-corner fallback); Latency Loop times the
+  projector-to-camera path with a flash loop; Lead Check tunes a prediction lead on one joint.
+  See `docs/MODELS.md` (Components).
 - **Depth Clean** (`DepthClean.tox`): fills the holes, IR shadows and noise in a depth camera's own
   depth map using its RGB. Two inputs (RGB, then depth aligned to the color; any camera, any depth
   units, 0 = no reading); TOP 1 is the cleaned depth at the RGB's resolution in the depth's units.

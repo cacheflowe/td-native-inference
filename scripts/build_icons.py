@@ -43,6 +43,10 @@ DEMOS = {
 	'Relight': ('Relight', 'DAViD + Hands outputs'),	# hand-built components and demos (export_hand_built.py) too
 	'MixamoPuppet': ('Mixamo Puppet', 'Pose tracking'),
 	'HandsGeometry': ('Hands Geometry', 'MediaPipe Hands'),
+	'LatencyLoop': ('Latency Loop', 'Projector + camera'),
+	'LeadCheck': ('Lead Check', 'Any joints DAT'),
+	'ProjectorMap': ('Projector Map', 'Camera + matte'),
+	'CapsuleMatte': ('Capsule Matte', 'Holistic / Pose joints'),
 }
 BROWSERS = [
 	Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe'),
