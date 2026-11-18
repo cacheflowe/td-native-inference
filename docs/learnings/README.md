@@ -13,3 +13,4 @@ moved here (Nov 6, 2026); file paths inside them are haxlib's layout at the time
 | [debug-comp-camera-aspect.md](debug-comp-camera-aspect.md) | Why landmark overlays distorted on non-square canvases, and the fixes |
 | [trt-multi-output-bug.md](trt-multi-output-bug.md) | TensorRT multi-output list-wrapping bug in a worker-thread handoff |
 | [td-cook-performance.md](td-cook-performance.md) | Keeping TD's cook light: GPU readback stalls, Wait for Result, CHOP sample rates, cooking flags, Python-in-TD limits |
+| [td-crashes.md](td-crashes.md) | TD crashes seen with the plugins, the delete-a-running-wrapper crash and its workaround, how to catch the next one |

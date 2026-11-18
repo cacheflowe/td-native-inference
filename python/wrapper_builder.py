@@ -173,6 +173,23 @@ def refresh_cooking(comp, frames=5):
 	td.run('args[0].allowCooking = False', comp, delayFrames=frames)
 
 
+def remove(comp, delay_frames=60):
+	"""Delete a model wrapper without taking TD down. Deleting a running ONNX wrapper that feeds a live
+	network crashed TD (docs/learnings/td-crashes.md); one that is disconnected, off and unloaded
+	deletes fine. So: cut its outputs, switch it off, unload its models, stop its cooking, and delete it
+	a few frames later (run from a script or the textport: td.run needs the frames to pass)."""
+	for connector in comp.outputConnectors:
+		connector.disconnect()
+	if hasattr(comp.par, 'Active') and not comp.par.Active.expr:
+		comp.par.Active = False
+	for name in ('inference', 'detector'):
+		node = comp.op(name)
+		if node is not None and hasattr(node.par, 'Unload'):
+			node.par.Unload.pulse()
+	comp.allowCooking = False
+	td.run('args[0].destroy()', comp, delayFrames=delay_frames)
+
+
 def _connect(destination, *sources):
 	for index, source in enumerate(sources):
 		destination.inputConnectors[index].connect(source.outputConnectors[0])

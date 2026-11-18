@@ -300,6 +300,21 @@ namespace
 		return fs::path(buf).parent_path();
 	}
 
+	// Appends one line to onnxtop-lifecycle.log next to the plugin DLL (create / destroy / unload stages).
+	// A crash inside one of those leaves the last stage reached as the file's last line.
+	void lifecycleLog(const void* node, const char* what)
+	{
+		SYSTEMTIME t;
+		GetLocalTime(&t);
+		std::wstring path = (pluginDir() / "onnxtop-lifecycle.log").wstring();
+		if (FILE* f = _wfopen(path.c_str(), L"a"))
+		{
+			fprintf(f, "%02d:%02d:%02d.%03d node %p thread %lu: %s\n", t.wHour, t.wMinute, t.wSecond, t.wMilliseconds,
+				node, GetCurrentThreadId(), what);
+			fclose(f);
+		}
+	}
+
 	// TD resolves a relative file parameter against the project folder. When that file doesn't
 	// exist, fall back to the same relative path under the plugin's folder, so a tox can preset
 	// "models/..." and work from an installed Plugins/<package>/models/ folder.
@@ -360,20 +375,24 @@ OnnxTOP::OnnxTOP(const OP_NodeInfo*, TOP_Context* context) :
 	cudaEventCreate(&myRunStart);
 	cudaEventCreate(&myRunDone);
 	cudaEventCreateWithFlags(&myHoloCopied, cudaEventDisableTiming);
+	lifecycleLog(this, "create");
 }
 
 OnnxTOP::~OnnxTOP()
 {
+	lifecycleLog(this, "destroy: start");
 	// Kills an in-progress out-of-process TensorRT build. An in-process ORT session load
 	// can't be interrupted, but with a cached engine that's only a few seconds.
 	myCancelLoad = true;
 	if (myLoader.joinable())
 		myLoader.join();
+	lifecycleLog(this, "destroy: loader joined");
 	stopHolisticWorker();
 	if (myStream)
 		cudaStreamSynchronize(myStream);
 	if (myIoStream)
 		cudaStreamSynchronize(myIoStream);
+	lifecycleLog(this, "destroy: streams synchronized");
 	if (myHoloFrame)
 		cudaFreeArray(myHoloFrame);
 	if (myHoloCopied)
@@ -384,10 +403,12 @@ OnnxTOP::~OnnxTOP()
 		cudaEventDestroy(myRunStart);
 	if (myRunDone)
 		cudaEventDestroy(myRunDone);
+	lifecycleLog(this, "destroy: releasing the ONNX session");
 	myEngine.reset();
 	myNextEngine.reset();
 	myCompanions.clear();
 	myNextCompanions.clear();
+	lifecycleLog(this, "destroy: session released");
 	if (myHostStage)
 		cudaFreeHost(myHostStage);
 	if (myDevSheetBoxes)
@@ -409,6 +430,7 @@ OnnxTOP::~OnnxTOP()
 			cudaEventDestroy(e);
 	if (myStream)
 		cudaStreamDestroy(myStream);
+	lifecycleLog(this, "destroy: done");
 }
 
 void OnnxTOP::getGeneralInfo(TOP_GeneralInfo* ginfo, const OP_Inputs*, void*)
@@ -484,6 +506,7 @@ void OnnxTOP::manageLoading(const EngineConfig& desired, const std::vector<std::
 
 void OnnxTOP::unloadModel()
 {
+	lifecycleLog(this, "unload: start");
 	myCancelLoad = true;
 	if (myLoader.joinable())
 		myLoader.join();
@@ -505,6 +528,7 @@ void OnnxTOP::unloadModel()
 	myForceReload = false;
 	myUnloaded = true;
 	myLoadState = LoadState::Idle;
+	lifecycleLog(this, "unload: done");
 }
 
 bool OnnxTOP::sameModelConfig(const EngineConfig& a, const EngineConfig& b)

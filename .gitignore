@@ -20,6 +20,7 @@ cpp/**/build/
 plugins/*.dll
 plugins/*.exe
 plugins/*.old-*
+plugins/*.log
 
 # Models (large; see models/README.md) and TensorRT engine caches
 models/**/*.onnx

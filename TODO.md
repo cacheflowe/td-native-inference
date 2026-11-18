@@ -37,6 +37,24 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
       TOP's format, cut detection, smoothing and a noise floor. Unreleased.
 - [x] **Relight** (Nov 13-14): the Relight component (two point / spot lights following the hands on
       DAViD's outputs) and a private RelightDemo; models / components / demos in three folders.
+- [ ] **Fix the TD crashes around our nodes** (Nov 18). Write-up and evidence:
+      [docs/learnings/td-crashes.md](docs/learnings/td-crashes.md). The one that reproduces: deleting a
+      running OnnxTOP wrapper that feeds a live network (RVM wired to Projector Map) takes TD down,
+      on the unload build and on the Nov 17 build, so it predates the unload work. A scratch wrapper
+      with no consumer, or the same one disconnected / off / unloaded, deletes fine. Workaround:
+      `wrapper_builder.remove(comp)`.
+      - [x] Documented: reproduction table, other crashes on record, how to capture the next one.
+      - [x] Added `plugins/onnxtop-lifecycle.log` (create, each destroy stage, unload) and
+            `scripts/enable_td_dumps.ps1` (WER full dumps, needs an elevated shell).
+      - [ ] Restart TD on the new `OnnxTOP.dll`, enable dumps (run `enable_td_dumps.ps1` as admin), and
+            reproduce: delete a running RVM wired to a GLSL TOP. Read the last lifecycle log line:
+            "destroy: ..." = our teardown, "destroy: done" = TD after it.
+      - [ ] Fix from what the log shows (see "What to fix" in the write-up): teardown order,
+            `cudaDeviceSynchronize()` before freeing, the plain CUDA provider's release with RVM's state.
+      - [ ] Minimal repro in the wrapper lab so the fix has a test, and check `remove()` end to end.
+      - [ ] Unexplained exits (Nov 12 twice, Nov 17 three times in TensorRT builds, Nov 18 11:08
+            `ucrtbase` `0xc0000409`): the dumps above should catch the next one. This machine has two
+            unstable P-cores, so some may be hardware.
 - [ ] **Next release (v0.6.0):** NeuFlow, the Relight component and the folder move are unreleased;
       follow docs/RELEASING.md (the package test also covers MixamoPuppet's fresh-process check).
 - [ ] **Unload models when they aren't in use** (Nov 18): OnnxTOP kept a model's GPU memory after
@@ -550,9 +568,6 @@ user, Nov 14). Worth borrowing:
       installs. Today it's `trt_cache/` next to each model.
 - [ ] CI build (GitHub Actions, CUDA toolkit).
 - [ ] haxlib side: point its scripts at this repo's Python or keep a copy; remove its `cpp/`.
-- [ ] TD exits silently now and then (twice on Nov 12, no dump; Windows logged `RADAR_PRE_LEAK_64`).
-      Not reproduced. This dev machine has two unstable P-cores, so random crashes here can be
-      hardware.
 - [ ] The full wrapper lab sometimes misses a MediaPipe wrapper that passes alone (Sound
       Classifier earlier, Hands on Nov 13: no hand in 1200 frames, no errors). Lab ordering or a
       MediaPipe graph not starting after the wrapper before it; retry once before failing?
