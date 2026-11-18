@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **`fetch_models.ps1` downloads NeuFlow v2** (42 MB, checksum-verified; `-SkipNeuFlow`) when
+  `models\onnx\neuflow\` is missing. The release zip already has it, so only a source checkout
+  (where `.onnx` files are gitignored) needed it.
 - **Depth Anything 3** (`DepthAnything3.tox`): relative depth (near = bright) from the newer Depth
   Anything (Base, Apache-2.0): crisper edges and more believable structure than V2. 413 MB, so it's
   downloaded by `fetch_models.cmd` (`-SkipDepthAnything3`); its first TensorRT engine build takes

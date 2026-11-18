@@ -6,11 +6,12 @@
 #   DAViD (DAViDNormals / Matte / Human)           MIT; left out of the zip for size; asks first. ~2.3 GB.
 #   DepthART (DepthART)                             Non-commercial weights (trained on CC BY-NC output); asks first. ~24 MB.
 #   Depth Anything 3 Base (DepthAnything3)          Apache-2.0; left out of the zip for size. ~413 MB.
+#   NeuFlow v2 (NeuFlowV2)                          Apache-2.0; already in the zip, so only a source checkout downloads it. ~42 MB.
 #
 # Every file is pinned (a Hugging Face revision, or DAViD's release URL) and checked by SHA-256: the same files the toxes
 # were tested with. Files already present are skipped. No Python needed.
 #
-#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-AcceptDepthArt] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid] [-SkipDepthArt] [-SkipDepthAnything3]
+#   powershell -ExecutionPolicy Bypass -File fetch_models.ps1 [-AcceptAgpl] [-AcceptGpl] [-AcceptDavid] [-AcceptDepthArt] [-SkipYolo] [-SkipRvm] [-SkipKokoro] [-SkipDavid] [-SkipDepthArt] [-SkipDepthAnything3] [-SkipNeuFlow]
 param(
 	[switch] $AcceptAgpl,
 	[switch] $AcceptGpl,
@@ -21,7 +22,8 @@ param(
 	[switch] $SkipDavid,
 	[switch] $AcceptDepthArt,
 	[switch] $SkipDepthArt,
-	[switch] $SkipDepthAnything3
+	[switch] $SkipDepthAnything3,
+	[switch] $SkipNeuFlow
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'	# Invoke-WebRequest's progress bar slows downloads a lot
@@ -80,6 +82,12 @@ $da3 = @(
 	   sha256 = '09de4dcff3fefe48b04fedbf146151f3339e6115416a72bf9b36dee3aafd03bd' }
 )
 
+$neuflow = @(
+	@{ path = 'onnx\neuflow\neuflow_mixed.onnx'; size = 42202229
+	   url = 'https://github.com/ibaiGorordo/ONNX-NeuFlowV2-Optical-Flow/releases/download/0.1.0/neuflow_mixed.onnx'
+	   sha256 = '7a07929423133f9267e33aec322873ef1dfcb17224020f30c794e569d353624d' }
+)
+
 function Get-Sha256([string] $path) {
 	# .NET directly: Get-FileHash can be missing when Windows PowerShell inherits PowerShell 7's module path.
 	$stream = [IO.File]::OpenRead($path)
@@ -112,7 +120,8 @@ $missingKokoro = if ($SkipKokoro) { @() } else { Get-Missing $kokoro }
 $missingDavid = if ($SkipDavid) { @() } else { Get-Missing $david }
 $missingDepthArt = if ($SkipDepthArt) { @() } else { Get-Missing $depthart }
 $missingDa3 = if ($SkipDepthAnything3) { @() } else { Get-Missing $da3 }
-if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0 -and $missingDepthArt.Count -eq 0 -and $missingDa3.Count -eq 0) {
+$missingNeuFlow = if ($SkipNeuFlow) { @() } else { Get-Missing $neuflow }
+if ($missingYolo.Count -eq 0 -and $missingRvm.Count -eq 0 -and $missingKokoro.Count -eq 0 -and $missingDavid.Count -eq 0 -and $missingDepthArt.Count -eq 0 -and $missingDa3.Count -eq 0 -and $missingNeuFlow.Count -eq 0) {
 	Write-Host "[fetch_models] All models are present in $models"
 	exit 0
 }
@@ -157,5 +166,9 @@ Treat the weights as non-commercial: personal and research use.
 if ($missingDa3.Count -gt 0) {
 	Write-Host '[fetch_models] Depth Anything 3 Base (ByteDance Seed, onnx-community export, Apache-2.0): 413 MB.'
 	Save-Models $missingDa3
+}
+if ($missingNeuFlow.Count -gt 0) {
+	Write-Host '[fetch_models] NeuFlow v2 optical flow (Apache-2.0, ONNX export by ibaiGorordo): 42 MB. The release zip already has it.'
+	Save-Models $missingNeuFlow
 }
 Write-Host '[fetch_models] Done. The first run of each YOLO, DAViD, DepthART or Depth Anything 3 model builds a TensorRT engine (a few minutes; Depth Anything 3 can take much longer).'
