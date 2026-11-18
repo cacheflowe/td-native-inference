@@ -7,7 +7,8 @@
   units, 0 = no reading); TOP 1 is the cleaned depth at the RGB's resolution in the depth's units.
   Any2Full ViT-S (Apache-2.0, 136 MB, in the zip), about 8 ms with TensorRT. The wrapper builder
   gained a `depth_input` spec key: a second input and a stacking network that feeds one image to
-  the OnnxTOP.
+  the OnnxTOP, and a `depth_smooth` key: Temporal Smoothing and Motion Threshold (a per-pixel,
+  motion-aware feedback blend) that cut the depth's frame-to-frame jitter by about two thirds.
 - **`fetch_models.ps1` downloads NeuFlow v2** (42 MB, checksum-verified; `-SkipNeuFlow`) when
   `models\onnx\neuflow\` is missing. The release zip already has it, so only a source checkout
   (where `.onnx` files are gitignored) needed it.

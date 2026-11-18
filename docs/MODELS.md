@@ -343,6 +343,18 @@ GPU); the first run builds a TensorRT engine (about 5 minutes; until then it run
 Against a larger depth-camera model (CDM) it's close on ordinary scenes and softer on a hand close
 to the lens with most of the depth missing: the fingertips come out ragged.
 
+**Frame-to-frame noise:** the model fits each frame independently and keeps the camera's own
+jitter on the pixels that had a reading, so the result flickers about as much as the raw depth.
+**Temporal Smoothing** (Model page, 0.8) blends each frame with the last result per pixel;
+**Motion Threshold** (3%) lets a pixel that moved by more than that fraction of its depth skip the
+blend, so moving hands and bodies don't trail. On a static scene at 2-4.5 m (RealSense D435, 1080p
+aligned) it cut the per-pixel jitter from about 34 mm to 11 mm (a 0.85 setting; 0.8 is a bit less),
+for well under 1 ms. Settling takes a few frames (at 0.8, about 5 camera frames). With a RealSense
+TOP, turn on its own **Apply Filter** with Spatial and Temporal, Decimation and Hole Filling off, and raise
+**Temporal Smooth Delta** (100) and **Spatial Smooth Delta** (50) from their defaults (20): at
+that range one disparity step is bigger than 20 mm, so the default filter never engages. That
+halves the camera's own jitter before the model; on top of the smoothing it helps a little.
+
 ### MODNet Portrait Matting (`MODNet.tox`)
 Alpha matte of the person in frame (white = person), hair detail included. TOP 1 is the matte at
 the input's resolution; use it as a mask over the input. **Dynamic Size** sets the inference

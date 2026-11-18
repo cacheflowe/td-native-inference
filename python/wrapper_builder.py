@@ -31,6 +31,8 @@ The spec decides what differs:
 	depth_input      image only: a second TOP input (`input2`, a depth image aligned to the RGB, 0 =
 	                 no reading) stacked under the RGB into one image of "stack_size": [width, height]
 	                 per half (_build_depth_stack); the model's ONNX splits the halves (DepthClean)
+	depth_smooth     image only: Temporal Smoothing on a depth result, per pixel and motion-aware
+	                 (_build_depth_smooth)
 Everything not exposed stays preset on the inner nodes.
 """
 
@@ -361,6 +363,8 @@ def _build_visuals(comp, spec):
 	if kind == 'image':
 		overlay = comp.create('resolutionTOP', 'overlay')
 		result = _build_flow(comp) if spec.get('flow') else _remapped(comp, comp.op('inference'), spec.get('remap'), 'remap')
+		if spec.get('depth_smooth'):
+			result = _build_depth_smooth(comp, result)
 		_connect(overlay, result)
 		overlay.par.outputresolution = 'custom'
 		overlay.par.resolutionw.expr = "op('input').width"
@@ -518,6 +522,43 @@ def _build_flow(comp):
 	output.par.connectorder = 3
 	_connect(output, flow_color)
 	return gate
+
+
+DEPTH_SMOOTH_SHADER = '''// Temporal Smoothing for a depth image: blends this frame with the last result (input 2, a Feedback
+// TOP) where the depth barely changed; where it moved by more than uThreshold (relative to the depth)
+// the new frame wins, so motion doesn't trail. No reading (0) passes through.
+uniform vec2 uSmooth;	// x: smoothing (0 = raw), y: motion threshold (fraction of the depth)
+out vec4 fragColor;
+void main()
+{
+	vec4 now = texture(sTD2DInputs[0], vUV.st);
+	vec4 before = texture(sTD2DInputs[1], vUV.st);
+	float move = abs(now.r - before.r) / max(now.r, 1e-4);
+	float keep = (now.r > 0.0 && before.r > 0.0) ? uSmooth.x * (1.0 - smoothstep(uSmooth.y, uSmooth.y * 2.0, move)) : 0.0;
+	fragColor = TDOutputSwizzle(mix(now, before, keep));
+}
+'''
+
+
+def _build_depth_smooth(comp, source):
+	"""`depth_smooth`: Temporal Smoothing (Model page) on a depth result: a Feedback TOP of its own
+	output, blended per pixel by DEPTH_SMOOTH_SHADER."""
+	model = next(page for page in comp.customPages if page.name == 'Model')
+	strength = _page_par(model, 'Float', 'Temporalsmoothing', 'Temporal Smoothing', 0.8,
+		'Blends each new depth with the last result (0 = off, higher = steadier but slower to settle).', 0.0, 0.95)
+	strength.clampMin, strength.clampMax, strength.min, strength.max = True, True, 0.0, 0.99
+	threshold = _page_par(model, 'Float', 'Motionthreshold', 'Motion Threshold', 0.03,
+		'A pixel whose depth changed by more than this fraction skips the smoothing, so moving things keep up.', 0.0, 0.2)
+	threshold.clampMin, threshold.min = True, 0.0
+	feedback = comp.create('feedbackTOP', 'depth_feedback')
+	_connect(feedback, source)
+	feedback.par.top = 'depth_smooth'
+	smooth = _glsl(comp, 'depth_smooth', DEPTH_SMOOTH_SHADER, source)
+	smooth.inputConnectors[1].connect(feedback)
+	smooth.par.vec0name = 'uSmooth'
+	smooth.par.vec0valuex.expr = 'parent().par.Temporalsmoothing'
+	smooth.par.vec0valuey.expr = 'parent().par.Motionthreshold'
+	return smooth
 
 
 def _remapped(comp, source, remap, name):
@@ -697,7 +738,10 @@ def _layout(comp, spec):
 			positions.update({'remap': (2, 320), 'overlay': (3, 320)})
 		if spec.get('depth_input'):
 			positions.update({'input': (0, 250), 'input2': (0, 110), 'stack': (1, 180), 'inference': (2, 180),
-				'detections': (3, 120), 'overlay': (3, 320)})
+				'detections': (3, 120), 'overlay': (4, 320)})
+		if spec.get('depth_smooth'):
+			positions.update({'depth_smooth': (3, 320), 'depth_feedback': (3, 460)})
+			docked = list(docked) + ['depth_smooth_pixel']
 		if spec.get('flow'):
 			positions.update({'flow': (2, 320), 'flow_feedback': (2, 460), 'flow_smooth': (3, 320), 'flow_gate': (4, 320),
 				'flow_color': (4, 460), 'overlay': (5, 200), 'out_color': (7, -700)})

@@ -5,6 +5,7 @@
 	"kind": "image",
 	"demo": false,
 	"depth_input": true,
+	"depth_smooth": true,
 	"stack_size": [924, 518],
 	"preset": {
 		"Model": "models/onnx/depthclean/any2full_vits_518x924.onnx",
