@@ -9,7 +9,7 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
 
 | Path | What |
 |---|---|
-| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/Components`: the hand-built components (Relight); `/project1/Demos`: the hand-built demos (private, see below), one camera in. `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
+| `td-native-inference.toe` | Dev project. `/project1/WrapperLab`: the generated standalone wrappers on a test image (audio wrappers on `audio_source`, a speech clip in `build/`; text to speech on `text_source`). `/project1/VisionDemo` and `/project1/AudioDemo`: the generated workbenches (one toggle per model); `/project1/Components`: the hand-built components (Relight, Projector Map, Capsule Matte, Latency Loop, Lead Check); `/project1/Demos`: the hand-built demos (private, see below), one camera in. `/project1/AudioLab`: MediaPipe Audio CHOP tests and the caption chain (`scripts/lab/build_captions.py`). `/project1/startup` puts `python/` on `sys.path` |
 | `wrappers/<Model>.json` | One spec per model tox: custom OP type, presets, output kind, tracker mode, and the curated parameters the wrapper exposes |
 | `cpp/OnnxTOP/`, `cpp/MediaPipeTOP/`, `cpp/MediaPipeCHOP/` | Plugin sources. MediaPipeTOP also compiles `../OnnxTOP/src/Kernels.cu`, so keep them side by side. MediaPipeCHOP (audio: classify, transcribe) loads `libmediapipe.dll` from next to itself |
 | `cpp/Tracking/` | The tracker in C++ (`docs/TODO-tracking-cpp.md`): the core, the Tracker DAT (`TrackerDAT.dll`, every wrapper's tracker) and `tracker_replay.dll` for the replay tests. Its own output is the reference: `tests/test_tracking_replay.py` / `test_tracking_extras.py` replay the fixtures in `tests/data/tracking/`, `tests/test_joint_gate.py` checks the joint gate; after a deliberate change regenerate with `--golden` and review the diff |
@@ -73,6 +73,40 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   may run bridges on 3031–3040. TouchDesigner docs: the bridge's `/help`.
 - **Never do heavy Python work on a background thread inside TD.** One deadlocked TD on
   Nov 6, 2026. Slice work across frames with `run()`, or use a separate process.
+- **Never delete a running ONNX wrapper that feeds a live network: it crashes TD** (reproduced Nov 18,
+  2026 with a running RVM wired to Projector Map, on the build before unloading existed too). Use
+  `wrapper_builder.remove(comp)` (cuts the outputs, Active off, unloads, cooking off, destroys 60
+  frames later), or wire the replacement in first and leave the old one switched off. Write-up,
+  other crashes, and how to catch the next one (`plugins/onnxtop-lifecycle.log`,
+  `scripts/enable_td_dumps.ps1`): [docs/learnings/td-crashes.md](docs/learnings/td-crashes.md). A
+  crash loses everything unsaved in the running project: save demos (`Demos/save_demos`) and the
+  `.toe` before risky steps, and do risky steps one at a time with a liveness check between.
+- **Models unload when off:** OnnxTOP frees a model's GPU memory `Unload After` (30 s) after Active
+  goes off, and the wrappers / VisionDemo pulse `Unload` for models that don't cook. Check it with
+  `nvidia-smi`'s total memory: the `loaded` info channel goes stale while a wrapper isn't cooking.
+- **Projector tests** (Projector Map, Capsule Matte, Latency Loop, Lead Check; the private
+  `Demos/ProjectionRehearsal`): the components are hand-built in `/project1/Components`, rebuilt from
+  scratch by `scripts/lab/build_projector_map.py` / `build_capsule_matte.py`, exported with
+  `scripts/export_hand_built.py`. A demo links them as external toxes, so reloading one resets its
+  parameters and calibration (the demo's `mode_logic` re-applies its settings every frame; save
+  `h_auto` before a reload and write it back after). Output to the projector, per
+  [docs/MODELS.md](docs/MODELS.md#projector-map-componentsprojectormaptox):
+  - **Reopen the Window COMP after every TD restart, and place it with
+    `scripts/place_projector_window.ps1`** (TD's Window offsets skew with mixed display scaling and
+    its display index renumbers). A Custom-size window shows its TOP at native pixels: feed it the
+    projector's resolution.
+  - **Check the Test Grid is on the projector before pressing Calibrate.** Calibrating with the
+    window closed or on the wrong screen wrote junk solves over good ones; Projector Map now
+    rejects an error above Max Error (px). **Verify** (held-out dots, no feedback) is how to check a
+    calibration; Output = Camera feeds back on itself.
+  - After the camera or projector moves, or the camera feed is flipped / rotated, just recalibrate:
+    the mapping is measured. The Flip must be upstream of the demo's input so the pose model, the
+    matte and the calibration all see the same upright image.
+- **Test scripts through the bridge:** put multi-line Python in a file and POST it
+  (`curl.exe --data-binary "@file"`), since PowerShell has no heredoc. Nodes in different networks
+  can't be wired (a test source must be a sibling of the COMP it feeds). `numpyArray()` rows start at
+  the bottom, like uv. Calls that cook for a while (a model loading, a calibration) need a separate
+  call to read the result, not a wait inside the same script.
 - **Don't commit** models, media, built plugins or TD's numbered `.toe` saves (`.gitignore`
   covers them).
 
