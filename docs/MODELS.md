@@ -627,6 +627,19 @@ Inputs:
 
 Send TOP 1 to the projector's Window COMP, at the projector's resolution.
 
+**Putting the output on the projector.** Three things bit us:
+- A Window COMP in **Custom** size shows its TOP at native pixels, so a 1920×1080 output sits in a
+  corner of a 3840×2160 window. Feed it a TOP at the projector's resolution (an upscale in front of
+  the window), or use **Fill**.
+- The Window COMP's **Display** index changes when Windows renumbers the displays (after the
+  projector is moved or replugged), and its offsets skew when the monitors have different display
+  scaling (a 150% primary next to a 100% projector put a window meant for x=3840 at x=5120). Place
+  the open window with `scripts\place_projector_window.ps1`: it uses Windows' own API to put it
+  exactly on the projector's rectangle, above the taskbar.
+- A TD restart closes the Window COMP. Open it again (and place it) **before** calibrating: with
+  nothing projected the camera finds no dots, and the solve is junk. Projector Map rejects a solve
+  whose error is above **Max Error (px)** (30) and keeps the last good one.
+
 - **Map page:** **Output** (Content × Silhouette, Silhouette, Outline, Camera, Test Grid, Content
   with no silhouette), **Content** (Input 3 in projector or camera space, White, Stripes, Rainbow),
   **Projector Resolution**, **Matte Black / White**
@@ -637,7 +650,7 @@ Send TOP 1 to the projector's Window COMP, at the projector's resolution.
   and solves the homography (shown as Status, **Error** in projector pixels and **Dots Found**; 1 to 3 px
   is good, since the camera is lower resolution). **Dots Across / Down**, **Margin**, **Dot Size**,
   **Settle (ms)** (how long to wait after each dot: at least Latency Loop's median, or the dots
-  smear) and **Min Contrast**. Dots the camera can't see, or only partly, are skipped (6 are needed),
+  smear), **Min Contrast** and **Max Error (px)**. Dots the camera can't see, or only partly, are skipped (6 are needed),
   and ones that disagree with the rest are dropped. DAT `points` lists them. **Verify** projects 9
   held-out dots the solve never used and reports the mean and worst error in projector pixels; it
   checks the calibration without the feedback that **Output** = Camera has (the camera sees its

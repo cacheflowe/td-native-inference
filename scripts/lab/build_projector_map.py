@@ -253,10 +253,14 @@ def _finish(comp, s):
 		return
 	proj, cam = [p for p, _ in ok], [c for _, c in ok]
 	h, err, keep = fit(proj, cam, res)
+	rms = float(np.sqrt(np.mean(err[keep] ** 2)))
+	if rms > float(comp.par.Maxerror):
+		stop(comp, f'failed: error {rms:.0f} px is above Max Error ({float(comp.par.Maxerror):.0f}); the last calibration is kept. '
+			'Is the projector showing the dots, and does the camera see all of the projection?')
+		return
 	write_h(comp.op('h_auto'), h)
 	for i, (p, c) in enumerate(ok):
 		table.appendRow([f'{p[0]:.3f}', f'{p[1]:.3f}', f'{c[0]:.4f}', f'{c[1]:.4f}', f'{err[i]:.2f}', int(i in keep)])
-	rms = float(np.sqrt(np.mean(err[keep] ** 2)))
 	comp.par.Error = round(rms, 2)
 	comp.par.Source = 'auto'
 	stop(comp, f'calibrated: {len(keep)} of {len(s["pts"])} dots, error {rms:.1f} px')
@@ -382,6 +386,7 @@ def build():
 	par(c, 'Float', 'Dotsize', 'Dot Size', 0.035, 0.005, 0.2)
 	par(c, 'Float', 'Settle', 'Settle (ms)', 400.0, 0.0, 3000.0)
 	par(c, 'Float', 'Mincontrast', 'Min Contrast', 0.08, 0.0, 1.0)
+	par(c, 'Float', 'Maxerror', 'Max Error (px)', 30.0, 1.0, 500.0)
 	for i, (x, y) in enumerate([(0, 0), (1, 0), (1, 1), (0, 1)], 1):
 		par(c, 'XY', f'Corner{i}', f'Corner {i} in Projector', (x, y))
 
