@@ -140,6 +140,12 @@ const int kPoseSource[33] = {0, FACE0 + 42, 1, FACE0 + 45, FACE0 + 39, 2, FACE0 
 	14, 15, 16, 19, 22, 17, 20};
 const int kCount = 75;
 const double kHandMinScore = 0.3, kBoneMinScore = 0.3;
+// A keypoint this close to the image edge is usually a limb outside the frame that SimCC pinned to
+// the crop's border (out-of-frame feet came out above the hips): confidence 0, so the tracker's
+// joint gate drops it and it stays out of the world scale.
+const double kEdge = 0.02;
+const int kEdgeChildren[][3] = {{15, 17, 19}, {16, 20, 22}};	// an ankle (COCO 15 / 16) takes its toes and heel along
+
 struct Bone {
 	int a, b;
 	double metres;
@@ -202,6 +208,11 @@ void convertRtmw(const InfoView* info, double width, double height, Table& out) 
 			conf[k] = num(info->cell(r, kp[k] + 2));
 			z[k] = kz[k] >= 0 ? num(info->cell(r, kz[k])) : 0.0;
 		}
+		for (int k = 0; k < 133; ++k)
+			if (u[k] < kEdge || u[k] > 1.0 - kEdge || v[k] < kEdge || v[k] > 1.0 - kEdge) conf[k] = 0.0;
+		for (const auto& family : kEdgeChildren)
+			if (conf[family[0]] == 0.0)
+				for (int k : family) conf[k] = 0.0;
 		const double zPx = num(info->cell(r, cropW)) / 2.0;
 		for (int k = 0; k < 133; ++k) {
 			p[k][0] = u[k] * width;

@@ -32,6 +32,7 @@ SESSIONS = [
 	{'name': 'yolopose_walking', 'wrapper': 'Yolo26Pose', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
 	{'name': 'movenet_walking', 'wrapper': 'MoveNet', 'source': f'{MEDIA}/people-walking.mp4', 'frames': 300},
 	{'name': 'rtmw_dancer', 'wrapper': 'RTMW3D', 'source': f'{MEDIA}/dancer.mp4', 'frames': 300},
+	{'name': 'rtmw_twins', 'wrapper': 'RTMW3D', 'source': f'{MEDIA}/les-twins-wod-2014.mp4', 'frames': 300},
 	# Chest-up framing (a desk webcam): the dancer's close-up, zoomed so the legs are out of the image
 	# and the hips at its bottom edge (clip frames 270-335; before and after, the knees are at the
 	# edge). The models still report legs; the tracker's joint gate (tests/test_joint_gate.py) and

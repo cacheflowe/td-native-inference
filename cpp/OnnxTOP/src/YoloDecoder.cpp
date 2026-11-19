@@ -604,7 +604,9 @@ bool YoloDecoder::addSimcc3D(const OnnxEngine& engine, const CropBox* boxes, int
 			d.keypoints.push_back(1.f - uy / srcH);
 			d.keypoints.push_back(r[3]);
 			if (hasZ)
-				d.keypointsZ.push_back((r[2] / inH - 1.f) * kZRange);
+				// mmpose SimCC3DLabel: z = (bin / split / (depth / 2) - 1) * z_range, input_size (w, h, depth) =
+				// (288, 384, 288), so the depth axis is the width, not the height (inH squashed z to 0.75x).
+				d.keypointsZ.push_back((r[2] / inW - 1.f) * kZRange);
 			if (k < bodyN)
 				bodySum += r[3];
 			if (r[3] >= kBoxScore)
