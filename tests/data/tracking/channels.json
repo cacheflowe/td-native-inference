@@ -13,7 +13,7 @@
 	"pose_chestup.jsonl.gz": "dbee2398e00c548db00036ca12391b02a9dd3bfebbe233c72f852cb601407849",
 	"pose_twins.jsonl.gz": "19a422a8dc974276bfe567ac07ed495b2f4aca6e4f682724cfc603ca69b68a14",
 	"rtmw_dancer.jsonl.gz": "95fec28f833141cb4b6cc4e7fbdd406f8df4f37f286482f1149e93a546112b5e",
-	"segment_walking.jsonl.gz": "8b73a48cfc7cbc82915adba196f426c0994787c8e5d4bb9452ee2e7f91f759cc",
+	"segment_walking.jsonl.gz": "5f5ec6f890dff5265015e02702575ea8945da05a0726d325ad99a89b682eec3a",
 	"yolopose_chestup.jsonl.gz": "c34aaf7f9dacec9c12f0f4d284fd208665baef9187f780dc90c54261e0bede62",
 	"yolopose_walking.jsonl.gz": "12beb304332f5488ab3a517a4f74e026aab8b11fa83242f9264f672f8f18db40",
 	"yunet_moving.jsonl.gz": "d6aefeea0fe4f5fc928b86e5cc5c1ca9686cee9a3cab36a0f839f252eafd8053",

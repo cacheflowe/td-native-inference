@@ -106,6 +106,7 @@ void BoxPipeline::update(const std::vector<std::shared_ptr<const Detection>>& de
 	tracker_.trackBuffer = p.trackBuffer;
 	tracker_.minHits = p.minHits;
 	const auto& tracks = tracker_.update(dets);
+	pruneStale(slot_, tracks);
 	objects_.clear();
 	for (auto& t : tracks) {
 		const bool snap = reacquired(gap_, t->trackId, t->lostFrames);
@@ -128,6 +129,13 @@ void BoxPipeline::update(const std::vector<std::shared_ptr<const Detection>>& de
 			o.presence = presenceRamp(presence_, t->trackId, t->lostFrames == 0, p.presenceRise, p.presenceFall);
 			o.maskArea = t->payload->hasMaskArea ? t->payload->maskArea : 0.0;
 			o.detIndex = t->lostFrames == 0 ? t->payload->detIndex : -1;
+			auto it = slot_.find(t->trackId);
+			if (it == slot_.end()) {
+				int free = 1;
+				while (std::any_of(slot_.begin(), slot_.end(), [&](auto& kv) { return kv.second == free; })) ++free;
+				it = slot_.emplace(t->trackId, free).first;
+			}
+			o.slot = it->second;
 		}
 		objects_.push_back(std::move(o));
 	}
@@ -141,7 +149,7 @@ void BoxPipeline::writeTracks(Table& out) const {
 	Row header = {"track_id", "label", "class_id", "class_name"};
 	boxHeader(header);
 	if (segmentation_)
-		for (const char* c : {"mask_area_ratio", "presence", "det_index"}) header.push_back(c);
+		for (const char* c : {"mask_area_ratio", "presence", "det_index", "slot"}) header.push_back(c);
 	for (const char* c : {"r", "g", "b"}) header.push_back(c);
 	out.push_back(std::move(header));
 	for (const Obj& o : objects_) {
@@ -156,6 +164,7 @@ void BoxPipeline::writeTracks(Table& out) const {
 			row.push_back(fixed(o.maskArea, 4));
 			row.push_back(fixed(o.presence, 4));
 			row.push_back(integer(o.detIndex));
+			row.push_back(integer(o.slot));
 		}
 		appendColor(row, o.id);
 		out.push_back(std::move(row));

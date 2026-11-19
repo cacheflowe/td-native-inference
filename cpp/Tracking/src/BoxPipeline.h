@@ -40,12 +40,16 @@ private:
 		int lost, total;
 		double maskArea = 0, presence = 0;
 		int detIndex = -1;
+		int slot = 0;
 	};
 	bool segmentation_;
 	ByteTracker tracker_;
 	std::map<long long, std::array<double, 4>> box_;
 	std::map<long long, int> gap_;
 	std::map<long long, double> presence_;
+	// Segmentation: a small stable number per live track (1..N, lowest free first), so a lookup
+	// texture can route each track's pixels to a fixed output.
+	std::map<long long, int> slot_;
 	std::vector<Obj> objects_;
 };
 
