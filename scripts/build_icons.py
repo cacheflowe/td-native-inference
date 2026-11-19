@@ -47,6 +47,8 @@ DEMOS = {
 	'LeadCheck': ('Lead Check', 'Any joints DAT'),
 	'ProjectorMap': ('Projector Map', 'Camera + matte'),
 	'CapsuleMatte': ('Capsule Matte', 'Holistic / Pose joints'),
+	'PersonSplit': ('Person Split', 'YOLO26 Seg, Instances'),
+	'PersonSplitDemo': ('Person Split Demo', 'YOLO26 Seg + Person Split'),
 }
 BROWSERS = [
 	Path(r'C:\Program Files\Google\Chrome\Application\chrome.exe'),

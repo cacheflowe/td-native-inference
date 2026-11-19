@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Person Split** (`components/PersonSplit.tox`) and **PersonSplitDemo** (`demos/PersonSplitDemo.tox`):
+  per-person outputs from YOLO26 Segmentation's Instances matte. A cutout and a matte per person
+  (2D texture arrays, cropped on each box or full frame), one picked person, a Kinect-style body
+  index and a slots CHOP for instancing. The demo shows a line-up of instanced cutouts and a
+  spotlight. The Tracker DAT's Segment mode gained a `slot` column (1..N, stable while a track lives).
 - **Models unload when they aren't in use.** OnnxTOP frees a model's GPU memory once **Active** has
   been off for **Unload After** seconds (default 30, 0 = never); turning Active on loads it again
   (about 17 s for DAViD's large model, from the cached TensorRT engine). **Unload** (a pulse) does it

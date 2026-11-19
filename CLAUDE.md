@@ -46,7 +46,8 @@ happens here now. `README.md` is the user-facing overview; `TODO.md` is the plan
   `/project1/Components/<Name>` and `/project1/Demos/<Name>`. Edit them there like any network,
   never in a generator. **Hand-built demos are private** (the user's IP): `Demos/save_demos` saves
   each to `demos/<Name>.tox` (untracked) on project save and the `.toe` keeps only the path (Save
-  Backup of External off), so never commit `demos/` or `tox/demos/` beyond the two generated ones.
+  Backup of External off), so never commit `demos/` or `tox/demos/` beyond the two generated ones and the public
+  `PersonSplitDemo` (an example the user chose to publish; `.gitignore` lists it).
   A demo links its components as external toxes (`tox/components/<Name>.tox`). POST
   `scripts/export_hand_built.py` to export both kinds (cuts shared-tox links and file syncs in the
   saved copy, loads the icon); `REFRESH_WRAPPERS = True` first rebuilds the wrappers inside each from

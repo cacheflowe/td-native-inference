@@ -54,3 +54,4 @@ models/onnx/rtmw3d/
 tox/demos/*
 !tox/demos/VisionDemo.tox
 !tox/demos/AudioDemo.tox
+!tox/demos/PersonSplitDemo.tox

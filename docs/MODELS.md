@@ -272,6 +272,7 @@ model's resolution), TOP 2 the input, TOP 3 the box overlay. `mask_area_ratio`, 
   - **G:** the detection that owns the pixel. That's the Info DAT `id` + 1, and 0 means nobody. Where people overlap, the pixel goes to the most confident mask.
   - **B:** that detection's class + 1.
 - **Matte NMS IoU** (default 0.5) leaves a mask out of the matte when its box nearly duplicates a more confident detection's. The model sometimes boxes one person twice; the tracker already drops the copy, and this keeps the copy from claiming half that person's pixels in Instances mode. Keep it equal to the Tracking page's NMS setting.
+- **`slot` column** (Tracker DAT): a small stable number per live track (1..N, the lowest free one, kept while the track lives, reused after). Person Split routes each person to a fixed output with it.
 - **TOP 4, `instances`,** paints each tracked object's pixels in its track color, the same colors as the box overlay. It's transparent while the encoding is Grayscale.
 
 Detection ids change order from frame to frame; the stable id is the track's. A track's `det_index` is the detection it matched this frame, or -1 while it's coasting. To isolate one track, look up its `det_index` in the tracks table and keep the pixels whose G equals `det_index + 1`. For example, in a GLSL TOP on TOP 1, with a uniform `uOwner` set to that number:
@@ -696,6 +697,41 @@ be the camera's size so the capsules stay round.
   don't know about depth or a turned torso. Projector Map warps them through the same
   calibration as any matte.
 
+### Person Split (`components/PersonSplit.tox`)
+Splits the people in a YOLO26 Segmentation matte into stable per-person outputs: a cutout, a matte
+and channels for each person, which keep the same output while that person is tracked. Wire
+`Yolo26Seg` TOP 1 (the matte; set its **Matte Encoding** to **Instances**) into input 1, its TOP 2
+(the image) into input 2 and its DAT 1 (`tracks`) into the DAT input. `demos/PersonSplitDemo.tox`
+shows it wired up.
+
+How it works: the tracker gives each live track a **slot** (the `slot` column, 1..N, kept while the
+track lives and reused after it ends), and each frame's `det_index` says which detection the track
+matched, i.e. which value of the matte's G channel is that person's. Python reads one row per
+person; the pixels are all one GLSL shader.
+
+- **TOP 1, preview:** each person tinted in their track color over the dimmed image.
+- **TOP 2, person:** one slot (**Pick Slot**), full frame in place, or centred on the box at
+  **Crop Resolution** with **Crop Person**. Composite it over anything; RGB is premultiplied.
+- **TOP 3, cutouts:** every slot, as a 2D texture array (layer = slot - 1), centred on each box at
+  **Crop Resolution** (**Crop Cutouts** off: full frame). For instancing: a MAT's Color Map on the
+  array with the Geometry COMP's **Texture Mode** = Transform and **W** = the instance's slot - 1
+  (the demo's line-up does this). In a GLSL TOP: `texture(sTD2DArrayInputs[0], vec3(uv, slot - 1))`.
+- **TOP 4, mattes:** the same, as white-on-black mattes.
+- **TOP 5, index:** a Kinect-style body index at the matte's resolution, 16-bit float: R = slot
+  (0 = nobody), G = track id, B = class + 1, A = the matte.
+- **CHOP, slots:** one sample per slot (sample = slot - 1): `present`, `track_id`, `det_index`,
+  `class_id`, `cx`, `cy`, `w`, `h` (uv), `r`, `g`, `b` (track color), `presence`, `area`. An
+  instance CHOP as is.
+- **Split page:** **Slots** (1-16; tracks numbered above it are left out), **Class Filter** (0 =
+  person, -1 = all), **Min Presence** (a slot counts as present above it), **Matte Low / High**
+  (remaps the matte through a smoothstep to tighten YOLO's soft edges; 0 / 1 = as is), the crop
+  settings and **Pick Slot**.
+- **Set the wrapper's Matte Conf at or below its Conf Threshold** (the demo binds them): a person
+  tracked with a score between the two has a slot but no pixels in the matte.
+- **Limits:** slots are per track, so a person whose track is lost and found again (occlusion, a
+  crowd) can come back in another slot. In a crowd the first N tracks get the slots, not the N
+  nearest people.
+
 ## Demos
 
 Demos wire models and components together to show what they can do. They're in `tox/demos/`.
@@ -706,6 +742,14 @@ Every video model in one COMP for trying them side by side. Wire a video TOP in 
 its **Models** page. A model that's off doesn't cook at all. TOP 1 is every enabled model's
 overlay composited together (image results behind the overlays); TOP 2 is the input; TOP 3 is DAViD
 Depth + Normals + Matte's depth on its own (transparent while that model is off).
+
+### PersonSplitDemo (`demos/PersonSplitDemo.tox`)
+
+YOLO26 Segmentation into Person Split, with three uses of the split, picked with **View**:
+**Line-up** (each person's cutout on a card in a row: Geometry COMP instancing from Person Split's
+cutouts array and slots CHOP; an empty slot's card is scaled to 0), **Spotlight** (the
+**Spotlight Slot** person sharp over the blurred, dimmed frame) and **Preview**. Wire a camera in;
+the model is AGPL-3.0, so run `fetch_models.cmd` once. CHOP 1 is the slots CHOP.
 
 ### AudioDemo (`demos/AudioDemo.tox`)
 
