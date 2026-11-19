@@ -18,6 +18,37 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
 
 ## Now
 
+**Order (agreed Nov 18), driven by the client projects:**
+1. **The delete-a-running-wrapper crash** (below). Show safety first.
+2. ~~**PersonSplit**~~ done Nov 19: `slot` column in the Tracker DAT (Segment mode),
+   `components/PersonSplit.tox` (preview, one picked person, cutouts / mattes as 2D arrays, body
+   index, slots CHOP) and the public `demos/PersonSplitDemo.tox` (instanced line-up, spotlight).
+   Built by `scripts/lab/build_person_split.py` / `build_person_split_demo.py`. Left: a clean-process
+   test of the demo tox; feeding ProjectorMap content per person; slot re-use after a lost track
+   (a person found again gets a new track, so maybe a new slot: re-identify by position?).
+   Lessons: a GLSL TOP binds CHOP array uniforms only for slice 0 of a 2D-array output (pass data
+   as textures); a script can't wire a new GLSL TOP's third input (use its `tops` parameter); a
+   Geometry COMP picks a 2D-array layer with Texture Mode = Transform and W.
+3. **A clean quick-start `.toe` for people who clone the repo**: `examples/QuickStart.toe` (not in
+   the repo root, whose `plugins/` would load the dev build next to an installed release). Built by
+   a script and saved from a fresh TD process, loading toxes from `../tox/`; says up front that it
+   needs a release installed. `td-native-inference.toe` stays the dev project.
+4. **Model manifest** (step 1 of [docs/TODO-model-downloads.md](docs/TODO-model-downloads.md)):
+   `models/manifest.json` with the existing pins, `fetch_models.ps1` reading it. Needed for RTMW3D's
+   fetch entry anyway. In-tox downloads (steps 2-5) later; one downloader (the PS1 with `-Model` and
+   `-ProgressFile`, started by the tox), never an automatic download.
+5. **Release** the unreleased work (Unload, 5D inputs, decoder fixes, agent skills in `skills/`).
+   Before it: cap or gate `onnxtop-lifecycle.log`, which grows without limit in users' Plugins folders.
+6. **Parked Nov 19: RTMW3D / RTMW / RTMPose.** The 3D loses to Holistic (arm depth), the weights aren't
+   licensed for commercial use (see the RTMW3D item below), and Holistic GPU already covers multi-person
+   whole body. Code kept (Pose Crops, converter fixes, `wrappers/RTMW.json` untracked). Was: (Nov 19: `tests/data/tracking/rtmw_dancer` is one frame repeated, so record
+   moving clips first; it does show the feet fault: ankles cut off at the bottom edge, world
+   `foot_index` 0.29 m above the hips) fix the three known faults (inverted out-of-frame feet, arms
+   behind the torso, head yaw), then score against Holistic GPU on recorded clips (jitter, cost with
+   5+ people). Continue only where it wins (crowds, 133 points). RTMPose-m 2D wrapper as a cheap side win.
+7. In-tox model downloads; the performer-projection items (LeadCheck tuning, BodySpace) slot in
+   around 2-3.
+
 - [x] **The puppet solver in C++** (phase 6 of the tracker plan). Design and steps:
       [docs/PUPPETS.md](docs/PUPPETS.md#the-c-solver-phase-6-of-todo-tracking-cppmd).
       - Done (Nov 13): `cpp/Puppet` and `PuppetCHOP.dll`, identical to the Python solver offline and
@@ -46,9 +77,14 @@ Performance lessons: [docs/learnings/td-cook-performance.md](docs/learnings/td-c
       - [x] Documented: reproduction table, other crashes on record, how to capture the next one.
       - [x] Added `plugins/onnxtop-lifecycle.log` (create, each destroy stage, unload) and
             `scripts/enable_td_dumps.ps1` (WER full dumps, needs an elevated shell).
-      - [ ] Restart TD on the new `OnnxTOP.dll`, enable dumps (run `enable_td_dumps.ps1` as admin), and
-            reproduce: delete a running RVM wired to a GLSL TOP. Read the last lifecycle log line:
-            "destroy: ..." = our teardown, "destroy: done" = TD after it.
+      - [x] Reproduced in a throwaway TD (Nov 18), 3 of 3 runs: `tests\run_clean_wrapper.ps1 -CaseDir
+            build\crash-repro -Wrapper RVM -Image media\dancer.mp4 -Models models\onnx\rvm\rvm_mobilenetv3_fp32.onnx
+            -LocalPlugins -DeleteWhileRunning` (RVM on a clip, a GLSL TOP consuming it, delete, keep cooking).
+            Exit code 0xC0000409 (fast-fail, same as the 11:08 crash), no dump, no WER event. The log ends at
+            "destroy: releasing the ONNX session": it is **our teardown**, inside the session / engine release.
+      - [ ] Run the traced build (`release()` steps and CUDA error state per stage; built, needs one Allow
+            click in the test TD for the new `OnnxTOP.dll`) to see which release step dies and whether CUDA
+            already holds a sticky error.
       - [ ] Fix from what the log shows (see "What to fix" in the write-up): teardown order,
             `cudaDeviceSynchronize()` before freeing, the plain CUDA provider's release with RVM's state.
       - [ ] Minimal repro in the wrapper lab so the fix has a test, and check `remove()` end to end.
@@ -117,13 +153,84 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
 
 ## Models
 
+- [ ] **DeepBump** (`HugoTini/DeepBump`, `deepbump256.onnx`): color image to a tangent-space normal
+      map, for texture / bump-map generation (PBR material authoring from a photo). Works on 256x256
+      tiles with overlap and blending, so the wrapper needs a tiler (split, run, feather-blend) or a
+      fixed 256² mode. Companion models in the repo: normals to height, and normals to curvature, for
+      a full bump / height / curvature set. GPL-3.0: handle like RVM (fetch_models entry with a
+      license prompt, not bundled). To check: ONNX input range / layout, opset and TensorRT support,
+      seams at tile joins, and how it compares to DAViDNormals (which targets humans).
+- [ ] **Distill Any Depth Base** (MIT, 389 MB, third-party ONNX at `FuryTMP/Distill-Any-Depth-Base-onnx`):
+      evaluating as an alternative to Depth Anything V2/V3 (downloaded to `models/onnx/distill-any-depth/`,
+      script in `build/eval/`). Nov 17 results (RTX 4090 laptop, TensorRT fp16, 518²): 9.5 ms
+      (p95 13), first engine build ~4 min, ONNX has an extra unused 1369x768 feature output. Its depth
+      maps match Depth Anything V2-S almost exactly (correlation 0.998 on the three source photos), so
+      it adds little over what's shipped. Near = bright. Check the license (the teacher was Depth
+      Anything V2-Large, CC BY-NC) before bundling or wrapping; re-export from the Westlake-AGI-Lab
+      weights if it ships.
+- [ ] **SAM 3.1 as a matte option** (asked Nov 19). Meta's SAM 3.1 (Mar 2026) is SAM 3 plus
+      multiplexed multi-object video tracking: ~0.8-0.85B parameters, text- or point-prompted
+      ("person", "guitar"), no small variant that I could find and no official ONNX (a community
+      SAM 3 ONNX split exists: image encoder + text encoder + decoder). Worth a time-boxed spike:
+      export / fetch, time the image encoder in onnxtop_tool. Likely a quality or open-vocabulary
+      matte, not a 60 fps one; YOLO26 Seg stays the realtime path. Tiny-SAM family (MobileSAM,
+      EfficientSAM) is the fast alternative but point/box-prompted, without text concepts.
+- [ ] **Prompt Depth Anything** (`DepthAnything/PromptDA`, CVPR 2025, Apache-2.0 code): metric depth
+      up to 4K, from an RGB frame plus a low-res depth prompt (LiDAR / ToF / a depth camera such as
+      RealSense or Kinect, ~192x256). A second input TOP, so it needs the OnnxTOP multi-input path.
+      To explore: an ONNX export (the repo ships PyTorch only), checkpoint licenses per size, speed at
+      the prompt's resolution, and whether a depth-camera + RGB pair makes a worthwhile "sharpen
+      sensor depth" wrapper. The PromptDA++ paper is out, its code isn't yet.
 - [ ] **RTMW3D** (`wrappers/RTMW3D.json`, experimental, `"demo": false`, not shipped):
       - **What it's good for:** multi-person 2D whole-body. Its 3D is clearly worse than Holistic's,
         so puppets stay on Holistic: out-of-frame feet land inverted at the crop edge (gate by
         score), arms go behind the torso, and head yaw comes from reversed face depth.
       - **Fixes:** derive head yaw from the 2D ears versus the nose, and smooth the world scale.
-      - **Before shipping:** a fetch_models entry (RTMW3D-X, Apache-2.0, 369 MB), demos, docs, and
+      - **Nov 19, measured against Holistic GPU's world joints on the dancer clip** (recorder sessions
+        `rtmw_dancer` / `rtmw_twins` / `holistic_gpu_dancer`, comparison in the session notes):
+        - Fixed: OnnxTOP decoded z with the crop height (384) where mmpose uses the depth axis
+          (288, = the width): all RTMW3D depth was squashed to 0.75x and offset. Arms' depth was the
+          most compressed (z fit 0.3-0.6x Holistic's), wrists ~5 cm behind the shoulders where
+          Holistic has them 6 cm in front.
+        - Fixed: keypoints within 2% of the image edge get confidence 0 (an ankle takes its toes and
+          heel along): out-of-frame feet were pinned to the crop border (foot_index 0.27 m below the
+          hip vs Holistic's 0.74 m), now the tracker's joint gate drops them.
+        - Tried and dropped: head yaw from the 2D nose vs ears. Better nose-direction yaw (19 vs 25
+          degrees median error), but the puppet aims the head by the ear axis, where the model's own
+          depth is already best (18 vs 20 degrees). Head yaw isn't the problem it looked like.
+        - Re-measured after the restart: feet at the edge now gated (ankle conf 0); arms unchanged
+          (wrists 3-5 cm behind the shoulders, Holistic 6-9 cm in front, z correlation 0-0.4): the
+          model's own arm depth, not a conversion bug. Puppets stay on Holistic.
+        - 2D jitter (median joint acceleration, 1/1000 of the image): dancer 3.7 unsmoothed vs Holistic
+          GPU 3.8 smoothed; twins 11.8 vs MediaPipe Pose 13.4. RTMW3D's 2D is as steady or steadier.
+        - Cost: ~2.4 ms per person, linear: 3.1 ms for 2 people, but `inference` takes 71 ms CPU per
+          cook with ~30 (people-walking: TD at 5 fps). The exported RTMW3D-X has batch 1, so Pose Crops
+          runs once per person. Next: re-export with a dynamic batch (mmpose deploy / onnx dim_param),
+          and until then a Max Detections cap (~6) in the spec.
+        - `tests/data/tracking/rtmw_dancer` is now frames 100-179 of a moving recording (was one frame).
+      - **Licence (checked Nov 19): not for commercial use as is.** mmpose's code is Apache-2.0, but no
+        licence covers the weights, and RTMW's cocktail14 mix (RTMW3D's too) includes COCO-WholeBody
+        (CC BY-NC 4.0; its authors say the whole-body models need their permission for commercial
+        use), 300W (no commercial training), InterHand2.6M (CC BY-NC), MPII ("commercial use is not
+        allowed") and Human-Art (non-commercial access). RTMPose-m's body7 also has MPII and several
+        datasets with no stated terms. Sources: COCO-WholeBody repo, rtmlib issue #65, dataset pages.
+      - 2D cost (RTMW-l, `wrappers/RTMW.json`, untracked spec): batched (Batch Size 16), ~9 ms inference
+        for 20-34 people; TD still ran at 5 fps on the crowd clip, cause not found (not inference).
+      - **Before shipping:** a fetch_models entry (RTMW3D-X, 369 MB; see the licence note), demos, docs, and
         a clean-process test.
+- [ ] **Kinect replacement: multi-person 3D pose + YOLO segmentation** (a project goal). Build on the
+      RTMW3D / RTMPose 3D work above (RTMPose 3D, the mmpose 3D whole-body line, is RTMW3D's family),
+      fast and multi-person, with 3D coordinates, plus Yolo26Seg masks for per-person silhouettes.
+      To explore:
+      - Whether RTMPose 3D's metric-ish coordinates are stable enough without a depth sensor: the
+        known RTMW3D issues are above (inverted out-of-frame feet, arms behind the torso, head yaw).
+        Fix those first, then score it against a recorded Kinect skeleton (joint error, jitter).
+      - Fusing the Yolo26Seg mask per person with the pose (clip joints to the mask, per-person
+        IDs through the Tracker DAT), and optionally a depth model (Depth Anything / Distill) for
+        per-person depth to anchor z.
+      - A "Kinect-style" output: per-person skeleton CHOP/DAT with joint names matching the Kinect
+        TOP/CHOP naming where practical, plus a body-index-like mask TOP.
+      - Latency and frame cost with pose + seg + depth on one GPU, against a 60 fps budget.
 - [ ] RTMPose-m (17 points, 2.4 ms) and RTMW-l (133 points, 3.6 ms) wrappers: Pose Crops already
       runs both. The RTMW weights' dataset terms are unchecked.
 - [ ] Pinned: dedicated head-pose models for face crops, if landmark head pose falls short:
@@ -207,6 +314,20 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
       (cached temporal hidden states) is experimental and drops accuracy (ScanNet delta1 0.926 to
       0.836). It also needs the `.pth` checkpoint and PyTorch to export. Probably 2-3 days for a
       modest gain; try a cheaper temporal filter on the depth output first.
+- [ ] **Fast 2x upscaling (Real-ESRGAN family)**: wanted: a quick 2x ONNX upscaler for live video
+      (Raw mode, an output at twice the input's size; a model with a dynamic or fixed small input
+      tile). Candidates to compare (none tried, check each license and ONNX source):
+      - **`realesr-general-x4v3`** (SRVGGNetCompact, 1.2 M parameters, BSD-3-Clause, general
+        scenes, has a denoise-strength blend): 4x only, so run it and downscale to 2x, or run it on
+        a half-size input. An ONNX export exists (e.g. `vlad-grig/realesr-general-x4v3-onnx` on
+        Hugging Face, the official weights unchanged). Cheapest to try.
+      - **`realesr-animevideov3`** (compact, x2 / x3 / x4 variants, for animation video).
+      - **`RealESRGAN_x2plus`** (RRDBNet, much heavier; quality reference, probably not real-time).
+      - **OpenModelDB 2x compact models** (SPAN, compact RealESRGAN-style; many are permissively
+        licensed, each its own terms).
+      - **To work out:** OnnxTOP's Raw mode writes the tensor at the input's size or its own size
+        (`Map to Input Frame` off gives the tensor's size, so a 2x output works); tiling for big
+        frames; an fp16 TensorRT build and the cost at 720p / 1080p; edges between tiles.
 - [ ] Other ONNX candidates (check each license before bundling):
       - RF-DETR (Apache-2.0);
       - fast style transfer (Raw mode);
@@ -228,20 +349,6 @@ See [docs/PUPPETS.md](docs/PUPPETS.md) for how the solver works.
         give coherent motion (the head 156 px to the right).
 
       **Next:** OnnxTOP has no two-frame input yet. A "frame pair" mode: when a model has two image
-- [ ] **Fast 2x upscaling (Real-ESRGAN family)**: wanted: a quick 2x ONNX upscaler for live video
-      (Raw mode, an output at twice the input's size; a model with a dynamic or fixed small input
-      tile). Candidates to compare (none tried, check each license and ONNX source):
-      - **`realesr-general-x4v3`** (SRVGGNetCompact, 1.2 M parameters, BSD-3-Clause, general
-        scenes, has a denoise-strength blend): 4x only, so run it and downscale to 2x, or run it on
-        a half-size input. An ONNX export exists (e.g. `vlad-grig/realesr-general-x4v3-onnx` on
-        Hugging Face, the official weights unchanged). Cheapest to try.
-      - **`realesr-animevideov3`** (compact, x2 / x3 / x4 variants, for animation video).
-      - **`RealESRGAN_x2plus`** (RRDBNet, much heavier; quality reference, probably not real-time).
-      - **OpenModelDB 2x compact models** (SPAN, compact RealESRGAN-style; many are permissively
-        licensed, each its own terms).
-      - **To work out:** OnnxTOP's Raw mode writes the tensor at the input's size or its own size
-        (`Map to Input Frame` off gives the tensor's size, so a 2x output works); tiling for big
-        frames; an fp16 TensorRT build and the cost at 720p / 1080p; edges between tiles.
       inputs of one shape, feed `input1` the previous frame's tensor (kept on the GPU, like RVM's
       recurrent state) and `input2` the current one. The flow comes out through Raw mode as RG,
       converted to UV (dx / 768, -dy / 432). Then a wrapper spec, a flow-to-color visualization
@@ -562,10 +669,38 @@ user, Nov 14). Worth borrowing:
 
 ## Housekeeping
 
+- [ ] **Split the `.toe`: a dev project and a clean starter.** `td-native-inference.toe` is the dev
+      project today (WrapperLab, Lab networks, private hand-built demos, bridge, startup path hack).
+      Make it dev-only (e.g. `dev/td-native-inference-dev.toe`, or keep the name and rename the
+      starter), and ship a separate clean `td-native-inference.toe` in the release:
+      - Contents: the generated VisionDemo and AudioDemo workbenches (one toggle per model), a short
+        "start here" note, and a few minimal per-model examples. No private demos, labs, bridge or
+        dev-only paths.
+      - Self-contained: relative `Plugins/` and `models/` paths that work from an installed
+        `Documents/Derivative/Plugins/<folder>/`, no `startup` sys.path hack for the source tree.
+      - Generated by a script (like `build_wrappers.py`, `DEMO = True`) from the dev project so it
+        doesn't drift. Add it to `release-manifest.json`, point the README and `tests/run_clean_wrapper.ps1`
+        at it, and update the "Layout" table in `CLAUDE.md` / the agent guide for the new file.
+
+- [ ] **Where to host our own converted ONNX models.** Depth Clean's `any2full_vits_518x924.onnx`
+      (136 MB, converted by us from Apache-2.0 weights, sha256 `cb9d9064...`) is **bundled in the
+      zip for now** (decided Nov 17). It's a special-use model (it needs a depth camera), so it
+      would be better as a download: pick a host (a GitHub release asset of a separate "models"
+      release, or a Hugging Face repo), then add a pinned `fetch_models.ps1` entry (no accept
+      prompt, like Depth Anything 3), drop it from `release-manifest.json` and update the docs.
+      The same host would also take any future converted model.
 - [ ] A tox/plugin version check that warns on a mismatch (an installed dev build still reports the
       last `VERSION`).
 - [ ] TensorRT cache: a per-user cache (`%LOCALAPPDATA%`) keyed by model content, for read-only
       installs. Today it's `trt_cache/` next to each model.
+- [ ] **A bridge helper for agents, probably as a td-http-api skill (being worked on there).** Every
+      bridge call today is a hand-written `curl.exe ... | head -c` line: find the port, check
+      `/server-info`'s `label` (other TD apps run bridges on 3031–3040), POST a script file to `/run`,
+      truncate the output. A small script (`td.ps1` / `td.sh`: `td run <file> [-Label x] [-Max 2000]`,
+      `td reload`, `td info`) would cut tokens and mistakes in every TD project, so it belongs in
+      td-http-api's skills, not here. Here, once it exists: point CLAUDE.md's "Test scripts through
+      the bridge" and the token-budget notes at it, and add it to a project `.claude/settings.json`
+      allowlist (with the `build.cmd` scripts and `tests/run_clean_wrapper.ps1`).
 - [ ] CI build (GitHub Actions, CUDA toolkit).
 - [ ] haxlib side: point its scripts at this repo's Python or keep a copy; remove its `cpp/`.
 - [ ] The full wrapper lab sometimes misses a MediaPipe wrapper that passes alone (Sound
@@ -580,13 +715,6 @@ RTMPose 2D on TensorRT fp16, 256x192 crops (OpenMMLab `onnx_sdk` exports):
 |---|---|---|---|---|
 | RTMPose-m body7 | 17 | 2.4 ms | 1.8 ms | 3.2 / 3.4 min |
 | RTMW-l (cocktail14) | 133 | 3.6 ms | 10.0 ms | 5.4 / 5.8 min |
-- [ ] **Where to host our own converted ONNX models.** Depth Clean's `any2full_vits_518x924.onnx`
-      (136 MB, converted by us from Apache-2.0 weights, sha256 `cb9d9064...`) is **bundled in the
-      zip for now** (decided Nov 17). It's a special-use model (it needs a depth camera), so it
-      would be better as a download: pick a host (a GitHub release asset of a separate "models"
-      release, or a Hugging Face repo), then add a pinned `fetch_models.ps1` entry (no accept
-      prompt, like Depth Anything 3), drop it from `release-manifest.json` and update the docs.
-      The same host would also take any future converted model.
 
 **Dropped:**
 - **BiRefNet lite** (Nov 11): 92 ms per frame, a 304 MB engine and a 22-minute build.
